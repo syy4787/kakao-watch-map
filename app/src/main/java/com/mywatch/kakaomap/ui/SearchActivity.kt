@@ -19,6 +19,7 @@ import com.mywatch.kakaomap.data.Favorites
 import com.mywatch.kakaomap.data.RouteRepository
 import com.mywatch.kakaomap.model.Place
 import com.mywatch.kakaomap.net.KakaoApi
+import com.mywatch.kakaomap.tile.ShortcutTileService
 import com.mywatch.kakaomap.update.UpdateActivity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -119,6 +120,7 @@ class SearchActivity : ComponentActivity() {
                 ACTION_FAV_CHANGE -> menuFavorite?.let { startRegister(it) }
                 ACTION_FAV_REMOVE -> menuFavorite?.let {
                     Favorites.clear(this, it)
+                    ShortcutTileService.refresh(this)
                     showHome()
                 }
             }
@@ -180,6 +182,7 @@ class SearchActivity : ComponentActivity() {
 
     private fun register(kind: Favorite, place: Place) {
         Favorites.set(this, kind, place)
+        ShortcutTileService.refresh(this)
         registering = null
         Toast.makeText(this, getString(R.string.fav_registered, kind.toward), Toast.LENGTH_SHORT).show()
         showHome()

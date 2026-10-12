@@ -58,9 +58,11 @@
             </intent-filter>
         </activity>
 
+        <!-- 타일의 '집으로·회사로·검색' 버튼이 바로 여는 화면이라 exported (받는 값은 집/회사/검색 세 가지뿐) -->
         <activity
             android:name=".ui.SearchActivity"
-            android:exported="false"
+            android:exported="true"
+            android:launchMode="singleTop"
             android:taskAffinity="com.mywatch.kakaomap.main" />
         <activity
             android:name=".ui.DirectionsActivity"
@@ -83,5 +85,20 @@
         <receiver
             android:name=".update.InstallResultReceiver"
             android:exported="false" />
+
+        <!-- 타일: 워치 화면을 옆으로 넘기면 나오는 '집으로·회사로·검색' 카드 -->
+        <service
+            android:name=".tile.ShortcutTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_directions"
+            android:label="@string/tile_label"
+            android:permission="com.google.android.wearable.permission.BIND_TILE_PROVIDER">
+            <intent-filter>
+                <action android:name="androidx.wear.tiles.action.BIND_TILE_PROVIDER" />
+            </intent-filter>
+            <meta-data
+                android:name="androidx.wear.tiles.PREVIEW"
+                android:resource="@drawable/tile_preview" />
+        </service>
     </application>
 </manifest>

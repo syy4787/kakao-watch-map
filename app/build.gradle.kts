@@ -112,6 +112,9 @@ dependencies {
     implementation("androidx.wear:wear:1.4.0")                              // 둥근 화면 목록·스와이프 닫기
     implementation("androidx.wear:wear-input:1.2.0")                        // 음성·키보드 입력
     implementation("androidx.wear:wear-ongoing:1.1.0")                      // 안내 중 워치페이스에 아이콘(진행 중 활동)
+    implementation("androidx.wear.tiles:tiles:1.6.2")                       // 타일: 집으로·회사로·검색
+    implementation("androidx.wear.protolayout:protolayout:1.4.2")
+    implementation("androidx.wear.protolayout:protolayout-material3:1.4.2")
     implementation("androidx.fragment:fragment:1.9.1")                      // wear 가 끌어오는 옛 버전 교체
     implementation("androidx.activity:activity-ktx:1.13.0")
     implementation("androidx.core:core-ktx:1.17.0")

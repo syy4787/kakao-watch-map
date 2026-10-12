@@ -32,6 +32,9 @@
     <string name="fav_remove">%1$s 지우기</string>
     <string name="fav_set">%1$s 등록</string>
     <string name="cancel">취소</string>
+    <string name="tile_label">길찾기 바로가기</string>
+    <string name="tile_title">길찾기</string>
+    <string name="tile_search">검색</string>
 
     <string name="routing">경로 찾는 중…</string>
     <string name="show_on_map">지도에서 보기</string>
