@@ -80,9 +80,24 @@ android {
     }
 
     packaging {
+        // 카카오맵 네이티브 라이브러리와 코드(dex)를 압축해서 APK 다운로드 크기를 줄인다 (워치 업데이트용).
+        // 플레이 스토어를 거치지 않고 워치가 APK 를 그대로 받기 때문에 압축하는 쪽이 절반 가까이 작다.
         jniLibs {
-            // 카카오맵 네이티브 라이브러리를 압축해서 APK 다운로드 크기를 줄인다 (워치 업데이트용)
             useLegacyPackaging = true
+        }
+        dex {
+            useLegacyPackaging = true
+        }
+    }
+
+    // CPU 종류별 APK 도 따로 만든다: 워치(32비트 armeabi-v7a)는 자기 CPU 용 카카오맵 라이브러리만 받으면 된다.
+    // 모든 CPU 용(universal)도 함께 만들어 처음 설치·예전 버전 업데이트에 쓴다.
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            include("armeabi-v7a", "arm64-v8a")
+            isUniversalApk = true
         }
     }
 

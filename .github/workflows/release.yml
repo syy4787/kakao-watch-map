@@ -94,28 +94,50 @@ jobs:
           export RELEASE_KEY_PASSWORD
           ./gradlew --no-daemon testDebugUnitTest assembleRelease
 
+      # kakao-watch-map.apk = 모든 CPU 용 (처음 설치·예전 버전 앱의 업데이트용)
+      # kakao-watch-map-<CPU>.apk = CPU 별 (새 버전 앱은 update.json 의 apks 에서 자기 것만 받는다 — 워치는 armeabi-v7a)
       - name: Prepare release files
         if: steps.check.outputs.ready == 'true'
         run: |
-          cp app/build/outputs/apk/release/app-release.apk kakao-watch-map.apk
+          set -euo pipefail
+          OUT=app/build/outputs/apk/release
+          BASE="https://github.com/$GITHUB_REPOSITORY/releases/download/v$VERSION_CODE"
+          cp "$OUT/app-universal-release.apk" kakao-watch-map.apk
+          APKS='{}'
+          for ABI in armeabi-v7a arm64-v8a; do
+            cp "$OUT/app-$ABI-release.apk" "kakao-watch-map-$ABI.apk"
+            ABI_SHA=$(sha256sum "kakao-watch-map-$ABI.apk" | cut -d' ' -f1)
+            APKS=$(jq -c --arg abi "$ABI" --arg url "$BASE/kakao-watch-map-$ABI.apk" --arg sha "$ABI_SHA" \
+              '. + {($abi): {url: $url, sha256: $sha}}' <<< "$APKS")
+          done
+          # 워치에 설치된 앱과 같은 키로 서명됐는지 (다르면 워치가 거부하므로 올리지 않는다)
+          APKSIGNER=$(ls -d "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
+          for f in kakao-watch-map*.apk; do
+            "$APKSIGNER" verify --print-certs "$f" \
+              | grep -q "SHA-256 digest: 926c87e6d4541f89907fa59de7d6608b60ec30e7451daf3ee74ae03ce841272f" \
+              || { echo "::error::$f 의 서명 키가 워치 앱과 달라요"; exit 1; }
+          done
           SHA=$(sha256sum kakao-watch-map.apk | cut -d' ' -f1)
           NOTES=$(git log -1 --pretty=%s)
           echo "NOTES=$NOTES" >> "$GITHUB_ENV"
           jq -n \
             --argjson code "$VERSION_CODE" \
             --arg name "$VERSION_NAME" \
-            --arg url "https://github.com/$GITHUB_REPOSITORY/releases/download/v$VERSION_CODE/kakao-watch-map.apk" \
+            --arg url "$BASE/kakao-watch-map.apk" \
             --arg sha "$SHA" \
             --arg notes "$NOTES" \
-            '{versionCode: $code, versionName: $name, apkUrl: $url, sha256: $sha, notes: $notes}' > update.json
+            --argjson apks "$APKS" \
+            '{versionCode: $code, versionName: $name, apkUrl: $url, sha256: $sha, notes: $notes, apks: $apks}' > update.json
           cat update.json
+          ls -l kakao-watch-map*.apk
 
       - name: Publish GitHub release
         if: steps.check.outputs.ready == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "v$VERSION_CODE" kakao-watch-map.apk update.json \
+          gh release create "v$VERSION_CODE" \
+            kakao-watch-map.apk kakao-watch-map-armeabi-v7a.apk kakao-watch-map-arm64-v8a.apk update.json \
             --target "$GITHUB_SHA" --title "v$VERSION_NAME" --notes "$NOTES" --latest
 
       - name: Clean up secrets

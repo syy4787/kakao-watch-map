@@ -6,6 +6,7 @@ import com.mywatch.kakaomap.model.TagoParsers
 import com.mywatch.kakaomap.model.TransitStepType
 import com.mywatch.kakaomap.model.TravelMode
 import com.mywatch.kakaomap.update.UpdateInfo
+import com.mywatch.kakaomap.update.UpdateManager
 import com.mywatch.kakaomap.net.KakaoApi
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
@@ -162,5 +163,34 @@ class ParsersTest {
         assertEquals("SW8", places[0].group)
         assertEquals("오늘 사용량을 다 썼어요", KakaoApi.errorMessage(400, """{"code":-10,"msg":"API limit has been exceeded."}"""))
         assertEquals("오늘 사용량을 다 썼어요", KakaoApi.errorMessage(429, ""))
+    }
+
+    @Test
+    fun updatePicksTheApkBuiltForThisWatchsCpu() {
+        val json = """{"versionCode":106,"versionName":"2.6","apkUrl":"https://x/all.apk","sha256":"AAA","notes":"n",
+            "apks":{"armeabi-v7a":{"url":"https://x/v7.apk","sha256":"BBB"},"arm64-v8a":{"url":"https://x/v8.apk","sha256":"CCC"}}}"""
+        // 갤럭시 워치9: 32비트 → 절반 크기 APK
+        val watch = UpdateInfo.parse(json, abis = listOf("armeabi-v7a", "armeabi"))
+        assertEquals("https://x/v7.apk", watch.apkUrl)
+        assertEquals("bbb", watch.sha256)
+        assertEquals("https://x/v8.apk", UpdateInfo.parse(json, abis = listOf("arm64-v8a", "armeabi-v7a")).apkUrl)
+        // 모르는 CPU·예전 형식 → 모두 들어 있는 APK
+        assertEquals("https://x/all.apk", UpdateInfo.parse(json, abis = listOf("x86_64")).apkUrl)
+        val old = """{"versionCode":105,"versionName":"2.5","apkUrl":"https://x/all.apk","sha256":"AAA","notes":""}"""
+        assertEquals("aaa", UpdateInfo.parse(old, abis = listOf("armeabi-v7a")).sha256)
+        // 저장했다 다시 읽어도 고른 것이 유지됨
+        assertEquals("https://x/v7.apk", UpdateInfo.parse(watch.toJson(), abis = listOf("armeabi-v7a")).apkUrl)
+    }
+
+    @Test
+    fun aDifferentApkOfTheSameVersionNeverResumesTheOtherPartialFile() {
+        // 받다 만 파일은 이어받는데, 같은 버전이라도 다른 APK(모든 CPU 용 ↔ 워치 전용)면 다른 파일이어야 섞이지 않는다
+        val universal = UpdateInfo(107, "2.7", "https://x/all.apk", "aaaa1111bbbb2222cccc", "")
+        val v7a = universal.copy(apkUrl = "https://x/v7.apk", sha256 = "dddd3333eeee4444ffff")
+        val a = UpdateManager.cacheFileName(universal)
+        val b = UpdateManager.cacheFileName(v7a)
+        assertTrue(a != b)
+        assertTrue(b.startsWith("app-107-") && b.endsWith(".apk"))
+        assertEquals(b, UpdateManager.cacheFileName(v7a.copy(notes = "다른 설명")))
     }
 }
