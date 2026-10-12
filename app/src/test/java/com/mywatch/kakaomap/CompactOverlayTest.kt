@@ -120,6 +120,7 @@ class CompactOverlayTest {
         assertEquals("은하수네거리", bus.alight)
         assertTrue(bus.ride && !bus.subway)
         assertEquals("617번 버스 · 시청역 → 은하수네거리", bus.text)
+        assertEquals("타는 중 남은 시간 계산용 소요 시간", 1800, bus.timeSec)
         assertEquals("대전 1호선", subway.line)
         assertEquals("대전역", subway.board)
         assertTrue(subway.ride && subway.subway)
