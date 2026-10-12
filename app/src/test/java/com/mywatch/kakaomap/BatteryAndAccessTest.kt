@@ -11,6 +11,7 @@ import com.mywatch.kakaomap.model.TransitStepType
 import com.mywatch.kakaomap.model.Vehicle
 import com.mywatch.kakaomap.nav.LocPower
 import com.mywatch.kakaomap.nav.LocationPolicy
+import com.mywatch.kakaomap.nav.LostClock
 import com.mywatch.kakaomap.nav.NavEngine
 import com.mywatch.kakaomap.nav.NavEvent
 import com.mywatch.kakaomap.nav.NavState
@@ -84,12 +85,37 @@ class BatteryAndAccessTest {
     @Test
     fun navigationEndsItselfAfterHalfAnHourOffTheRoute() {
         val min = 60_000L
-        assertTrue(LocationPolicy.shouldGiveUp(nav(off = true), 31 * min))
-        assertTrue(!LocationPolicy.shouldGiveUp(nav(off = true), 29 * min))
-        // 출발 전 실내에서 오래 기다리는 것(한 번도 경로에 오르지 않음)은 끝내지 않는다
-        assertTrue(!LocationPolicy.shouldGiveUp(nav(matched = false), 60 * min))
-        // 버스·지하철 타는 중은 이탈로 보지 않는다
-        assertTrue(!LocationPolicy.shouldGiveUp(nav(ride = true), 60 * min))
+        val clock = LostClock()
+        var t = 1_000L
+        fun at(minutes: Long, s: NavState): Boolean {
+            t = 1_000L + minutes * min
+            clock.update(s, t)
+            return clock.shouldGiveUp(s, t)
+        }
+        // 출발 전 실내에서 오래 기다림(한 번도 경로에 오르지 않음): 위치 아끼기는 하지만 끝내지는 않는다
+        assertTrue(!at(0, nav(matched = false)))
+        assertTrue(!at(40, nav(matched = false)))
+        assertEquals(40 * min, clock.sinceLost(t))
+        // 40분 뒤 처음 이탈 → 그때부터 30분을 센다 (곧바로 끝내지 않음)
+        assertTrue(!at(41, nav(off = true)))
+        // 재탐색해서 새 경로에 아직 못 올라도 계속 셈
+        assertTrue(!at(60, nav(matched = false)))
+        assertTrue(at(72, nav(matched = false)))
+
+        // 경로로 돌아오면 다시 처음부터
+        val back = LostClock()
+        back.update(nav(off = true), 0)
+        back.update(nav(), 20 * min)
+        back.update(nav(off = true), 25 * min)
+        assertTrue(!back.shouldGiveUp(nav(off = true), 50 * min))
+        assertTrue(back.shouldGiveUp(nav(off = true), 56 * min))
+        assertEquals(0L, LostClock().also { it.update(nav(), 5 * min) }.sinceLost(10 * min))
+
+        // 버스·지하철 타는 중, 도착 뒤에는 끝내지 않는다
+        val ride = LostClock()
+        ride.update(nav(off = true), 0)
+        assertTrue(!ride.shouldGiveUp(nav(ride = true).copy(passedStop = true), 60 * min))
+        assertTrue(!ride.shouldGiveUp(nav(arrived = true), 60 * min))
     }
 
     @Test

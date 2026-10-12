@@ -96,19 +96,29 @@ class NavigationService : Service() {
     /** 경로를 못 받은(안내 시작 후 아직 경로 위가 아닌) 시각 — 1초 간격을 무한정 쓰지 않게 */
     private var startedAt = 0L
     private var signalJob: Job? = null
-    /** 경로를 벗어났거나(이탈·정류장 지나침) 아직 경로에 못 오른 상태가 시작된 시각 (경로 위면 0) */
-    private var lostSince = 0L
-    /** 경로 밖에 오래 있을 때 위치가 안 들어와도 다시 판단하게 (10분: 저전력 위치로, 30분: 안내 끝냄) */
+    /** 경로 밖에 있는 시간 (10분: 저전력 위치로, 벗어난 채 30분: 안내 끝냄) */
+    private val lostClock = LostClock()
+    /** 위치가 안 들어와도(멈춰 있으면 거의 안 옴) 그 시각에 다시 판단하는 타이머 */
     private var lostTimerJob: Job? = null
+    private var lostTimerAt: Long? = null
 
     private val callback = object : LocationCallback() {
         override fun onLocationResult(result: LocationResult) {
             // 모아서 받은 경우(배칭) 순서대로 모두 처리해야 갈림길·하차를 놓치지 않는다
+            val wasStill = still
             result.locations.forEach { loc ->
                 updateSpeed(loc)
                 Navigator.onFix(this@NavigationService, loc.toFix())
             }
             onSignal(true)
+            // 멈춤 ↔ 움직임이 바뀌면 위치 계획을 다시 본다: 저전력(Wi-Fi·기지국) 위치는 거칠어서 엔진이 버리므로
+            // 안내 상태가 안 바뀌어도, 걷기 시작하면 GPS 를 다시 켜야 한다
+            if (still != wasStill) RouteRepository.activeRoute?.let { a ->
+                val st = Navigator.state.value
+                if (foreground && a.startNavigation && !st.arrived && st.routeVersion == RouteRepository.activeRouteVersion) {
+                    applyPlan(planFor(a, st))
+                }
+            }
         }
 
         override fun onLocationAvailability(availability: LocationAvailability) {
@@ -247,13 +257,12 @@ class NavigationService : Service() {
             reroutesWithoutMatch = 0
             lastRerouteAt = 0L
             startedAt = SystemClock.elapsedRealtime()
-            lostSince = 0L
-            lostTimerJob?.cancel()
+            lostClock.reset()
         }
         updateNotification(active, s)
         if (s.matched && !s.offRoute && !s.passedStop) reroutesWithoutMatch = 0
         trackLost(s)
-        if (LocationPolicy.shouldGiveUp(s, sinceLost())) {
+        if (lostClock.shouldGiveUp(s, SystemClock.elapsedRealtime())) {
             // 경로를 벗어난 채 30분 — 잊고 둔 안내가 배터리를 다 쓰지 않게 스스로 끝낸다
             notifyGaveUp(active)
             finishRoute()
@@ -290,27 +299,24 @@ class NavigationService : Service() {
         if ((s.offRoute || s.passedStop) && !s.rerouting) maybeReroute(active)
     }
 
-    /** 경로 밖에 있는 시간을 잰다. 위치가 안 들어와도 10분·30분 지점에서 다시 판단하도록 타이머를 건다 */
+    /** 경로 밖에 있는 시간을 잰다. 위치가 안 들어와도 다음 판단 시각(10분·30분)에 다시 보도록 타이머를 건다 */
     private fun trackLost(s: NavState) {
-        val lost = !s.arrived && (s.offRoute || s.passedStop || !s.matched)
-        if (!lost) {
-            lostSince = 0L
-            lostTimerJob?.cancel()
-            lostTimerJob = null
-            return
-        }
-        if (lostSince != 0L) return
-        lostSince = SystemClock.elapsedRealtime()
+        val now = SystemClock.elapsedRealtime()
+        lostClock.update(s, now)
+        val at = lostClock.nextDeadline(now)
+        if (at == lostTimerAt && (at == null || lostTimerJob?.isActive == true)) return
         lostTimerJob?.cancel()
-        lostTimerJob = scope.launch {
-            delay(LocationPolicy.LOST_LONG_MS + 1_000)
-            onState(Navigator.state.value)
-            delay(LocationPolicy.GIVE_UP_MS - LocationPolicy.LOST_LONG_MS)
-            onState(Navigator.state.value)
+        lostTimerAt = at
+        lostTimerJob = at?.let {
+            scope.launch {
+                delay(it - now)
+                lostTimerAt = null
+                onState(Navigator.state.value)
+            }
         }
     }
 
-    private fun sinceLost(): Long = if (lostSince == 0L) 0L else SystemClock.elapsedRealtime() - lostSince
+    private fun sinceLost(): Long = lostClock.sinceLost(SystemClock.elapsedRealtime())
 
     /** 안내를 스스로 끝냈다는 알림 (소리 없이) */
     private fun notifyGaveUp(active: ActiveRoute) {
@@ -532,7 +538,8 @@ class NavigationService : Service() {
         signalJob?.cancel()
         retryJob?.cancel()
         lostTimerJob?.cancel()
-        lostSince = 0L
+        lostTimerAt = null
+        lostClock.reset()
         if (Navigator.state.value.signalLost) Navigator.setSignalLost(false)
         // 안내 중이라 미뤄 둔 자동 업데이트가 있으면 이제 설치 예약 (조건이 맞으면 곧바로)
         UpdateInstallWorker.enqueueSoon(this)

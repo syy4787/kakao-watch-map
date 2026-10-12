@@ -45,15 +45,8 @@ object LocationPolicy {
     const val STILL_MPS = 0.4f
     /** 경로 밖에 이만큼 넘게 있으면 GPS 대신 Wi-Fi·기지국 위치(멈춰 있을 때) */
     const val LOST_LONG_MS = 10 * 60_000L
-    /** 경로를 벗어난 채 이만큼 지나면 안내를 스스로 끝낸다 (잊고 둔 안내가 배터리를 다 쓰지 않게) */
+    /** 경로를 벗어난 채 이만큼 지나면 안내를 스스로 끝낸다 (잊고 둔 안내가 배터리를 다 쓰지 않게) — [LostClock] */
     const val GIVE_UP_MS = 30 * 60_000L
-
-    /**
-     * 안내를 스스로 끝낼지: 경로를 '벗어난'(이탈·정류장 지나침) 채 30분.
-     * 한 번도 경로에 오르지 않은 출발 전 대기, 버스·지하철 타는 중은 끝내지 않는다.
-     */
-    fun shouldGiveUp(s: NavState, sinceLostMs: Long): Boolean =
-        !s.arrived && !s.onRide && (s.offRoute || s.passedStop) && sinceLostMs >= GIVE_UP_MS
     const val AFTER_ARRIVAL_ACTIVE_MS = 2 * 60_000L
     private const val NOT_MATCHED_FAST_MS = 60_000L
 
