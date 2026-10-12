@@ -48,6 +48,17 @@ class StillDetectorTest {
     }
 
     @Test
+    fun cellOnlyFixesStillNoticeALongWalk() {
+        // Wi-Fi 없이 기지국 위치만(오차 수백 m~1km): 오차를 그대로 더하면 아무리 걸어도 '멈춤'이 되므로 오차는 50m 까지만 친다
+        val d = StillDetector()
+        d.update(0, home, 8f, speed = 0.1f)
+        d.update(60_000, north(30.0), 900f, speed = null)
+        assertTrue(d.still)
+        d.update(240_000, north(400.0), 1_200f, speed = null)
+        assertFalse(d.still)
+    }
+
+    @Test
     fun walkingAwayIsNoticedFromNetworkFixes() {
         val d = StillDetector()
         d.update(0, home, 8f, speed = 0.1f)

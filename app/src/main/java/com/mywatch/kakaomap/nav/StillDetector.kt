@@ -2,12 +2,13 @@ package com.mywatch.kakaomap.nav
 
 import com.mywatch.kakaomap.model.Coord
 import com.mywatch.kakaomap.model.Geo
+import kotlin.math.min
 
 /**
  * 멈춤/움직임 판단 (위치를 얼마나 자주 받을지 = 배터리). 순수 계산이라 단위 테스트로 검증한다.
  *  · GPS 위치는 도플러 속도가 있어 그대로 쓴다: 0.4m/s 아래 '멈춤', 0.9m/s 넘어야 '움직임' (경계에서 깜빡이지 않게)
  *  · 속도가 없는 Wi-Fi·기지국 위치는 수십 m 씩 튄다. 튄 것을 '걷기 시작'으로 보면 GPS 를 켰다 껐다 반복하므로,
- *    멈춰 있을 땐 '멈춘 곳'에서 두 위치의 오차 + 20m 보다 확실히 멀어졌을 때만 움직임으로 본다.
+ *    멈춰 있을 땐 '멈춘 곳'에서 두 위치의 오차(각각 50m 까지) + 20m 보다 확실히 멀어졌을 때만 움직임으로 본다.
  *    움직이는 중엔 두 위치 사이 거리/시간 (멈춤으로 바뀌는 건 주로 GPS 속도가 정한다)
  */
 class StillDetector(
@@ -38,7 +39,9 @@ class StillDetector(
         val raw: Float? = when {
             speed != null && !speed.isNaN() -> speed
             still -> anchor?.let { a ->
-                if (Geo.distanceM(a.c, c) > a.acc + acc + MOVE_MARGIN_M) movingMps + 0.1f else 0f
+                // 오차는 50m 까지만 친다: 기지국 위치(오차 수백 m~1km)를 그대로 더하면 아무리 걸어도 '멈춤'이 된다
+                val noise = min(a.acc, MAX_NOISE_M) + min(acc, MAX_NOISE_M) + MOVE_MARGIN_M
+                if (Geo.distanceM(a.c, c) > noise) movingMps + 0.1f else 0f
             }
             else -> prev?.let { p ->
                 val dt = (timeMs - p.timeMs) / 1000f
@@ -55,6 +58,7 @@ class StillDetector(
     companion object {
         const val MOVING_MPS = 0.9f
         private const val MOVE_MARGIN_M = 20f
+        private const val MAX_NOISE_M = 50f
         private const val UNKNOWN_ACCURACY_M = 30f
         private const val MAX_GAP_S = 120f
     }

@@ -23,12 +23,14 @@ import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import androidx.wear.ongoing.OngoingActivity
 import androidx.wear.ongoing.Status
+import com.google.android.gms.location.CurrentLocationRequest
 import com.google.android.gms.location.LocationAvailability
 import com.google.android.gms.location.LocationCallback
 import com.google.android.gms.location.LocationRequest
 import com.google.android.gms.location.LocationResult
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
+import com.google.android.gms.tasks.CancellationTokenSource
 import com.mywatch.kakaomap.MainActivity
 import com.mywatch.kakaomap.MapApp
 import com.mywatch.kakaomap.R
@@ -102,11 +104,14 @@ class NavigationService : Service() {
     /**
      * 위치가 안 들어와도(멈춰 있으면 거의 안 옴) 정한 시각에 다시 판단하는 알람.
      * 코루틴 delay 는 워치가 잠든(CPU 꺼짐) 동안 시간이 안 가서 몇 시간씩 늦어지므로, 부팅 후 시각 기준 알람을 쓴다
-     * (정확 알람이 아니라 몇 분 늦을 수 있음 — 권한 불필요, 배터리 부담 없음).
+     * (정확 알람이 아니라 남은 시간의 3/4 까지 늦을 수 있고 깊은 절전 중엔 미뤄짐 — 권한 불필요, 배터리 부담 없음.
+     *  늦어도 그 사이 위치가 들어오면 그때 바로 판단하므로 이 알람은 '위치가 안 올 때'의 보험이다).
      */
     private val lostWake by lazy { Wake("kakaomap:lost") { onState(Navigator.state.value) } }
     private val passiveWake by lazy { Wake("kakaomap:passive") { onState(Navigator.state.value) } }
     private val finishWake by lazy { Wake("kakaomap:finish") { finishIfStillArrived() } }
+    /** 저전력(Wi-Fi·기지국) 위치로 쉬는 동안 몇 분마다 GPS 로 한 번 확인 — 기지국 위치만 잡히면 걷기 시작해도 모르므로 */
+    private val probeWake by lazy { Wake("kakaomap:probe") { probeGps() } }
     private var finishVersion = -1
 
     private val callback = object : LocationCallback() {
@@ -224,11 +229,40 @@ class NavigationService : Service() {
                 tracking = true
                 plan = p
                 lastPlanAt = now
+                // 저전력 위치로 쉬는 중(도착 뒤 제외)이면 GPS 확인을 예약, 아니면 취소
+                if (p.power == LocPower.BALANCED && !Navigator.state.value.arrived && !Navigator.state.value.onSubway) {
+                    probeWake.schedule(now + PROBE_EVERY_MS)
+                } else {
+                    probeWake.cancel()
+                }
             }
             .onFailure { Log.w(MapApp.TAG, "안내 위치 요청 실패", it) }
     }
 
+    /**
+     * GPS 로 지금 위치를 한 번만 (최대 30초). 걷고 있으면 GPS 속도로 '움직임'이 되어 다시 GPS 안내로 돌아간다.
+     * 실내라 못 잡으면 그냥 끝 (몇 분 뒤 다시).
+     */
+    @SuppressLint("MissingPermission")
+    private fun probeGps() {
+        val p = plan ?: return
+        if (!tracking || p.power != LocPower.BALANCED || !Locator.hasPermission(this)) return
+        probeWake.schedule(SystemClock.elapsedRealtime() + PROBE_EVERY_MS)
+        val request = CurrentLocationRequest.Builder()
+            .setPriority(Priority.PRIORITY_HIGH_ACCURACY)
+            .setDurationMillis(PROBE_TIMEOUT_MS)
+            .setMaxUpdateAgeMillis(5_000)
+            .build()
+        runCatching {
+            fused.getCurrentLocation(request, CancellationTokenSource().token)
+                .addOnSuccessListener { loc ->
+                    if (loc != null && running && tracking) callback.onLocationResult(LocationResult.create(listOf(loc)))
+                }
+        }.onFailure { Log.w(MapApp.TAG, "GPS 확인 실패", it) }
+    }
+
     private fun stopTracking() {
+        probeWake.cancel()
         if (!tracking) return
         tracking = false
         plan = null
@@ -570,6 +604,8 @@ class NavigationService : Service() {
         private const val SIGNAL_LOST_AFTER_MS = 10_000L
         private const val MAX_REROUTES = 10
         private const val BATTERY_CHECK_MS = 60_000L
+        private const val PROBE_EVERY_MS = 4 * 60_000L
+        private const val PROBE_TIMEOUT_MS = 30_000L
 
         /** 서비스가 돌고 있는지 (메인 스레드에서 쓰고, 업데이트 작업이 다른 스레드에서 읽음) */
         @Volatile
