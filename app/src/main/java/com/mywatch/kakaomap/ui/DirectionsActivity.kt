@@ -16,6 +16,9 @@ import com.mywatch.kakaomap.location.Locator
 import com.mywatch.kakaomap.model.Coord
 import com.mywatch.kakaomap.model.Place
 import com.mywatch.kakaomap.model.SimpleRoute
+import com.mywatch.kakaomap.model.TransitFilter
+import com.mywatch.kakaomap.model.TransitOptions
+import com.mywatch.kakaomap.model.TransitSort
 import com.mywatch.kakaomap.model.TransitStepType
 import com.mywatch.kakaomap.model.TravelMode
 import com.mywatch.kakaomap.net.BusArrivalService
@@ -39,6 +42,11 @@ class DirectionsActivity : ComponentActivity() {
     private var loadJob: Job? = null
     /** 출발지 설명 — 새로 잡은 위치면 '내 위치', 몇 분 지난 위치면 그렇게 알린다 */
     private var originLabel = "내 위치에서 출발"
+    /** 대중교통 거르기(검색마다 전체로 시작)·정렬(기억) */
+    private var filter = TransitFilter.ALL
+    private var sort = TransitSort.RECOMMENDED
+    /** 경로 번호 → 실시간 첫 버스 도착 (거르기·정렬을 바꿔도 다시 받지 않게) */
+    private val liveTexts = mutableMapOf<Int, String>()
 
     private val permission = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
         load()
@@ -52,9 +60,9 @@ class DirectionsActivity : ComponentActivity() {
             return
         }
         dest = d
-        mode = runCatching {
-            TravelMode.valueOf(getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_MODE, null) ?: "")
-        }.getOrDefault(TravelMode.TRANSIT)
+        val prefs = getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        mode = runCatching { TravelMode.valueOf(prefs.getString(KEY_MODE, null) ?: "") }.getOrDefault(TravelMode.TRANSIT)
+        sort = runCatching { TransitSort.valueOf(prefs.getString(KEY_SORT, null) ?: "") }.getOrDefault(TransitSort.RECOMMENDED)
         setContentView(R.layout.activity_list)
         ui = WearList(this, ::onRow)
         load()
@@ -105,14 +113,37 @@ class DirectionsActivity : ComponentActivity() {
             runCatching { KakaoApi.transit(origin, dest.coord, dest.name) }
         }
         result.onSuccess { routes ->
+            val fresh = RouteRepository.transitRoutes !== routes
             RouteRepository.transitRoutes = routes
-            val cards = routes.mapIndexed { i, r -> Row.TransitCard(i, r) }
-            val tail = mutableListOf<Row>()
-            if (!TagoApi.isConfigured) tail += Row.Note(getString(R.string.tago_missing))
-            tail += Row.Note(getString(R.string.transit_note))
-            ui.rows = head() + (if (routes.isEmpty()) listOf(Row.Note("대중교통 경로가 없어요")) else cards) + tail
-            fetchLiveArrivals()
+            if (fresh) liveTexts.clear()
+            renderTransit()
+            if (fresh || liveTexts.isEmpty()) fetchLiveArrivals()
         }.onFailure { e -> showError(e) }
+    }
+
+    /** 경로 카드 목록: 거르기·정렬 칩 + (거르고 정렬한) 카드. 카드 번호는 원래 목록의 번호 */
+    private fun renderTransit() {
+        val routes = RouteRepository.transitRoutes ?: return
+        val choices = TransitOptions.filters(routes)
+        filter = TransitOptions.valid(filter, choices.map { it.first })
+        val shown = TransitOptions.apply(routes, filter, sort)
+        val body = mutableListOf<Row>()
+        if (routes.isEmpty()) {
+            body += Row.Note("대중교통 경로가 없어요")
+        } else {
+            if (routes.size >= 2) {
+                body += Row.TransitChoice(
+                    filter = filter,
+                    filterCount = choices.firstOrNull { it.first == filter }?.second ?: shown.size,
+                    canFilter = choices.size >= 2,
+                    sort = sort,
+                )
+            }
+            body += shown.map { Row.TransitCard(it.index, it.value, liveTexts[it.index]) }
+        }
+        if (!TagoApi.isConfigured) body += Row.Note(getString(R.string.tago_missing))
+        body += Row.Note(getString(R.string.transit_note))
+        ui.rows = head() + body
     }
 
     /** 각 경로 카드의 첫 버스에 대해 실시간 도착 정보를 붙인다 */
@@ -123,6 +154,8 @@ class DirectionsActivity : ComponentActivity() {
             val bus = r.steps.firstOrNull { it.type == TransitStepType.BUS } ?: return@forEachIndexed
             lifecycleScope.launch {
                 val text = withContext(Dispatchers.IO) { BusArrivalService.describe(bus) } ?: return@launch
+                if (RouteRepository.transitRoutes !== routes) return@launch
+                liveTexts[i] = text
                 val rows = ui.adapter.rows
                 val pos = rows.indexOfFirst { it is Row.TransitCard && it.index == i }
                 if (pos >= 0 && mode == TravelMode.TRANSIT) {
@@ -165,6 +198,18 @@ class DirectionsActivity : ComponentActivity() {
                 load()
             }
             is Row.TransitCard -> startActivity(RouteDetailActivity.intent(this, row.index))
+            is Row.TransitChoice -> {
+                val routes = RouteRepository.transitRoutes ?: return
+                when (row.tapped) {
+                    Row.TransitChoice.FILTER ->
+                        filter = TransitOptions.next(filter, TransitOptions.filters(routes).map { it.first })
+                    Row.TransitChoice.SORT -> {
+                        sort = sort.next()
+                        getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit { putString(KEY_SORT, sort.name) }
+                    }
+                }
+                renderTransit()   // 칩이 손가락 아래 그대로 있게 스크롤은 그대로 둔다
+            }
             is Row.Action -> when (row.id) {
                 ACTION_RETRY -> {
                     if (mode == TravelMode.TRANSIT) RouteRepository.transitRoutes = null
@@ -192,6 +237,7 @@ class DirectionsActivity : ComponentActivity() {
     companion object {
         private const val PREFS = "directions"
         private const val KEY_MODE = "mode"
+        private const val KEY_SORT = "transit_sort"
         private const val ACTION_RETRY = "retry"
         private const val ACTION_PERMISSION = "permission"
         private const val ACTION_NAVIGATE = "navigate"

@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 대중교통 경로 거르기(전체·버스·지하철·버스+지하철) · 정렬(추천·빠른·환승 적은·덜 걷는) — 톡 하면 다음 것으로 -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:gravity="center"
+    android:orientation="horizontal"
+    android:paddingBottom="4dp">
+
+    <TextView
+        android:id="@+id/filter"
+        android:layout_width="0dp"
+        android:layout_height="40dp"
+        android:layout_marginEnd="6dp"
+        android:layout_weight="1"
+        android:autoSizeMaxTextSize="13sp"
+        android:autoSizeMinTextSize="9sp"
+        android:autoSizeTextType="uniform"
+        android:background="@drawable/bg_option_chip"
+        android:gravity="center"
+        android:maxLines="1"
+        android:paddingHorizontal="8dp"
+        android:textColor="@color/text_primary" />
+
+    <TextView
+        android:id="@+id/sort"
+        android:layout_width="0dp"
+        android:layout_height="40dp"
+        android:layout_weight="1"
+        android:autoSizeMaxTextSize="13sp"
+        android:autoSizeMinTextSize="9sp"
+        android:autoSizeTextType="uniform"
+        android:background="@drawable/bg_option_chip"
+        android:gravity="center"
+        android:maxLines="1"
+        android:paddingHorizontal="8dp"
+        android:textColor="@color/text_primary" />
+</LinearLayout>

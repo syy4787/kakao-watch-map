@@ -1,0 +1,85 @@
+package com.mywatch.kakaomap
+
+import com.mywatch.kakaomap.model.Coord
+import com.mywatch.kakaomap.model.TransitFilter
+import com.mywatch.kakaomap.model.TransitOptions
+import com.mywatch.kakaomap.model.TransitRoute
+import com.mywatch.kakaomap.model.TransitSort
+import com.mywatch.kakaomap.model.TransitStep
+import com.mywatch.kakaomap.model.TransitStepType
+import com.mywatch.kakaomap.model.Vehicle
+import org.junit.Assert.assertEquals
+import org.junit.Test
+
+/**
+ * 카카오맵 대중교통 결과처럼 '버스 / 지하철 / 버스+지하철'로 거르고 빠른·환승 적은·덜 걷는 순으로 정렬.
+ * 순서·개수는 실제 대전 응답(대전역 → KAIST, 15개 경로)의 모양을 줄여 만든 것.
+ */
+class TransitOptionsTest {
+
+    private val a = Coord(36.33, 127.43)
+    private val b = Coord(36.37, 127.36)
+
+    private fun step(type: TransitStepType, min: Int) = TransitStep(
+        type, "", 1000, min * 60, stops = listOf("가", "나"),
+        vehicles = if (type == TransitStepType.WALK) emptyList() else listOf(Vehicle("일반", "1")),
+        points = listOf(a, b),
+    )
+
+    private fun route(type: String, min: Int, transfers: Int, walkMin: Int, vararg rides: TransitStepType) = TransitRoute(
+        type = type, totalDistanceM = 9000, totalTimeSec = min * 60, transfers = transfers, fare = 1500,
+        steps = listOf(step(TransitStepType.WALK, walkMin)) + rides.map { step(it, 10) },
+    )
+
+    // 카카오가 준 순서(추천순) 그대로
+    private val routes = listOf(
+        route("BUS_AND_SUBWAY", 51, 1, 9, TransitStepType.SUBWAY, TransitStepType.BUS),   // 0
+        route("BUS", 61, 1, 4, TransitStepType.BUS, TransitStepType.BUS),                // 1
+        route("BUS_AND_SUBWAY", 50, 2, 12, TransitStepType.SUBWAY, TransitStepType.BUS), // 2
+        route("BUS", 75, 0, 3, TransitStepType.BUS),                                    // 3
+        route("BUS", 81, 0, 2, TransitStepType.BUS),                                    // 4
+    )
+
+    private fun order(f: TransitFilter, s: TransitSort) = TransitOptions.apply(routes, f, s).map { it.index }
+
+    @Test
+    fun recommendedKeepsKakaosOrderAndOtherSortsReorder() {
+        assertEquals(listOf(0, 1, 2, 3, 4), order(TransitFilter.ALL, TransitSort.RECOMMENDED))
+        assertEquals(listOf(2, 0, 1, 3, 4), order(TransitFilter.ALL, TransitSort.FASTEST))
+        // 환승이 같으면 빠른 것 먼저
+        assertEquals(listOf(3, 4, 0, 1, 2), order(TransitFilter.ALL, TransitSort.FEWEST_TRANSFERS))
+        // 걷는 시간이 같으면 빠른 것 먼저
+        assertEquals(listOf(4, 3, 1, 0, 2), order(TransitFilter.ALL, TransitSort.LEAST_WALK))
+    }
+
+    @Test
+    fun filtersKeepTheOriginalIndexForTheDetailScreen() {
+        assertEquals(listOf(1, 3, 4), order(TransitFilter.BUS, TransitSort.RECOMMENDED))
+        assertEquals(listOf(2, 0), order(TransitFilter.BUS_AND_SUBWAY, TransitSort.FASTEST))
+        assertEquals(emptyList<Int>(), order(TransitFilter.SUBWAY, TransitSort.RECOMMENDED))
+    }
+
+    @Test
+    fun onlyKindsThatExistCanBeChosenWithTheirCounts() {
+        assertEquals(
+            listOf(TransitFilter.ALL to 5, TransitFilter.BUS to 3, TransitFilter.BUS_AND_SUBWAY to 2),
+            TransitOptions.filters(routes),
+        )
+        // 한 종류뿐이면 거를 필요가 없다
+        assertEquals(listOf(TransitFilter.ALL to 3), TransitOptions.filters(routes.filter { it.type == "BUS" }))
+        // 응답의 type 이 비어 있어도 구간으로 판단
+        assertEquals(TransitFilter.SUBWAY, TransitOptions.kindOf(route("", 20, 0, 3, TransitStepType.SUBWAY)))
+        assertEquals(TransitFilter.BUS_AND_SUBWAY, TransitOptions.kindOf(route("", 20, 1, 3, TransitStepType.BUS, TransitStepType.SUBWAY)))
+    }
+
+    @Test
+    fun tappingAChipMovesToTheNextChoice() {
+        val choices = TransitOptions.filters(routes).map { it.first }
+        assertEquals(TransitFilter.BUS, TransitOptions.next(TransitFilter.ALL, choices))
+        assertEquals(TransitFilter.ALL, TransitOptions.next(TransitFilter.BUS_AND_SUBWAY, choices))
+        // 지금 고른 종류가 새 결과에 없으면 전체로
+        assertEquals(TransitFilter.ALL, TransitOptions.valid(TransitFilter.SUBWAY, choices))
+        assertEquals(TransitSort.FASTEST, TransitSort.RECOMMENDED.next())
+        assertEquals(TransitSort.RECOMMENDED, TransitSort.LEAST_WALK.next())
+    }
+}

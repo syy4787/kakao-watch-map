@@ -15,8 +15,10 @@ import com.mywatch.kakaomap.data.FavoriteSlot
 import com.mywatch.kakaomap.model.Format
 import com.mywatch.kakaomap.model.Place
 import com.mywatch.kakaomap.model.SimpleRoute
+import com.mywatch.kakaomap.model.TransitFilter
 import com.mywatch.kakaomap.model.TransitGuide
 import com.mywatch.kakaomap.model.TransitRoute
+import com.mywatch.kakaomap.model.TransitSort
 import com.mywatch.kakaomap.model.TravelMode
 
 /** 목록 화면에 들어가는 줄 종류 */
@@ -27,6 +29,19 @@ sealed class Row {
     data class FavoriteItem(val slot: FavoriteSlot) : Row()
     data class ModeTabs(val selected: TravelMode) : Row()
     data class TransitCard(val index: Int, val route: TransitRoute, val live: String? = null) : Row()
+    /** 대중교통 거르기·정렬 칩. [tapped] = 누른 칩 (FILTER / SORT) */
+    data class TransitChoice(
+        val filter: TransitFilter,
+        val filterCount: Int,
+        val canFilter: Boolean,
+        val sort: TransitSort,
+        val tapped: Int = 0,
+    ) : Row() {
+        companion object {
+            const val FILTER = 1
+            const val SORT = 2
+        }
+    }
     data class SimpleCard(val route: SimpleRoute) : Row()
     data class Step(
         val color: Int,
@@ -66,6 +81,7 @@ class RowAdapter(
         is Row.FavoriteItem -> R.layout.item_favorite
         is Row.ModeTabs -> R.layout.item_mode_tabs
         is Row.TransitCard -> R.layout.item_transit_card
+        is Row.TransitChoice -> R.layout.item_transit_options
         is Row.SimpleCard -> R.layout.item_simple_card
         is Row.Step -> R.layout.item_step
         is Row.Note -> R.layout.item_note
@@ -129,6 +145,23 @@ class RowAdapter(
                 }
             }
             is Row.TransitCard -> bindTransit(v, row)
+            is Row.TransitChoice -> {
+                v.text(R.id.filter).apply {
+                    visibility = if (row.canFilter) View.VISIBLE else View.GONE
+                    text = "${row.filter.label} ${row.filterCount}"
+                    isActivated = row.filter != TransitFilter.ALL
+                    contentDescription = "경로 종류 ${row.filter.label} ${row.filterCount}개, 눌러서 바꾸기"
+                    setOnClickListener { onClick(row.copy(tapped = Row.TransitChoice.FILTER)) }
+                }
+                v.text(R.id.sort).apply {
+                    text = row.sort.label
+                    isActivated = row.sort != TransitSort.RECOMMENDED
+                    contentDescription = "정렬 ${row.sort.label}, 눌러서 바꾸기"
+                    setOnClickListener { onClick(row.copy(tapped = Row.TransitChoice.SORT)) }
+                }
+                v.setOnClickListener(null)
+                v.isClickable = false
+            }
             is Row.SimpleCard -> {
                 val r = row.route
                 v.text(R.id.time).text = Format.duration(r.totalTimeSec)
