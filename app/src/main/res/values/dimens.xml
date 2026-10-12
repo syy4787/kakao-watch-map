@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 버튼 지름 (Wear OS 권장 터치 영역 48dp 근처) -->
+    <dimen name="ring_button_size">44dp</dimen>
+    <!-- 원형 화면 테두리와 버튼 사이 여백 -->
+    <dimen name="ring_edge_inset">4dp</dimen>
+</resources>

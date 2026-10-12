@@ -1,0 +1,113 @@
+# Claude 가 코드를 고쳐 main 에 올리면 → 서명된 APK 를 만들어 GitHub Release 로 게시
+# → 워치 앱이 새 버전을 알아서 받아 설치한다.
+name: Build & release (watch auto-update)
+
+on:
+  push:
+    branches: [ main ]
+    paths-ignore: [ '**.md' ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      # 서명 비밀번호(Secret)가 아직 없으면 실패 대신 건너뛴다 (등록 후 다음 커밋부터 자동 배포)
+      - name: Check signing secret
+        id: check
+        env:
+          RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+        run: |
+          if [ -z "$RELEASE_KEY_PASSWORD" ]; then
+            echo "::warning::저장소 Settings > Secrets and variables > Actions 에 RELEASE_KEY_PASSWORD 를 추가하면 다음 커밋부터 배포돼요"
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v7
+        if: steps.check.outputs.ready == 'true'
+
+      - uses: actions/setup-java@v6
+        if: steps.check.outputs.ready == 'true'
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: gradle/actions/setup-gradle@v6
+        if: steps.check.outputs.ready == 'true'
+
+      # 버전 번호는 항상 커져야 워치가 업데이트를 받는다:
+      # 이미 올라간 릴리스(v숫자) 중 가장 큰 번호 + 1 과 (100 + 실행 번호) 중 큰 값
+      - name: Version
+        if: steps.check.outputs.ready == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # 목록을 못 받으면 여기서 멈춘다 (번호가 거꾸로 가면 워치가 업데이트를 못 받음)
+          TAGS=$(gh release list --limit 200 --json tagName -q '.[].tagName')
+          LAST=$(printf '%s\n' "$TAGS" | sed -n 's/^v\([0-9][0-9]*\)$/\1/p' | sort -n | tail -1 || true)
+          LAST=${LAST:-100}
+          RUN_BASED=$((100 + GITHUB_RUN_NUMBER))
+          CODE=$(( LAST + 1 > RUN_BASED ? LAST + 1 : RUN_BASED ))
+          echo "VERSION_CODE=$CODE" >> "$GITHUB_ENV"
+          echo "VERSION_NAME=2.$((CODE - 100))" >> "$GITHUB_ENV"
+          echo "versionCode=$CODE"
+
+      - name: Decrypt signing key and API keys
+        if: steps.check.outputs.ready == 'true'
+        env:
+          RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+        run: |
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -in signing/release.jks.enc \
+            -out "$RUNNER_TEMP/release.jks" -pass env:RELEASE_KEY_PASSWORD
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -in signing/secrets.properties.enc \
+            -out "$RUNNER_TEMP/secrets.properties" -pass env:RELEASE_KEY_PASSWORD
+
+      # 키를 바꾸거나(TAGO 실시간 버스 키 추가 등) 할 때는 저장소 Secrets 에 같은 이름으로 넣으면
+      # 암호화 파일보다 우선한다 (비어 있으면 무시)
+      - name: Test and build signed APK
+        if: steps.check.outputs.ready == 'true'
+        env:
+          RELEASE_STORE_FILE: ${{ runner.temp }}/release.jks
+          RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+          SECRETS_FILE: ${{ runner.temp }}/secrets.properties
+          KAKAO_REST_API_KEY: ${{ secrets.KAKAO_REST_API_KEY }}
+          TAGO_SERVICE_KEY: ${{ secrets.TAGO_SERVICE_KEY }}
+        run: ./gradlew --no-daemon testDebugUnitTest assembleRelease
+
+      - name: Prepare release files
+        if: steps.check.outputs.ready == 'true'
+        run: |
+          cp app/build/outputs/apk/release/app-release.apk kakao-watch-map.apk
+          SHA=$(sha256sum kakao-watch-map.apk | cut -d' ' -f1)
+          NOTES=$(git log -1 --pretty=%s)
+          echo "NOTES=$NOTES" >> "$GITHUB_ENV"
+          jq -n \
+            --argjson code "$VERSION_CODE" \
+            --arg name "$VERSION_NAME" \
+            --arg url "https://github.com/$GITHUB_REPOSITORY/releases/download/v$VERSION_CODE/kakao-watch-map.apk" \
+            --arg sha "$SHA" \
+            --arg notes "$NOTES" \
+            '{versionCode: $code, versionName: $name, apkUrl: $url, sha256: $sha, notes: $notes}' > update.json
+          cat update.json
+
+      - name: Publish GitHub release
+        if: steps.check.outputs.ready == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "v$VERSION_CODE" kakao-watch-map.apk update.json \
+            --target "$GITHUB_SHA" --title "v$VERSION_NAME" --notes "$NOTES" --latest
+
+      - name: Clean up secrets
+        if: always()
+        run: rm -f "$RUNNER_TEMP/release.jks" "$RUNNER_TEMP/secrets.properties"

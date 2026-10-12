@@ -1,0 +1,170 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  원형 워치 지도 화면
+  · MapView 를 정사각형 화면 전체에 깔면 원형 디스플레이에서는 원 전체가 지도로 꽉 찬다.
+  · 버튼·안내·경로 카드 위치는 MainActivity 가 원 안에 들어가도록 계산해서 놓는다.
+  · 맨 바깥 SwipeDismissFrameLayout: 왼쪽 가장자리 스와이프 = 앱 닫기
+-->
+<androidx.wear.widget.SwipeDismissFrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/swipe_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <com.mywatch.kakaomap.PannableFrameLayout
+        android:id="@+id/map_container"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent">
+
+        <com.kakao.vectormap.MapView
+            android:id="@+id/map_view"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent" />
+
+        <!-- 안내 배너 (현재 구간 안내 + 남은 거리) -->
+        <TextView
+            android:id="@+id/guide"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="top|center_horizontal"
+            android:background="@drawable/bg_guide"
+            android:ellipsize="end"
+            android:gravity="center"
+            android:maxLines="3"
+            android:paddingHorizontal="12dp"
+            android:paddingVertical="6dp"
+            android:textColor="@android:color/white"
+            android:textSize="13sp"
+            android:visibility="gone" />
+
+        <!-- 새 버전 알림 -->
+        <TextView
+            android:id="@+id/update_pill"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="top|center_horizontal"
+            android:background="@drawable/bg_update_pill"
+            android:paddingHorizontal="10dp"
+            android:paddingVertical="4dp"
+            android:text="@string/update_available"
+            android:textColor="@android:color/white"
+            android:textSize="11sp"
+            android:visibility="gone" />
+
+        <!-- 경로 요약 카드 (탭 → 상세, ✕ → 안내 종료) -->
+        <LinearLayout
+            android:id="@+id/route_card"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="bottom|center_horizontal"
+            android:background="@drawable/bg_map_card"
+            android:elevation="3dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingVertical="6dp"
+            android:paddingStart="12dp"
+            android:paddingEnd="4dp"
+            android:visibility="gone">
+
+            <ImageView
+                android:id="@+id/route_icon"
+                android:layout_width="22dp"
+                android:layout_height="22dp"
+                android:importantForAccessibility="no"
+                android:tint="@color/accent" />
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <TextView
+                    android:id="@+id/route_summary"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:ellipsize="end"
+                    android:maxLines="1"
+                    android:textColor="@color/text_dark"
+                    android:textSize="13sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/route_dest"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:ellipsize="end"
+                    android:maxLines="1"
+                    android:textColor="@color/text_dark_secondary"
+                    android:textSize="12sp" />
+            </LinearLayout>
+
+            <ImageButton
+                android:id="@+id/route_close"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:background="?android:attr/selectableItemBackgroundBorderless"
+                android:contentDescription="@string/end_route"
+                android:src="@drawable/ic_close"
+                android:tint="@color/text_dark_secondary" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/status_text"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:background="@drawable/bg_status"
+            android:gravity="center"
+            android:paddingHorizontal="12dp"
+            android:paddingVertical="8dp"
+            android:textColor="@android:color/white"
+            android:textSize="12sp"
+            android:visibility="gone" />
+
+        <ImageButton
+            android:id="@+id/btn_search"
+            style="@style/RingButton"
+            android:contentDescription="@string/search"
+            android:src="@drawable/ic_directions" />
+
+        <ImageButton
+            android:id="@+id/btn_zoom_in"
+            style="@style/RingButton"
+            android:contentDescription="@string/zoom_in"
+            android:src="@drawable/ic_zoom_in" />
+
+        <ImageButton
+            android:id="@+id/btn_my_location"
+            style="@style/RingButton"
+            android:contentDescription="@string/my_location"
+            android:src="@drawable/ic_my_location" />
+
+        <ImageButton
+            android:id="@+id/btn_zoom_out"
+            style="@style/RingButton"
+            android:contentDescription="@string/zoom_out"
+            android:src="@drawable/ic_zoom_out" />
+
+        <!-- 저전력(앰비언트) 화면: 손목을 내렸을 때 검은 바탕에 안내만 표시해 배터리를 아낀다.
+             elevation 이 높아야 그림자가 있는 흰 카드·버튼보다 위에 그려져 모두 가린다 (번인·전력 방지).
+             번인 방지용 화면 이동은 시스템이 알아서 한다 -->
+        <FrameLayout
+            android:id="@+id/ambient_root"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:background="@android:color/black"
+            android:clickable="true"
+            android:elevation="24dp"
+            android:focusable="false"
+            android:visibility="gone">
+
+            <!-- 선만 그린 미니 지도 + 다음 안내 (지도 엔진·네트워크 없이 직접 그림) -->
+            <com.mywatch.kakaomap.ui.AmbientRouteView
+                android:id="@+id/ambient_map"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent" />
+        </FrameLayout>
+
+    </com.mywatch.kakaomap.PannableFrameLayout>
+</androidx.wear.widget.SwipeDismissFrameLayout>

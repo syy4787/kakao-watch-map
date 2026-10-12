@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Wear OS 기본 테마(검은 배경, 액션바 없음, 스와이프로 닫기 유지) -->
+    <style name="Theme.KakaoWatchMap" parent="@android:style/Theme.DeviceDefault">
+        <item name="android:windowBackground">@android:color/black</item>
+    </style>
+
+    <!-- 지도 위 원 테두리를 따라 놓는 흰 둥근 버튼 (카카오맵의 흰 플로팅 버튼처럼) -->
+    <style name="RingButton">
+        <item name="android:layout_width">@dimen/ring_button_size</item>
+        <item name="android:layout_height">@dimen/ring_button_size</item>
+        <item name="android:layout_gravity">top|start</item>
+        <item name="android:background">@drawable/bg_map_button</item>
+        <item name="android:scaleType">center</item>
+        <item name="android:tint">@color/text_dark</item>
+        <item name="android:elevation">2dp</item>
+        <item name="android:alpha">0</item>
+        <item name="android:visibility">invisible</item>
+    </style>
+
+    <!-- 이동수단 탭 -->
+    <style name="ModeTab">
+        <item name="android:layout_width">62dp</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:orientation">vertical</item>
+        <item name="android:gravity">center_horizontal</item>
+        <item name="android:paddingVertical">2dp</item>
+        <item name="android:clickable">true</item>
+        <item name="android:focusable">true</item>
+    </style>
+
+    <style name="ModeTabIcon">
+        <item name="android:layout_width">42dp</item>
+        <item name="android:layout_height">42dp</item>
+        <item name="android:background">@drawable/bg_tab</item>
+        <item name="android:scaleType">center</item>
+        <item name="android:importantForAccessibility">no</item>
+        <item name="android:duplicateParentState">true</item>
+    </style>
+
+    <style name="ModeTabLabel">
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_marginTop">2dp</item>
+        <item name="android:textColor">@color/text_secondary</item>
+        <item name="android:textSize">11sp</item>
+    </style>
+</resources>

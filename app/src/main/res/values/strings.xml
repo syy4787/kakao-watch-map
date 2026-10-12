@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">카카오 지도</string>
+
+    <string name="zoom_in">확대</string>
+    <string name="zoom_out">축소</string>
+    <string name="my_location">내 위치</string>
+    <string name="search">길찾기</string>
+
+    <string name="mode_transit">대중교통</string>
+    <string name="mode_walk">도보</string>
+    <string name="mode_bike">자전거</string>
+
+    <string name="loading_map">지도 불러오는 중…</string>
+    <string name="location_unavailable">현재 위치를\n가져오지 못했어요</string>
+    <string name="location_permission_denied">위치 권한이 없어\n내 위치를 표시할 수 없어요</string>
+    <string name="location_needed">길찾기는 현재 위치가 필요해요.\n위치 권한을 허용해 주세요</string>
+
+    <string name="search_title">어디로 갈까요?</string>
+    <string name="search_hint">도착지 검색</string>
+    <string name="search_prompt">말하거나 입력하세요</string>
+    <string name="recent_places">최근 목적지</string>
+    <string name="clear_recents">최근 목적지 지우기</string>
+    <string name="searching">검색 중…</string>
+    <string name="no_results">검색 결과가 없어요</string>
+    <string name="app_info_update">앱 정보 · 업데이트</string>
+
+    <string name="routing">경로 찾는 중…</string>
+    <string name="show_on_map">지도에서 보기</string>
+    <string name="start_navigation">안내 시작</string>
+    <string name="end_route">안내 종료</string>
+    <string name="transit_note">버스 도착 시간은 공공데이터(TAGO) 실시간 정보예요. 고속·시외버스·KTX 같은 장거리 노선은 카카오 대중교통 API에 없어요.</string>
+    <string name="tago_missing">실시간 버스 도착은 공공데이터 키를 넣으면 보여요</string>
+
+    <string name="back_to_map">지도로 돌아가기</string>
+    <string name="nav_channel">길 안내</string>
+    <string name="transit_nav_note">‘안내 시작’을 누르면 화면이 꺼져도 위치를 따라가며, 갈아탈 곳과 내릴 정류장 근처에서 진동으로 알려 줘요.</string>
+
+    <string name="update_available">새 버전 · 탭해서 업데이트</string>
+
+    <string name="err_401">인증 실패 (401)\n카카오 콘솔에 패키지명·키 해시를\n등록했는지 확인하세요</string>
+    <string name="err_403">권한 오류 (403)\n카카오맵 “사용 설정”이\nON 인지 확인하세요</string>
+    <string name="err_429">사용량 초과 (429)\n무료 쿼터 소진 또는\n유료 설정이 필요해요</string>
+    <string name="err_network">네트워크 연결을\n확인하세요</string>
+    <string name="err_unknown">지도 인증 오류 (%1$d)</string>
+    <string name="err_with_hash">%1$s\n\n패키지명\n%2$s\n\n키 해시\n%3$s</string>
+    <string name="err_generic">지도 오류\n%1$s</string>
+    <string name="tap_to_retry">👆 톡 하면 다시 시도</string>
+    <string name="error_sdk_init">카카오맵 SDK 시작 실패\n(%1$s)\n\nx86 에뮬레이터는 지원 안 돼요.\n실제 워치에서 실행하세요.</string>
+</resources>

@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Wear OS 전용 앱 -->
+    <uses-feature android:name="android.hardware.type.watch" />
+    <uses-feature
+        android:name="android.hardware.location.gps"
+        android:required="false" />
+    <uses-feature
+        android:name="android.hardware.sensor.compass"
+        android:required="false" />
+
+    <!-- 지도·검색·길찾기·업데이트 다운로드 -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- 내 위치 (출발지·안내) -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <!-- 자체 업데이트: 새 APK 설치 (워치에선 처음 한 번 ADB 로 허용) -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <uses-permission android:name="android.permission.UPDATE_PACKAGES_WITHOUT_USER_ACTION" />
+    <!-- 안내 중 저전력(앰비언트) 화면 유지 -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- '안내 시작' 후 화면이 꺼져도 위치를 받아 진동으로 안내 (위치 포그라운드 서비스) -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- 안내 알림 / 워치페이스의 '진행 중' 아이콘 -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <application
+        android:name=".MapApp"
+        android:allowBackup="true"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.KakaoWatchMap">
+
+        <!-- 앰비언트 모드용 Wear 공유 라이브러리 (없어도 설치는 됨) -->
+        <uses-library
+            android:name="com.google.android.wearable"
+            android:required="false" />
+
+        <!-- 휴대폰 앱 없이 워치 단독으로 동작 -->
+        <meta-data
+            android:name="com.google.android.wearable.standalone"
+            android:value="true" />
+
+        <!-- 모든 화면은 한 작업(task)으로: 워치 '최근 앱'에 한 번만, 알림·진행 중 아이콘을 눌러도 같은 지도로 돌아옴 -->
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:taskAffinity="com.mywatch.kakaomap.main">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <activity
+            android:name=".ui.SearchActivity"
+            android:exported="false"
+            android:taskAffinity="com.mywatch.kakaomap.main" />
+        <activity
+            android:name=".ui.DirectionsActivity"
+            android:exported="false"
+            android:taskAffinity="com.mywatch.kakaomap.main" />
+        <activity
+            android:name=".ui.RouteDetailActivity"
+            android:exported="false"
+            android:taskAffinity="com.mywatch.kakaomap.main" />
+        <activity
+            android:name=".update.UpdateActivity"
+            android:exported="false"
+            android:taskAffinity="com.mywatch.kakaomap.main" />
+
+        <service
+            android:name=".nav.NavigationService"
+            android:exported="false"
+            android:foregroundServiceType="location" />
+
+        <receiver
+            android:name=".update.InstallResultReceiver"
+            android:exported="false" />
+    </application>
+</manifest>

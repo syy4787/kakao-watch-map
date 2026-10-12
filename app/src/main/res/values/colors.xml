@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="ic_launcher_background">#1E2A3A</color>
+    <color name="ic_launcher_pin">#FEE500</color>
+
+    <color name="accent">#2F6FED</color>
+    <color name="accent_light">#7FB0FF</color>
+    <color name="card">#1F2023</color>
+    <color name="chip">#2B2D31</color>
+    <color name="text_primary">#FFFFFF</color>
+    <color name="text_secondary">#B0B3B8</color>
+    <color name="text_dark">#202124</color>
+    <color name="text_dark_secondary">#5F6368</color>
+    <color name="live">#FF8A3D</color>
+</resources>

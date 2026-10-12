@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 카카오맵 길찾기 상단의 이동수단 탭 (자동차 제외) -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:gravity="center"
+    android:orientation="horizontal"
+    android:paddingTop="2dp"
+    android:paddingBottom="6dp">
+
+    <LinearLayout
+        android:id="@+id/tab_transit"
+        style="@style/ModeTab">
+        <ImageView style="@style/ModeTabIcon" android:id="@+id/tab_transit_icon" android:contentDescription="@null" android:src="@drawable/ic_bus" />
+        <TextView style="@style/ModeTabLabel" android:text="@string/mode_transit" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/tab_walk"
+        style="@style/ModeTab">
+        <ImageView style="@style/ModeTabIcon" android:id="@+id/tab_walk_icon" android:contentDescription="@null" android:src="@drawable/ic_walk" />
+        <TextView style="@style/ModeTabLabel" android:text="@string/mode_walk" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/tab_bike"
+        style="@style/ModeTab">
+        <ImageView style="@style/ModeTabIcon" android:id="@+id/tab_bike_icon" android:contentDescription="@null" android:src="@drawable/ic_bike" />
+        <TextView style="@style/ModeTabLabel" android:text="@string/mode_bike" />
+    </LinearLayout>
+</LinearLayout>

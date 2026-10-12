@@ -1,0 +1,139 @@
+package com.mywatch.kakaomap
+
+import com.mywatch.kakaomap.model.KakaoParsers
+import com.mywatch.kakaomap.model.RouteStatusException
+import com.mywatch.kakaomap.model.TagoParsers
+import com.mywatch.kakaomap.model.TransitStepType
+import com.mywatch.kakaomap.model.TravelMode
+import com.mywatch.kakaomap.update.UpdateInfo
+import org.json.JSONObject
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import org.junit.Assert.fail
+import org.junit.Test
+
+/** 카카오·TAGO 응답 파싱 — 공식 문서의 응답 구조를 그대로 본뜬 예시로 검증 */
+class ParsersTest {
+
+    private val walkJson = """
+        {"route":{"properties":{"totalDistance":4025,"totalTime":3914,"landingUrl":"https://map.kakao.com/link/by/walk/x"},
+         "legs":[{"properties":{"distance":4025,"time":3914},"steps":[
+           {"properties":{"distance":93,"guidance":"판교역 1번 출구까지 역사 내 이동","time":84,"x":127.11119783,"y":37.39477573},
+            "path":{"points":[[127.11119783,37.39477573],[127.11119779,37.39474869],[127.1114835,37.39474572]]}},
+           {"properties":{"distance":200,"guidance":"우회전","time":150,"x":127.1114835,"y":37.39474572},
+            "path":{"points":[[127.1114835,37.39474572],[127.1130,37.3950]]}}]}]},
+         "status":"OK"}
+    """.trimIndent()
+
+    @Test
+    fun walkRouteParses() {
+        val r = KakaoParsers.simpleRoute(JSONObject(walkJson), TravelMode.WALK)
+        assertEquals(4025, r.totalDistanceM)
+        assertEquals(3914, r.totalTimeSec)
+        assertEquals(2, r.steps.size)
+        assertEquals("판교역 1번 출구까지 역사 내 이동", r.steps[0].guidance)
+        assertEquals(3, r.steps[0].points.size)
+        // [x, y] = [경도, 위도]
+        assertEquals(37.39477573, r.steps[0].points[0].lat, 1e-9)
+        assertEquals(127.11119783, r.steps[0].points[0].lng, 1e-9)
+    }
+
+    @Test
+    fun routeStatusErrorsBecomeMessages() {
+        try {
+            KakaoParsers.simpleRoute(JSONObject("""{"status":"TOO_FAR_AWAY"}"""), TravelMode.BIKE)
+            fail("예외가 나야 함")
+        } catch (e: RouteStatusException) {
+            assertEquals("TOO_FAR_AWAY", e.status)
+            assertTrue(e.message!!.contains("자전거"))
+        }
+    }
+
+    private val transitJson = """
+        {"status":"OK","properties":{"total":2,"bus":1,"subway":0,"busAndSubway":1,"landingURL":"u"},
+         "routes":[
+          {"properties":{"type":"BUS_AND_SUBWAY","totalDistance":9000,"totalTime":2520,"transfers":1,"fare":{"value":1500,"min":1500,"max":1500}},
+           "steps":[
+            {"properties":{"guidance":"정류장까지 도보","type":"WALKING","distance":300,"time":240,"stops":[],"vehicles":[]},
+             "path":{"points":[[127.1,37.4],[127.101,37.401]]}},
+            {"properties":{"guidance":"마을 76 (판교역동편 > 성남시청전면)","type":"BUS","distance":5000,"time":1200,
+              "stops":[{"name":"판교역동편"},{"name":"중간"},{"name":"성남시청전면"}],"vehicles":[{"type":"마을","name":"76"}]},
+             "path":{"points":[[127.101,37.401],[127.12,37.42]]}},
+            {"properties":{"guidance":"신분당선 (정자 > 판교)","type":"SUBWAY","distance":3500,"time":900,
+              "stops":[{"name":"정자"},{"name":"판교"}],"vehicles":[{"type":"일반","name":"신분당선"}]},
+             "path":{"points":[[127.12,37.42],[127.13,37.43]]}}]},
+          {"properties":{"type":"BUS","totalDistance":8000,"totalTime":1800,"transfers":0},
+           "steps":[{"properties":{"guidance":"g","type":"BUS","distance":8000,"time":1800,"stops":[],"vehicles":[{"type":"간선","name":"102"}]},"path":{"points":[[1,2],[3,4]]}}]}
+         ]}
+    """.trimIndent()
+
+    @Test
+    fun transitRoutesParseAndSortByTime() {
+        val routes = KakaoParsers.transitRoutes(JSONObject(transitJson))
+        assertEquals(2, routes.size)
+        // 더 빠른 경로(30분)가 먼저
+        assertEquals(1800, routes[0].totalTimeSec)
+        assertNull(routes[0].fare)
+        val r = routes[1]
+        assertEquals(1500, r.fare)
+        assertEquals(1, r.transfers)
+        assertEquals(240, r.walkTimeSec)
+        val bus = r.steps[1]
+        assertEquals(TransitStepType.BUS, bus.type)
+        assertEquals("판교역동편", bus.boardingStop)
+        assertEquals("성남시청전면", bus.alightingStop)
+        assertEquals(2, bus.stopCount)
+        assertEquals("76", bus.vehicles[0].name)
+        assertEquals(TransitStepType.SUBWAY, r.steps[2].type)
+        assertEquals(r.steps[1], r.firstRide)
+    }
+
+    @Test
+    fun placesParse() {
+        val json = """{"documents":[{"id":"1","place_name":"대전역","category_name":"교통,수송 > 기차,철도 > 기차역",
+            "address_name":"대전 동구 정동 1-1","road_address_name":"대전 동구 중앙로 215","x":"127.434","y":"36.332","distance":"1234"}],
+            "meta":{"total_count":1}}"""
+        val p = KakaoParsers.places(JSONObject(json)).single()
+        assertEquals("대전역", p.name)
+        assertEquals("기차역", p.category)
+        assertEquals(1234, p.distanceM)
+        assertEquals("대전 동구 중앙로 215", p.displayAddress)
+    }
+
+    @Test
+    fun tagoItemsHandleArrayObjectAndEmpty() {
+        val arr = JSONObject("""{"response":{"header":{"resultCode":"00","resultMsg":"NORMAL SERVICE."},
+            "body":{"items":{"item":[{"routeno":102,"routetp":"간선버스","arrtime":245,"arrprevstationcnt":3},
+                                      {"routeno":"급행1","arrtime":60,"arrprevstationcnt":1}]}}}}""")
+        val a = TagoParsers.arrivals(arr)
+        assertEquals(2, a.size)
+        assertEquals("급행1", a[0].routeNo)        // 더 빨리 오는 버스가 먼저
+        assertEquals("102", a[1].routeNo)          // 숫자로 와도 문자열로
+        assertNull(TagoParsers.errorMessage(arr))
+
+        val single = JSONObject("""{"response":{"header":{"resultCode":"00"},
+            "body":{"items":{"item":{"citycode":25,"gpslati":36.35,"gpslong":127.38,"nodeid":"DJB8001793","nodenm":"송촌동"}}}}}""")
+        val s = TagoParsers.stops(single).single()
+        assertEquals(25, s.cityCode)
+        assertEquals("DJB8001793", s.nodeId)
+
+        val empty = JSONObject("""{"response":{"header":{"resultCode":"00"},"body":{"items":"","totalCount":0}}}""")
+        assertTrue(TagoParsers.arrivals(empty).isEmpty())
+    }
+
+    @Test
+    fun tagoErrorsAreReadable() {
+        val err = JSONObject("""{"OpenAPI_ServiceResponse":{"cmmMsgHeader":{"errMsg":"SERVICE_KEY_IS_NOT_REGISTERED_ERROR",
+            "returnAuthMsg":"등록되지 않은 서비스키","returnReasonCode":"30"}}}""")
+        assertEquals("등록되지 않은 서비스키", TagoParsers.errorMessage(err))
+    }
+
+    @Test
+    fun updateInfoParses() {
+        val info = UpdateInfo.parse("""{"versionCode":105,"versionName":"2.5","apkUrl":"https://x/a.apk","sha256":"ABCDEF","notes":"버그 수정"}""")
+        assertEquals(105L, info.versionCode)
+        assertEquals("abcdef", info.sha256)   // 소문자로 맞춤
+        assertEquals(info, UpdateInfo.parse(info.toJson()))
+    }
+}
