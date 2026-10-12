@@ -56,6 +56,10 @@ data class GuideStep(
     val subway: Boolean = false,
     /** 직선으로 채운 도보 구간 — 실제 걷는 길과 달라서 이탈 판단을 하지 않는다 */
     val approx: Boolean = false,
+    /** 탈 것의 짧은 이름 ("617번", "대전 1호선") — 안내 배너용 */
+    val line: String? = null,
+    /** 타는 정류장·역 */
+    val board: String? = null,
 )
 
 /** 경로 위 현재 진행 상황 */

@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- 안내 배너: 살짝 투명해서 아래 지도가 비친다 -->
 <shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
-    <solid android:color="#F0202124" />
-    <corners android:radius="18dp" />
+    <solid android:color="#D9202124" />
+    <corners android:radius="14dp" />
 </shape>

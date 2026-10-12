@@ -12,4 +12,6 @@
     <color name="text_dark">#202124</color>
     <color name="text_dark_secondary">#5F6368</color>
     <color name="live">#FF8A3D</color>
+    <!-- 안내 종료 버튼 -->
+    <color name="end_red">#E2382F</color>
 </resources>

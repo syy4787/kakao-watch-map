@@ -6,6 +6,7 @@ import com.mywatch.kakaomap.model.Format
 import com.mywatch.kakaomap.model.GuideStep
 import com.mywatch.kakaomap.model.Place
 import com.mywatch.kakaomap.model.SimpleRoute
+import com.mywatch.kakaomap.model.TransitGuide
 import com.mywatch.kakaomap.model.TransitRoute
 import com.mywatch.kakaomap.model.TransitStep
 import com.mywatch.kakaomap.model.TransitStepType
@@ -55,21 +56,7 @@ object RoutePresentation {
     }
 
     /** 구간 막대·칩에 쓰는 짧은 이름: 버스 번호 / 지하철 노선 */
-    fun stepLabel(step: TransitStep): String = when (step.type) {
-        TransitStepType.WALK -> "도보"
-        TransitStepType.BUS -> step.vehicles.joinToString("/") { it.name }.ifBlank { "버스" }
-        TransitStepType.SUBWAY -> step.vehicles.firstOrNull()?.name?.ifBlank { null } ?: "지하철"
-        TransitStepType.OTHER -> "기타"
-    }
-
-    /** 안내 배너용 문구 */
-    fun stepGuide(step: TransitStep): String = when (step.type) {
-        TransitStepType.WALK -> if (step.approx) step.guidance
-        else "도보 ${Format.duration(step.timeSec)} · ${Format.distance(step.distanceM)}"
-        TransitStepType.BUS -> "${stepLabel(step)}번 버스 · ${step.boardingStop ?: ""} → ${step.alightingStop ?: ""}"
-        TransitStepType.SUBWAY -> "${stepLabel(step)} · ${step.boardingStop ?: ""} → ${step.alightingStop ?: ""}"
-        TransitStepType.OTHER -> step.guidance
-    }
+    fun stepLabel(step: TransitStep): String = TransitGuide.label(step)
 
     fun transitSummary(r: TransitRoute): String =
         "${Format.duration(r.totalTimeSec)} · ${Format.clockAfter(r.totalTimeSec)} 도착"
@@ -91,17 +78,7 @@ object RoutePresentation {
                 else -> MapSegment(it.points, stepColor(it), 7f)
             }
         },
-        steps = r.steps.map {
-            val ride = it.type == TransitStepType.BUS || it.type == TransitStepType.SUBWAY
-            GuideStep(
-                text = stepGuide(it),
-                points = it.points,
-                ride = ride,
-                alight = if (ride) it.alightingStop?.ifBlank { null } else null,
-                subway = it.type == TransitStepType.SUBWAY,
-                approx = it.approx,
-            )
-        },
+        steps = TransitGuide.steps(r),
         startNavigation = navigate,
         transit = r,
     )

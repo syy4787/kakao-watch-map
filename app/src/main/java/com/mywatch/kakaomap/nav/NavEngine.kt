@@ -174,19 +174,24 @@ class NavEngine(
     /** 경로를 다시 찾는 동안에는 그 문구를 유지 */
     private fun shown(guide: String) = if (state.rerouting) REROUTING_TEXT else guide
 
+    /** 첫 줄은 짧게 '다음에 할 일', 둘째 줄은 장소 — 지도를 덜 가리도록 */
     private fun guideText(p: RouteProgress): String {
         val cur = steps[p.stepIndex]
+        val dist = Format.distance(p.toStepEndM)
         if (cur.ride) {
-            return buildString {
-                append(cur.text)
-                cur.alight?.let { append("\n").append(it).append("까지 ").append(Format.distance(p.toStepEndM)) }
-            }
+            // 타고 가는 중: "1.2km 후 하차" / "은하수네거리 · 617번"
+            val where = listOfNotNull(cur.alight, cur.line).joinToString(" · ")
+            return if (where.isEmpty()) "$dist 후 하차" else "$dist 후 하차\n$where"
         }
-        val next = steps.getOrNull(p.stepIndex + 1)?.text?.ifBlank { null }
+        val next = steps.getOrNull(p.stepIndex + 1)
+        if (next != null && next.ride && next.line != null) {
+            // 정류장·역으로 걷는 중: "171m 후 617번 승차" / "선비마을입구"
+            return "$dist 후 ${next.line} 승차" + (next.board?.let { "\n$it" } ?: "")
+        }
         // 카카오맵처럼 '다음에 할 일'을 먼저: "120m 후 우회전"
         return buildString {
-            append(Format.distance(p.toStepEndM)).append(" 후 ")
-            append(next ?: "도착")
+            append(dist).append(" 후 ")
+            append(next?.text?.ifBlank { null } ?: "도착")
             if (cur.text.isNotBlank()) append("\n").append(cur.text)
         }
     }

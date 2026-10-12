@@ -20,21 +20,43 @@
             android:layout_width="match_parent"
             android:layout_height="match_parent" />
 
-        <!-- 안내 배너 (현재 구간 안내 + 남은 거리) -->
-        <TextView
+        <!-- 안내 배너: 첫 줄 '다음에 할 일'(굵게) + 둘째 줄 장소(작게). 지도를 덜 가리게 두 줄까지만.
+             톡 → 한 줄로 접기 / 다시 톡 → 펼치기 -->
+        <LinearLayout
             android:id="@+id/guide"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_gravity="top|center_horizontal"
             android:background="@drawable/bg_guide"
-            android:ellipsize="end"
-            android:gravity="center"
-            android:maxLines="3"
-            android:paddingHorizontal="12dp"
-            android:paddingVertical="6dp"
-            android:textColor="@android:color/white"
-            android:textSize="13sp"
-            android:visibility="gone" />
+            android:gravity="center_horizontal"
+            android:orientation="vertical"
+            android:paddingHorizontal="10dp"
+            android:paddingVertical="5dp"
+            android:visibility="gone">
+
+            <TextView
+                android:id="@+id/guide_main"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:includeFontPadding="false"
+                android:maxLines="1"
+                android:textColor="@android:color/white"
+                android:textSize="14sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/guide_sub"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="1dp"
+                android:ellipsize="end"
+                android:includeFontPadding="false"
+                android:maxLines="1"
+                android:textColor="#D9FFFFFF"
+                android:textSize="12sp"
+                android:visibility="gone" />
+        </LinearLayout>
 
         <!-- 새 버전 알림 -->
         <TextView
@@ -50,64 +72,24 @@
             android:textSize="11sp"
             android:visibility="gone" />
 
-        <!-- 경로 요약 카드 (탭 → 상세, ✕ → 안내 종료) -->
-        <LinearLayout
-            android:id="@+id/route_card"
+        <!-- 남은 거리 · 도착 시각 한 줄 (톡 → 경로 상세). 안내 종료는 지도를 톡 하면 나오는 ✕ 버튼 -->
+        <TextView
+            android:id="@+id/route_pill"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_gravity="bottom|center_horizontal"
-            android:background="@drawable/bg_map_card"
-            android:elevation="3dp"
-            android:gravity="center_vertical"
-            android:orientation="horizontal"
-            android:paddingVertical="6dp"
-            android:paddingStart="12dp"
-            android:paddingEnd="4dp"
-            android:visibility="gone">
-
-            <ImageView
-                android:id="@+id/route_icon"
-                android:layout_width="22dp"
-                android:layout_height="22dp"
-                android:importantForAccessibility="no"
-                android:tint="@color/accent" />
-
-            <LinearLayout
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="8dp"
-                android:layout_weight="1"
-                android:orientation="vertical">
-
-                <TextView
-                    android:id="@+id/route_summary"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:ellipsize="end"
-                    android:maxLines="1"
-                    android:textColor="@color/text_dark"
-                    android:textSize="13sp"
-                    android:textStyle="bold" />
-
-                <TextView
-                    android:id="@+id/route_dest"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:ellipsize="end"
-                    android:maxLines="1"
-                    android:textColor="@color/text_dark_secondary"
-                    android:textSize="12sp" />
-            </LinearLayout>
-
-            <ImageButton
-                android:id="@+id/route_close"
-                android:layout_width="40dp"
-                android:layout_height="40dp"
-                android:background="?android:attr/selectableItemBackgroundBorderless"
-                android:contentDescription="@string/end_route"
-                android:src="@drawable/ic_close"
-                android:tint="@color/text_dark_secondary" />
-        </LinearLayout>
+            android:background="@drawable/bg_route_pill"
+            android:elevation="2dp"
+            android:ellipsize="end"
+            android:gravity="center"
+            android:includeFontPadding="false"
+            android:maxLines="1"
+            android:paddingHorizontal="10dp"
+            android:paddingVertical="5dp"
+            android:textColor="@color/text_dark"
+            android:textSize="12sp"
+            android:textStyle="bold"
+            android:visibility="gone" />
 
         <TextView
             android:id="@+id/status_text"
@@ -145,6 +127,14 @@
             style="@style/RingButton"
             android:contentDescription="@string/zoom_out"
             android:src="@drawable/ic_zoom_out" />
+
+        <!-- 안내 종료 (경로가 있을 때 지도를 톡 하면 3시 방향에 잠깐 보임) -->
+        <ImageButton
+            android:id="@+id/btn_end"
+            style="@style/RingButton"
+            android:contentDescription="@string/end_route"
+            android:src="@drawable/ic_close"
+            android:tint="@color/end_red" />
 
         <!-- 저전력(앰비언트) 화면: 손목을 내렸을 때 검은 바탕에 안내만 표시해 배터리를 아낀다.
              elevation 이 높아야 그림자가 있는 흰 카드·버튼보다 위에 그려져 모두 가린다 (번인·전력 방지).

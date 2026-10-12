@@ -21,7 +21,6 @@ import android.view.ViewGroup
 import android.view.WindowManager
 import android.widget.FrameLayout
 import android.widget.ImageButton
-import android.widget.ImageView
 import android.widget.TextView
 import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
@@ -64,7 +63,6 @@ import com.mywatch.kakaomap.location.Locator
 import com.mywatch.kakaomap.location.toFix
 import com.mywatch.kakaomap.model.Coord
 import com.mywatch.kakaomap.model.Format
-import com.mywatch.kakaomap.model.TravelMode
 import com.mywatch.kakaomap.nav.LocPlan
 import com.mywatch.kakaomap.nav.LocPower
 import com.mywatch.kakaomap.nav.LocationPolicy
@@ -73,6 +71,7 @@ import com.mywatch.kakaomap.nav.NavigationService
 import com.mywatch.kakaomap.nav.Navigator
 import com.mywatch.kakaomap.ui.AmbientRouteView
 import com.mywatch.kakaomap.ui.MapBitmaps
+import com.mywatch.kakaomap.ui.NavOverlayText
 import com.mywatch.kakaomap.ui.RouteDetailActivity
 import com.mywatch.kakaomap.ui.SearchActivity
 import com.mywatch.kakaomap.update.UpdateActivity
@@ -91,16 +90,21 @@ class MainActivity : ComponentActivity() {
     private lateinit var swipeRoot: SwipeDismissFrameLayout
     private lateinit var mapView: MapView
     private lateinit var statusText: TextView
-    private lateinit var guideText: TextView
+    private lateinit var guideBox: View
+    private lateinit var guideMain: TextView
+    private lateinit var guideSub: TextView
     private lateinit var updatePill: TextView
-    private lateinit var routeCard: View
+    private lateinit var routePill: TextView
     private lateinit var ambientRoot: View
     private lateinit var ambientMap: AmbientRouteView
     private lateinit var btnSearch: ImageButton
     private lateinit var btnZoomIn: ImageButton
     private lateinit var btnMyLocation: ImageButton
     private lateinit var btnZoomOut: ImageButton
+    private lateinit var btnEnd: ImageButton
     private lateinit var controls: List<View>
+    /** 안내 배너를 한 줄로 접어 둘지 (배너를 톡 해서 바꾸고, 다음에도 그대로) */
+    private var guideCompact = false
 
     private var kakaoMap: KakaoMap? = null
     private var mapStarted = false
@@ -176,16 +180,20 @@ class MainActivity : ComponentActivity() {
         swipeRoot = findViewById(R.id.swipe_root)
         mapView = findViewById(R.id.map_view)
         statusText = findViewById(R.id.status_text)
-        guideText = findViewById(R.id.guide)
+        guideBox = findViewById(R.id.guide)
+        guideMain = findViewById(R.id.guide_main)
+        guideSub = findViewById(R.id.guide_sub)
         updatePill = findViewById(R.id.update_pill)
-        routeCard = findViewById(R.id.route_card)
+        routePill = findViewById(R.id.route_pill)
         ambientRoot = findViewById(R.id.ambient_root)
         ambientMap = findViewById(R.id.ambient_map)
         btnSearch = findViewById(R.id.btn_search)
         btnZoomIn = findViewById(R.id.btn_zoom_in)
         btnMyLocation = findViewById(R.id.btn_my_location)
         btnZoomOut = findViewById(R.id.btn_zoom_out)
-        controls = listOf(btnSearch, btnZoomIn, btnMyLocation, btnZoomOut)
+        btnEnd = findViewById(R.id.btn_end)
+        controls = listOf(btnSearch, btnZoomIn, btnMyLocation, btnZoomOut, btnEnd)
+        guideCompact = getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_GUIDE_COMPACT, false)
 
         headingSensor = HeadingSensor(this) { deg -> runOnUiThread { onHeading(deg) } }
         // 손목을 내리면 꺼지는 대신 저전력 화면으로 (길 안내를 계속 볼 수 있게)
@@ -205,11 +213,19 @@ class MainActivity : ComponentActivity() {
         btnZoomIn.setOnClickListener { zoomBy(+1); bumpControls() }
         btnZoomOut.setOnClickListener { zoomBy(-1); bumpControls() }
         btnMyLocation.setOnClickListener { onMyLocationButton(); bumpControls() }
+        btnEnd.setOnClickListener { endRoute() }
         controls.forEach { it.isClickable = false }   // 숨겨진 상태로 시작
 
         updatePill.setOnClickListener { startActivity(Intent(this, UpdateActivity::class.java)) }
-        routeCard.setOnClickListener { openRouteDetail() }
-        findViewById<View>(R.id.route_close).setOnClickListener { endRoute() }
+        routePill.setOnClickListener { openRouteDetail() }
+        guideBox.setOnClickListener { toggleGuideCompact() }
+        // 글자가 바뀌어 폭이 달라지면 원 가장자리 쪽으로 다시 붙인다 (레이아웃 중에 바꾸지 않도록 한 박자 뒤에)
+        guideBox.addOnLayoutChangeListener { v, l, _, r, _, ol, _, or, _ ->
+            if (r - l != or - ol) v.post { fitToCircle(v, atTop = true) }
+        }
+        routePill.addOnLayoutChangeListener { v, l, _, r, _, ol, _, or, _ ->
+            if (r - l != or - ol) v.post { fitToCircle(v, atTop = false) }
+        }
 
         statusText.setOnClickListener { if (mapFailed) recreate() }
         statusText.isClickable = false
@@ -357,8 +373,8 @@ class MainActivity : ComponentActivity() {
             it.visibility = View.INVISIBLE
         }
         controlsShown = false
-        guideText.visibility = View.GONE
-        routeCard.visibility = View.GONE
+        guideBox.visibility = View.GONE
+        routePill.visibility = View.GONE
         showStatus(describeMapError(error), isError = true)
     }
 
@@ -401,35 +417,54 @@ class MainActivity : ComponentActivity() {
         val size = resources.getDimensionPixelSize(R.dimen.ring_button_size)
         val routeActive = RouteRepository.activeRoute != null
 
-        // 버튼: 평소 — 11시 길찾기, 5·6·7시 확대·내 위치·축소 / 경로 표시 중 — 11시 길찾기, 1시 내 위치
+        // 버튼: 평소 — 11시 길찾기, 5·6·7시 확대·내 위치·축소
+        //       경로 표시 중 — 11시 길찾기, 1시 내 위치, 3시 안내 종료
         val step = RoundScreen.ringAngleStep(w, h, size, inset, minGap = 8 * resources.displayMetrics.density)
         placeOnRing(btnSearch, inset, 330f)
         if (routeActive) {
             placeOnRing(btnMyLocation, inset, 30f)
+            placeOnRing(btnEnd, inset, 90f)
         } else {
             placeOnRing(btnZoomIn, inset, 180f - step)
             placeOnRing(btnMyLocation, inset, 180f)
             placeOnRing(btnZoomOut, inset, 180f + step)
         }
 
-        // 경로 카드: 폭 62%, 아래 모서리가 원 안에 들어오는 위치
-        val cardW = (w * 0.62f).toInt()
-        (routeCard.layoutParams as FrameLayout.LayoutParams).apply {
-            width = cardW
-            bottomMargin = (h - RoundScreen.bottomForWidth(w, h, cardW, inset * 2)).toInt()
-            routeCard.layoutParams = this
-        }
-        // 안내 배너: 로고 아래, 폭 66%
-        val guideW = (w * 0.66f).toInt()
-        guideText.maxWidth = guideW
-        (guideText.layoutParams as FrameLayout.LayoutParams).apply {
-            topMargin = maxOf((h * 0.15f).toInt(), RoundScreen.topForWidth(w, h, guideW, inset * 2).toInt())
-            guideText.layoutParams = this
-        }
+        // 아래 한 줄 알약 (최대 폭 60%), 안내 배너 (최대 폭 70%) — 실제 위치는 글자 폭에 맞춰 fitToCircle 이 정한다
+        routePill.maxWidth = (w * 0.60f).toInt()
+        val textW = (w * 0.70f).toInt() - guideBox.paddingLeft - guideBox.paddingRight
+        guideMain.maxWidth = textW
+        guideSub.maxWidth = textW
+        fitToCircle(guideBox, atTop = true)
+        fitToCircle(routePill, atTop = false)
         (updatePill.layoutParams as FrameLayout.LayoutParams).apply {
             topMargin = (h * 0.16f).toInt()
             updatePill.layoutParams = this
         }
+    }
+
+    /**
+     * 글자 길이만큼만 넓은 배너·알약을 원 안쪽 끝(위·아래)에 붙인다 — 좁을수록 가장자리로 가서 지도가 더 보인다.
+     * 남은 거리 숫자가 바뀔 때마다 들썩이지 않도록 폭은 16dp 계단으로 본다. 배너는 카카오 로고(위 9%) 아래.
+     */
+    private fun fitToCircle(view: View, atTop: Boolean) {
+        val w = swipeRoot.width
+        val h = swipeRoot.height
+        if (w == 0 || h == 0 || view.width == 0) return
+        val inset = resources.getDimension(R.dimen.ring_edge_inset)
+        val stepPx = (16 * resources.displayMetrics.density).toInt().coerceAtLeast(1)
+        val width = (view.width + stepPx - 1) / stepPx * stepPx
+        val lp = view.layoutParams as FrameLayout.LayoutParams
+        if (atTop) {
+            val top = maxOf((h * 0.15f).toInt(), RoundScreen.topForWidth(w, h, width, inset * 2).toInt())
+            if (lp.topMargin == top) return
+            lp.topMargin = top
+        } else {
+            val bottom = (h - RoundScreen.bottomForWidth(w, h, width, inset * 2)).toInt()
+            if (lp.bottomMargin == bottom) return
+            lp.bottomMargin = bottom
+        }
+        view.layoutParams = lp
     }
 
     private fun placeOnRing(view: View, inset: Float, angleDeg: Float) {
@@ -451,8 +486,8 @@ class MainActivity : ComponentActivity() {
         layoutOverlays()
         Navigator.sync()
         if (active == null) {
-            routeCard.visibility = View.GONE
-            guideText.visibility = View.GONE
+            routePill.visibility = View.GONE
+            guideBox.visibility = View.GONE
             setControlsVisible(controlsShown)
             NavigationService.stop(this)
             return
@@ -470,18 +505,11 @@ class MainActivity : ComponentActivity() {
         addBubble(active.origin, "출발", ContextCompat.getColor(this, R.color.accent))
         addBubble(active.destination, "도착", android.graphics.Color.parseColor("#E2382F"))
 
-        findViewById<ImageView>(R.id.route_icon).setImageResource(
-            when (active.mode) {
-                TravelMode.TRANSIT -> R.drawable.ic_bus
-                TravelMode.WALK -> R.drawable.ic_walk
-                TravelMode.BIKE -> R.drawable.ic_bike
-            }
-        )
-        findViewById<TextView>(R.id.route_summary).text = active.summary
-        findViewById<TextView>(R.id.route_dest).text = "→ ${active.destinationName}"
-        routeCard.visibility = View.VISIBLE
+        routePill.text = active.summary
+        routePill.visibility = View.VISIBLE
         btnZoomIn.visibility = View.INVISIBLE
         btnZoomOut.visibility = View.INVISIBLE
+        setControlsVisible(controlsShown)    // 경로가 생기면 버튼 구성이 바뀜 (✕ 추가)
 
         if (active.startNavigation && Locator.hasPermission(this)) {
             // 나침반 모드로 보고 있었다면(재탐색 등) 그대로 유지
@@ -510,16 +538,35 @@ class MainActivity : ComponentActivity() {
         }
         val active = RouteRepository.activeRoute
         if (active == null || s.routeVersion != RouteRepository.activeRouteVersion) {
-            if (active == null) guideText.visibility = View.GONE
+            if (active == null) guideBox.visibility = View.GONE
             return
         }
         val guide = s.guide ?: active.steps.firstOrNull()?.text
-        guideText.text = guide.orEmpty()
-        guideText.visibility = if (guide.isNullOrBlank() || mapFailed) View.GONE else View.VISIBLE
-        findViewById<TextView>(R.id.route_dest).text = s.remainingM?.takeIf { !s.arrived }
-            ?.let { "남은 거리 ${Format.distance(it)} · → ${active.destinationName}" }
-            ?: "→ ${active.destinationName}"
+        val (main, sub) = NavOverlayText.bannerLines(guide.orEmpty())
+        guideMain.text = main
+        guideSub.text = sub.orEmpty()
+        guideSub.visibility = if (sub == null || guideCompact) View.GONE else View.VISIBLE
+        guideBox.visibility = if (main.isEmpty() || mapFailed) View.GONE else View.VISIBLE
+        routePill.text = NavOverlayText.pill(
+            mode = active.mode,
+            remainingM = s.remainingM,
+            arrived = s.arrived,
+            totalDistanceM = active.totalDistanceM,
+            totalTimeSec = active.totalTimeSec,
+            startedAtMs = active.startedAtMs,
+            nowMs = System.currentTimeMillis(),
+            summary = active.summary,
+            destinationName = active.destinationName,
+        )
         if (inAmbient) renderAmbient()
+    }
+
+    /** 배너 톡 → 한 줄로 접기 / 펼치기 (다음에 열어도 그대로) */
+    private fun toggleGuideCompact() {
+        guideCompact = !guideCompact
+        getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit { putBoolean(KEY_GUIDE_COMPACT, guideCompact) }
+        guideBox.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+        renderNav(Navigator.state.value)
     }
 
     private fun maybeAskNotificationPermission() {
@@ -784,7 +831,8 @@ class MainActivity : ComponentActivity() {
     // ───────────────────────── 버튼·안내 문구 ─────────────────────────
 
     private fun visibleControls(): List<View> =
-        if (RouteRepository.activeRoute != null) listOf(btnSearch, btnMyLocation) else controls
+        if (RouteRepository.activeRoute != null) listOf(btnSearch, btnMyLocation, btnEnd)
+        else listOf(btnSearch, btnZoomIn, btnMyLocation, btnZoomOut)
 
     private fun setControlsVisible(visible: Boolean) {
         controlsShown = visible
@@ -892,6 +940,7 @@ class MainActivity : ComponentActivity() {
         private const val PREFS = "main"
         private const val KEY_ASKED = "asked_location"
         private const val KEY_ASKED_NOTIFICATIONS = "asked_notifications"
+        private const val KEY_GUIDE_COMPACT = "guide_compact"
 
         /** 카카오 로고를 위에서 얼마나 내릴지 (화면 높이 대비) */
         private const val LOGO_TOP_RATIO = 0.09f

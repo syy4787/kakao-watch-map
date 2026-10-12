@@ -32,9 +32,13 @@ data class ActiveRoute(
     val startNavigation: Boolean,
     val transit: TransitRoute? = null,
     val simple: SimpleRoute? = null,
+    /** 이 경로를 받은 시각 — 대중교통 도착 예정 시각 계산용 */
+    val startedAtMs: Long = System.currentTimeMillis(),
 ) {
     val destinationName: String get() = place.name
     val destination: Coord get() = place.coord
+    val totalDistanceM: Int get() = transit?.totalDistanceM ?: simple?.totalDistanceM ?: 0
+    val totalTimeSec: Int get() = transit?.totalTimeSec ?: simple?.totalTimeSec ?: 0
 }
 
 /**

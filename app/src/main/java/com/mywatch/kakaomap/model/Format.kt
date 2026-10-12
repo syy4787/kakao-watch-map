@@ -37,6 +37,12 @@ object Format {
         return String.format(Locale.KOREA, "%s %d:%02d", ampm, hour12, c.get(Calendar.MINUTE))
     }
 
+    /** 지금부터 seconds 뒤의 시각 → "14:05" (지도 위 작은 알약처럼 좁은 곳용) */
+    fun clock24After(seconds: Int, nowMillis: Long = System.currentTimeMillis()): String {
+        val c = Calendar.getInstance(Locale.KOREA).apply { timeInMillis = nowMillis + seconds * 1000L }
+        return String.format(Locale.KOREA, "%02d:%02d", c.get(Calendar.HOUR_OF_DAY), c.get(Calendar.MINUTE))
+    }
+
     /** 1,500원 */
     fun fare(won: Int): String = NumberFormat.getNumberInstance(Locale.KOREA).format(won) + "원"
 
