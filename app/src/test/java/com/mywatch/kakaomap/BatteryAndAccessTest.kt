@@ -30,24 +30,34 @@ class BatteryAndAccessTest {
 
     @Test
     fun locationIntervalFollowsTheSituation() {
-        // 갈림길 바로 앞·이탈·출발 직후는 1초
-        assertEquals(1_000L, LocationPolicy.navigation(nav(toNext = 120), false, 1.3f, 0).intervalMs)
+        // 할 일(회전·횡단보도) 바로 앞·이탈·출발 직후는 1초
+        assertEquals(1_000L, LocationPolicy.navigation(nav(toNext = 50), false, 1.3f, 0).intervalMs)
         assertEquals(1_000L, LocationPolicy.navigation(nav(off = true), false, 1.3f, 0).intervalMs)
         assertEquals(1_000L, LocationPolicy.navigation(nav(matched = false), false, 1.3f, 0).intervalMs)
-        // 갈림길 접근 2초, 긴 직진 4초 + 모아 받기
-        assertEquals(2_000L, LocationPolicy.navigation(nav(toNext = 300), false, 1.3f, 0).intervalMs)
+        // 실내 출발 등으로 1분 넘게 경로에 못 오르면 1초를 계속 쓰지 않는다
+        assertEquals(3_000L, LocationPolicy.navigation(nav(matched = false), false, 1.3f, 0, sinceStartMs = 120_000).intervalMs)
+        // 할 일 접근 2초, 긴 직진 4초 + 모아 받기
+        assertEquals(2_000L, LocationPolicy.navigation(nav(toNext = 200), false, 1.3f, 0).intervalMs)
         val straight = LocationPolicy.navigation(nav(toNext = 900), false, 1.3f, 0)
         assertEquals(4_000L, straight.intervalMs)
         assertTrue(straight.maxDelayMs > straight.intervalMs)
-        // 신호 대기 등 멈춤 5초 (갈림길 바로 앞이면 멈춰도 1초)
+        // 신호 대기·정류장 대기 등 멈춤은 갈림길 바로 앞이어도 5초 (움직이면 바로 다시 촘촘히)
         assertEquals(5_000L, LocationPolicy.navigation(nav(toNext = 900), false, 0f, 0).intervalMs)
-        assertEquals(1_000L, LocationPolicy.navigation(nav(toNext = 100), false, 0f, 0).intervalMs)
-        // 버스: 내릴 곳이 멀면 10초, 가까우면 3초
-        assertEquals(10_000L, LocationPolicy.navigation(nav(toNext = 3_000, ride = true), false, 8f, 0).intervalMs)
+        assertEquals(5_000L, LocationPolicy.navigation(nav(toNext = 20), false, 0f, 0).intervalMs)
+        // 버스: 내릴 곳이 아주 멀면 15초, 멀면 10초, 가까우면 3초
+        assertEquals(15_000L, LocationPolicy.navigation(nav(toNext = 5_000, ride = true), false, 8f, 0).intervalMs)
+        assertEquals(10_000L, LocationPolicy.navigation(nav(toNext = 2_000, ride = true), false, 8f, 0).intervalMs)
         assertEquals(3_000L, LocationPolicy.navigation(nav(toNext = 900, ride = true), false, 8f, 0).intervalMs)
+        // 지하철(지하)은 GPS 대신 기지국·Wi-Fi 위치
+        assertEquals(LocPower.BALANCED, LocationPolicy.navigation(nav(toNext = 3_000, ride = true).copy(onSubway = true), false, 10f, 0).power)
         // 자전거는 더 촘촘히
         assertEquals(2_000L, LocationPolicy.navigation(nav(toNext = 900), true, 5f, 0).intervalMs)
         assertEquals(1_000L, LocationPolicy.navigation(nav(toNext = 250), true, 5f, 0).intervalMs)
+        // 다음 할 일까지 거리(직진 구간 합침)가 있으면 그것을 기준으로
+        assertEquals(4_000L, LocationPolicy.navigation(nav(toNext = 50).copy(toActionM = 900), false, 1.3f, 0).intervalMs)
+        // 배터리 15% 이하: 간격을 넓힌다 (회전 앞도 2초)
+        assertEquals(2_000L, LocationPolicy.navigation(nav(toNext = 50), false, 1.3f, 0, lowBattery = true).intervalMs)
+        assertEquals(8_000L, LocationPolicy.navigation(nav(toNext = 900), false, 1.3f, 0, lowBattery = true).intervalMs)
     }
 
     @Test
@@ -76,15 +86,15 @@ class BatteryAndAccessTest {
     }
 
     // 실제 카카오 응답처럼: 단계에는 버스만 있고, 정류장까지·도착지까지 도보는 총합에만 들어 있음
-    private val origin = Coord(36.36433799, 127.44688087)
-    private val dest = Coord(36.33229415, 127.43464451)
+    private val origin = Coord(36.33433799, 127.39688087)
+    private val dest = Coord(36.30229415, 127.38464451)
     private val busOnly = TransitRoute(
         type = "BUS", totalDistanceM = 7331, totalTimeSec = 2353, transfers = 0, fare = 1500,
         steps = listOf(
             TransitStep(
-                type = TransitStepType.BUS, guidance = "일반 314 (선비마을4단지 > 대전역)", distanceM = 6597, timeSec = 1630,
-                stops = listOf("선비마을4단지", "송촌119안전센터", "대전역"), vehicles = listOf(Vehicle("일반", "314")),
-                points = listOf(Coord(36.3634, 127.4441), Coord(36.3450, 127.4400), Coord(36.3341, 127.4334)),
+                type = TransitStepType.BUS, guidance = "일반 314 (목련아파트 > 대전역)", distanceM = 6597, timeSec = 1630,
+                stops = listOf("목련아파트", "청솔아파트", "대전역"), vehicles = listOf(Vehicle("일반", "314")),
+                points = listOf(Coord(36.33340000, 127.39410000), Coord(36.31500000, 127.39000000), Coord(36.30410000, 127.38340000)),
             ),
         ),
     )
@@ -97,23 +107,23 @@ class BatteryAndAccessTest {
         val tail = r.steps.last()
         assertTrue(lead.approx && tail.approx)
         assertEquals(TransitStepType.WALK, lead.type)
-        assertEquals("선비마을4단지까지 도보", lead.guidance)
+        assertEquals("목련아파트까지 도보", lead.guidance)
         assertEquals("대전역까지 도보", tail.guidance)
         // 빠진 몫(723초·734m)을 둘이 나눠 가져서 단계 합 = 총합
         assertTrue(kotlin.math.abs(busOnly.totalTimeSec - r.steps.sumOf { it.timeSec }) <= 2)
         assertTrue(kotlin.math.abs(busOnly.totalDistanceM - r.steps.sumOf { it.distanceM }) <= 2)
         assertEquals(lead.timeSec + tail.timeSec, r.walkTimeSec)
         // 첫 버스·내릴 곳 정보는 그대로
-        assertEquals("선비마을4단지", r.firstRide?.boardingStop)
+        assertEquals("목련아파트", r.firstRide?.boardingStop)
     }
 
     @Test
     fun routesThatAlreadyHaveWalksAreLeftAlone() {
         val withWalk = busOnly.copy(
             steps = listOf(
-                TransitStep(TransitStepType.WALK, "정류장까지", 300, 240, emptyList(), emptyList(), listOf(origin, Coord(36.3634, 127.4441))),
+                TransitStep(TransitStepType.WALK, "정류장까지", 300, 240, emptyList(), emptyList(), listOf(origin, Coord(36.33340000, 127.39410000))),
             ) + busOnly.steps + listOf(
-                TransitStep(TransitStepType.WALK, "도착지까지", 300, 240, emptyList(), emptyList(), listOf(Coord(36.3341, 127.4334), dest)),
+                TransitStep(TransitStepType.WALK, "도착지까지", 300, 240, emptyList(), emptyList(), listOf(Coord(36.30410000, 127.38340000), dest)),
             ),
         )
         assertSame(withWalk, TransitAccess.withAccessWalks(withWalk, origin, dest, "대전역"))
@@ -125,7 +135,7 @@ class BatteryAndAccessTest {
         val r = TransitAccess.withAccessWalks(busOnly, origin, dest, "대전역")
         val steps = r.steps.map { GuideStep(it.guidance, it.points, ride = it.type == TransitStepType.BUS, alight = it.alightingStop, approx = it.approx) }
         val e = NavEngine(steps, dest, 1)
-        val beside = Coord(36.3648, 127.4458)    // 직선에서 100m 쯤 옆 골목
+        val beside = Coord(36.33480000, 127.39580000)    // 직선에서 100m 쯤 옆 골목
         repeat(4) { assertFalse(NavEvent.OFF_ROUTE in e.update(beside, 8f)) }
         assertFalse(e.state.offRoute)
         assertEquals(0, e.state.stepIndex)

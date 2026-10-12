@@ -40,6 +40,11 @@ object Locator {
             ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) ==
             PackageManager.PERMISSION_GRANTED
 
+    /** '정확한 위치' 권한 — 길안내(갈림길·정류장 판단)에 필요. '대략적 위치'만 있으면 경로 보기만 된다 */
+    fun hasPrecise(context: Context): Boolean =
+        ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) ==
+            PackageManager.PERMISSION_GRANTED
+
     /** 위치가 몇 분 전 것인지 (화면에 'n분 전 위치'로 알릴 때) */
     fun ageMinutes(fix: Fix): Long = (SystemClock.elapsedRealtime() - fix.elapsedMs) / 60_000L
 

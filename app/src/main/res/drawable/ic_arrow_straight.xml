@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 직진 화살표 (비스듬히 돌려 '왼쪽·오른쪽 길로'에도 씀) -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">
+    <path android:fillColor="@android:color/white"  android:pathData="M12,3 L18.5,9.5 L14,9.5 L14,21 L10,21 L10,9.5 L5.5,9.5 Z" />
+</vector>

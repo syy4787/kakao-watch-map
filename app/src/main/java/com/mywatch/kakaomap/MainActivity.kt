@@ -21,6 +21,7 @@ import android.view.ViewGroup
 import android.view.WindowManager
 import android.widget.FrameLayout
 import android.widget.ImageButton
+import android.widget.ImageView
 import android.widget.TextView
 import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
@@ -62,10 +63,13 @@ import com.mywatch.kakaomap.location.HeadingSensor
 import com.mywatch.kakaomap.location.Locator
 import com.mywatch.kakaomap.location.toFix
 import com.mywatch.kakaomap.model.Coord
+import com.mywatch.kakaomap.model.Action
 import com.mywatch.kakaomap.model.Format
+import com.mywatch.kakaomap.model.TravelMode
 import com.mywatch.kakaomap.nav.LocPlan
 import com.mywatch.kakaomap.nav.LocPower
 import com.mywatch.kakaomap.nav.LocationPolicy
+import com.mywatch.kakaomap.nav.NavIcon
 import com.mywatch.kakaomap.nav.NavState
 import com.mywatch.kakaomap.nav.NavigationService
 import com.mywatch.kakaomap.nav.Navigator
@@ -91,6 +95,8 @@ class MainActivity : ComponentActivity() {
     private lateinit var mapView: MapView
     private lateinit var statusText: TextView
     private lateinit var guideBox: View
+    private lateinit var guideIcon: ImageView
+    private lateinit var guideDist: TextView
     private lateinit var guideMain: TextView
     private lateinit var guideSub: TextView
     private lateinit var updatePill: TextView
@@ -105,6 +111,18 @@ class MainActivity : ComponentActivity() {
     private lateinit var controls: List<View>
     /** 안내 배너를 한 줄로 접어 둘지 (배너를 톡 해서 바꾸고, 다음에도 그대로) */
     private var guideCompact = false
+    /** 배너 전체 최대 폭(px) — 오른쪽 글자 칸은 여기서 여백·왼쪽 칸을 뺀 만큼, 넘치면 글자를 조금 줄인다 */
+    private var guideMaxPx = 0
+    /** 안내 중 지도를 손으로 움직여 '내 위치 따라가기'가 풀렸는지 (8초 뒤 다시 따라감) */
+    private var followLostByTouch = false
+    private var modeBeforeTouch = LocMode.FOLLOW
+    private val refollowRunnable = Runnable {
+        val active = RouteRepository.activeRoute
+        if (followLostByTouch && locMode == LocMode.NONE && active != null && active.startNavigation && !inAmbient) {
+            followLostByTouch = false
+            setLocMode(modeBeforeTouch)
+        }
+    }
 
     private var kakaoMap: KakaoMap? = null
     private var mapStarted = false
@@ -157,6 +175,12 @@ class MainActivity : ComponentActivity() {
     ) { result ->
         if (result.values.any { it }) {
             setLocMode(LocMode.FOLLOW)
+            // '안내 시작'을 정확한 위치 권한 때문에 미뤄 뒀다면 이제 시작 (알림 권한 요청도 그 뒤에 — 한 번에 하나만 뜰 수 있음)
+            val active = RouteRepository.activeRoute
+            if (active != null && active.startNavigation && Locator.hasPrecise(this)) {
+                maybeAskNotificationPermission()
+                NavigationService.start(this)
+            }
         } else {
             showStatus(getString(R.string.location_permission_denied), autoHideMs = 2500)
         }
@@ -181,6 +205,8 @@ class MainActivity : ComponentActivity() {
         mapView = findViewById(R.id.map_view)
         statusText = findViewById(R.id.status_text)
         guideBox = findViewById(R.id.guide)
+        guideIcon = findViewById(R.id.guide_icon)
+        guideDist = findViewById(R.id.guide_dist)
         guideMain = findViewById(R.id.guide_main)
         guideSub = findViewById(R.id.guide_sub)
         updatePill = findViewById(R.id.update_pill)
@@ -277,6 +303,12 @@ class MainActivity : ComponentActivity() {
         override fun onExitAmbient() {
             inAmbient = false
             ambientRoot.visibility = View.GONE
+            renderNav(Navigator.state.value)       // 저전력 화면 동안 건너뛴 배너·알약을 바로 맞춘다
+            // 지도를 움직여 둔 채 손목을 내렸다 올리면 바로 다시 내 위치를 따라간다
+            if (followLostByTouch) {
+                mainHandler.removeCallbacks(refollowRunnable)
+                refollowRunnable.run()
+            }
             if (mapStarted && !mapFailed && mapView.isPaused) mapView.resume()
             refreshLocationPlan()
             // 손목을 내린 동안 모아 둔 위치를 바로 받아 지도를 따라잡는다
@@ -418,23 +450,23 @@ class MainActivity : ComponentActivity() {
         val routeActive = RouteRepository.activeRoute != null
 
         // 버튼: 평소 — 11시 길찾기, 5·6·7시 확대·내 위치·축소
-        //       경로 표시 중 — 11시 길찾기, 1시 내 위치, 3시 안내 종료
+        //       경로 표시 중 — 위 안내 배너·아래 알약을 가리지 않게 3시 안내 종료, 9시 내 위치 (카카오맵 길안내처럼 검색 없음)
+        //       ✕ 를 왼쪽 가장자리(쓸어서 닫기 영역)에 두지 않아 누르다 미끄러져도 안내가 꺼지거나 앱이 닫히지 않게
         val step = RoundScreen.ringAngleStep(w, h, size, inset, minGap = 8 * resources.displayMetrics.density)
-        placeOnRing(btnSearch, inset, 330f)
         if (routeActive) {
-            placeOnRing(btnMyLocation, inset, 30f)
             placeOnRing(btnEnd, inset, 90f)
+            placeOnRing(btnMyLocation, inset, 270f)
         } else {
+            placeOnRing(btnSearch, inset, 330f)
             placeOnRing(btnZoomIn, inset, 180f - step)
             placeOnRing(btnMyLocation, inset, 180f)
             placeOnRing(btnZoomOut, inset, 180f + step)
         }
 
-        // 아래 한 줄 알약 (최대 폭 60%), 안내 배너 (최대 폭 70%) — 실제 위치는 글자 폭에 맞춰 fitToCircle 이 정한다
+        // 아래 한 줄 알약 (최대 폭 60%), 안내 배너 (최대 폭 62% — 이보다 좁아야 로고 바로 아래 높이에 들어간다).
+        // 실제 위치는 글자 폭에 맞춰 fitToCircle 이 정한다
         routePill.maxWidth = (w * 0.60f).toInt()
-        val textW = (w * 0.70f).toInt() - guideBox.paddingLeft - guideBox.paddingRight
-        guideMain.maxWidth = textW
-        guideSub.maxWidth = textW
+        guideMaxPx = (w * 0.62f).toInt()
         fitToCircle(guideBox, atTop = true)
         fitToCircle(routePill, atTop = false)
         (updatePill.layoutParams as FrameLayout.LayoutParams).apply {
@@ -511,12 +543,20 @@ class MainActivity : ComponentActivity() {
         btnZoomOut.visibility = View.INVISIBLE
         setControlsVisible(controlsShown)    // 경로가 생기면 버튼 구성이 바뀜 (✕ 추가)
 
+        val needPrecise = active.startNavigation && Locator.hasPermission(this) && !Locator.hasPrecise(this)
+        if (needPrecise) {
+            // '대략적 위치'만으로는 갈림길·정류장을 가릴 수 없어 안내가 시작되지 않는다 → 정확한 위치를 다시 요청
+            showStatus(getString(R.string.precise_location_needed), autoHideMs = 4_000)
+            permissionRequest.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
+        }
         if (active.startNavigation && Locator.hasPermission(this)) {
             // 나침반 모드로 보고 있었다면(재탐색 등) 그대로 유지
             setLocMode(if (locMode == LocMode.COMPASS) LocMode.COMPASS else LocMode.FOLLOW)
             // 화면이 꺼져도 따라가며 진동으로 안내 (워치페이스에 진행 중 아이콘)
-            maybeAskNotificationPermission()
-            NavigationService.start(this)
+            if (!needPrecise) {
+                maybeAskNotificationPermission()
+                NavigationService.start(this)
+            }
         } else {
             setLocMode(LocMode.NONE)
             fitRoute(active)
@@ -528,7 +568,7 @@ class MainActivity : ComponentActivity() {
         renderNav(Navigator.state.value)
     }
 
-    /** 안내 상태를 배너·카드·저전력 화면에 그린다 */
+    /** 안내 상태를 배너·알약·저전력 화면에 그린다 */
     private fun renderNav(s: NavState) {
         if (isFinishing || isDestroyed) return
         // 재탐색 등으로 경로가 바뀌었으면 지도부터 다시 그린다
@@ -541,11 +581,30 @@ class MainActivity : ComponentActivity() {
             if (active == null) guideBox.visibility = View.GONE
             return
         }
+        // 저전력 화면에선 가려진 배너·알약을 고치지 않는다 (위치마다 다시 그리면 배터리 낭비) — 돌아올 때 한 번에
+        if (inAmbient) {
+            renderAmbient()
+            return
+        }
         val guide = s.guide ?: active.steps.firstOrNull()?.text
-        val (main, sub) = NavOverlayText.bannerLines(guide.orEmpty())
-        guideMain.text = main
-        guideSub.text = sub.orEmpty()
-        guideSub.visibility = if (sub == null || guideCompact) View.GONE else View.VISIBLE
+        val fallback = NavOverlayText.bannerLines(guide.orEmpty())
+        val main = s.bannerTitle ?: fallback.first
+        val rawSub = if (s.bannerTitle != null) s.bannerSub else fallback.second
+        // GPS 신호가 끊기면(지하·실내) 둘째 줄로 알린다 — 접어 둔 상태여도
+        val sub = if (s.signalLost && !s.arrived) getString(R.string.gps_weak) else rawSub
+        // 왼쪽 칸: 아이콘 + 그 아래 거리
+        val dist = s.bannerDistM?.let { Format.distance(it) }
+        guideDist.text = dist.orEmpty()
+        guideDist.visibility = if (dist == null) View.GONE else View.VISIBLE
+        val dp = resources.displayMetrics.density
+        val leftW = maxOf(22 * dp, if (dist == null) 0f else guideDist.paint.measureText(dist))
+        val textMax = (guideMaxPx - guideBox.paddingLeft - guideBox.paddingRight - leftW - 6 * dp).toInt()
+        guideMain.maxWidth = textMax
+        guideSub.maxWidth = textMax
+        fitText(guideMain, main, textMax, maxSp = 14f, minSp = 11f)
+        fitText(guideSub, sub.orEmpty(), textMax, maxSp = 12f, minSp = 10.5f)
+        guideSub.visibility = if (sub == null || (guideCompact && !s.signalLost)) View.GONE else View.VISIBLE
+        applyGuideIcon(s, active)
         guideBox.visibility = if (main.isEmpty() || mapFailed) View.GONE else View.VISIBLE
         routePill.text = NavOverlayText.pill(
             mode = active.mode,
@@ -558,7 +617,49 @@ class MainActivity : ComponentActivity() {
             summary = active.summary,
             destinationName = active.destinationName,
         )
-        if (inAmbient) renderAmbient()
+    }
+
+    /** 글자가 한 줄 폭을 넘으면 최대 minSp 까지 조금씩 줄여서 끝이 잘리지 않게 (그래도 넘치면 … 처리) */
+    private fun fitText(tv: TextView, text: String, maxPx: Int, maxSp: Float, minSp: Float) {
+        var sp = maxSp
+        if (maxPx > 0 && text.isNotEmpty()) {
+            val paint = android.text.TextPaint(tv.paint)
+            while (sp > minSp) {
+                paint.textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, sp, resources.displayMetrics)
+                if (paint.measureText(text) <= maxPx) break
+                sp -= 0.5f
+            }
+        }
+        tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, sp)
+        tv.text = text
+    }
+
+    /** 배너 앞 아이콘: 회전 화살표·횡단보도·버스·지하철·도착 깃발·경고 */
+    private fun applyGuideIcon(s: NavState, active: ActiveRoute) {
+        var rotation = 0f
+        var mirror = false
+        val res = when (s.icon) {
+            NavIcon.ACTION -> when (s.action) {
+                Action.LEFT, Action.SHARP_LEFT -> R.drawable.ic_turn_right.also { mirror = true }
+                Action.RIGHT, Action.SHARP_RIGHT -> R.drawable.ic_turn_right
+                Action.SLIGHT_LEFT -> R.drawable.ic_arrow_straight.also { rotation = -45f }
+                Action.SLIGHT_RIGHT -> R.drawable.ic_arrow_straight.also { rotation = 45f }
+                Action.UTURN -> R.drawable.ic_uturn
+                Action.CROSSWALK -> R.drawable.ic_crosswalk
+                Action.STAIRS, Action.OVERPASS, Action.UNDERPASS -> R.drawable.ic_stairs
+                Action.ELEVATOR -> R.drawable.ic_info
+                Action.INDOOR -> R.drawable.ic_subway
+                Action.STRAIGHT, null -> R.drawable.ic_arrow_straight
+            }
+            NavIcon.WALK -> if (active.mode == TravelMode.BIKE) R.drawable.ic_bike else R.drawable.ic_walk
+            NavIcon.BUS -> R.drawable.ic_bus
+            NavIcon.SUBWAY -> R.drawable.ic_subway
+            NavIcon.FLAG -> R.drawable.ic_flag
+            NavIcon.WARNING -> R.drawable.ic_warning
+        }
+        guideIcon.setImageResource(res)
+        guideIcon.rotation = rotation
+        guideIcon.scaleX = if (mirror) -1f else 1f
     }
 
     /** 배너 톡 → 한 줄로 접기 / 펼치기 (다음에 열어도 그대로) */
@@ -611,6 +712,8 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun endRoute() {
+        followLostByTouch = false
+        mainHandler.removeCallbacks(refollowRunnable)
         RouteRepository.activeRoute = null
         NavigationService.stop(this)
         syncRoute()
@@ -627,6 +730,9 @@ class MainActivity : ComponentActivity() {
     // ───────────────────────── 내 위치 (위치 → 추적 → 나침반) ─────────────────────────
 
     private fun onMyLocationButton() {
+        // 직접 고른 모드는 저절로 되돌리지 않는다
+        followLostByTouch = false
+        mainHandler.removeCallbacks(refollowRunnable)
         if (!Locator.hasPermission(this)) {
             permissionRequest.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
             return
@@ -818,20 +924,35 @@ class MainActivity : ComponentActivity() {
             MotionEvent.ACTION_DOWN -> {
                 touchDownX = ev.x
                 touchDownY = ev.y
+                mainHandler.removeCallbacks(refollowRunnable)
             }
-            MotionEvent.ACTION_POINTER_DOWN -> if (locMode != LocMode.NONE) setLocMode(LocMode.NONE)
+            MotionEvent.ACTION_POINTER_DOWN -> if (locMode != LocMode.NONE) stopFollowByTouch()
             MotionEvent.ACTION_MOVE ->
                 if (locMode != LocMode.NONE && hypot(ev.x - touchDownX, ev.y - touchDownY) > touchSlop * 2) {
-                    setLocMode(LocMode.NONE)
+                    stopFollowByTouch()
                 }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> if (followLostByTouch) {
+                // 안내 중이면 지도를 놓고 8초 지나면 다시 내 위치를 따라간다 (카카오맵처럼)
+                mainHandler.removeCallbacks(refollowRunnable)
+                mainHandler.postDelayed(refollowRunnable, REFOLLOW_AFTER_MS)
+            }
         }
         return super.dispatchTouchEvent(ev)
+    }
+
+    private fun stopFollowByTouch() {
+        val active = RouteRepository.activeRoute
+        if (active != null && active.startNavigation) {
+            followLostByTouch = true
+            modeBeforeTouch = locMode
+        }
+        setLocMode(LocMode.NONE)
     }
 
     // ───────────────────────── 버튼·안내 문구 ─────────────────────────
 
     private fun visibleControls(): List<View> =
-        if (RouteRepository.activeRoute != null) listOf(btnSearch, btnMyLocation, btnEnd)
+        if (RouteRepository.activeRoute != null) listOf(btnMyLocation, btnEnd)
         else listOf(btnSearch, btnZoomIn, btnMyLocation, btnZoomOut)
 
     private fun setControlsVisible(visible: Boolean) {
@@ -941,6 +1062,7 @@ class MainActivity : ComponentActivity() {
         private const val KEY_ASKED = "asked_location"
         private const val KEY_ASKED_NOTIFICATIONS = "asked_notifications"
         private const val KEY_GUIDE_COMPACT = "guide_compact"
+        private const val REFOLLOW_AFTER_MS = 8_000L
 
         /** 카카오 로고를 위에서 얼마나 내릴지 (화면 높이 대비) */
         private const val LOGO_TOP_RATIO = 0.09f

@@ -21,6 +21,7 @@ import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import androidx.wear.ongoing.OngoingActivity
 import androidx.wear.ongoing.Status
+import com.google.android.gms.location.LocationAvailability
 import com.google.android.gms.location.LocationCallback
 import com.google.android.gms.location.LocationRequest
 import com.google.android.gms.location.LocationResult
@@ -37,6 +38,7 @@ import com.mywatch.kakaomap.location.toFix
 import com.mywatch.kakaomap.model.Format
 import com.mywatch.kakaomap.model.TravelMode
 import com.mywatch.kakaomap.net.KakaoApi
+import com.mywatch.kakaomap.update.UpdateInstallWorker
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.MainScope
@@ -50,8 +52,10 @@ import kotlinx.coroutines.withContext
  * 손목을 내려 화면이 꺼지거나 워치페이스로 돌아가도 위치를 계속 받아서
  * 갈림길·하차·이탈·도착을 진동으로 알리고, 도보·자전거는 경로를 벗어나면 다시 찾는다(카카오맵 재탐색처럼).
  * 워치페이스에는 '진행 중 활동' 아이콘이 떠서 눌러 바로 지도로 돌아올 수 있다.
- * 위치 간격은 [LocationPolicy] 가 상황에 맞춰 정한다 (갈림길 앞 1초 ~ 멀리 탈 때 10초, 도착 뒤엔 추가 전력 0).
- * 도착해도 저절로 끝나지 않는다 — 사용자가 끌 때까지 저전력으로 '목적지까지 직선거리'를 보여 준다.
+ * 위치 간격은 [LocationPolicy] 가 상황에 맞춰 정한다 (갈림길 앞 1초 ~ 멀리 탈 때 15초, 도착 뒤엔 추가 전력 0).
+ * 도착하면 5분 동안(또는 300m 넘게 떠날 때까지) '목적지까지 직선거리'를 보여 준 뒤 스스로 끝난다 —
+ * 그래야 위치·진행 중 아이콘이 꺼지고, 미뤄 둔 자동 업데이트도 설치된다.
+ * 버스에서 내릴 정류장을 지나치거나 환승 도보 중 길을 벗어나면 지금 위치에서 대중교통 경로를 다시 찾는다.
  */
 class NavigationService : Service() {
 
@@ -69,6 +73,14 @@ class NavigationService : Service() {
     private var lastRerouteAt = 0L
     /** 새 경로에 올라서지 못한 채 연달아 재탐색한 횟수 → 간격을 30초·1분·2분·4분으로 늘림 */
     private var reroutesWithoutMatch = 0
+    /** 이번 여정에서 다시 찾은 횟수 — 하루 무료 사용량(경로 API 1,000회)을 지키려고 10번까지만 */
+    private var rerouteCount = 0
+    /** 지금 따라가는 여정 (새 길찾기를 시작하면 횟수·시작 시각을 새로) */
+    private var tripId = 0L
+    private var retryJob: Job? = null
+    /** 배터리 15% 이하인지 — 1분에 한 번만 확인 */
+    private var lowBattery = false
+    private var batteryCheckedAt = 0L
     private var lastStartId = 0
 
     /** 지금 걸어 둔 위치 요청 (바뀔 때만 다시 요청) */
@@ -80,6 +92,10 @@ class NavigationService : Service() {
     private var lastSpeedFix: android.location.Location? = null
     private var lastPlanAt = 0L
     private var passiveTimerJob: Job? = null
+    private var finishJob: Job? = null
+    /** 경로를 못 받은(안내 시작 후 아직 경로 위가 아닌) 시각 — 1초 간격을 무한정 쓰지 않게 */
+    private var startedAt = 0L
+    private var signalJob: Job? = null
 
     private val callback = object : LocationCallback() {
         override fun onLocationResult(result: LocationResult) {
@@ -87,6 +103,25 @@ class NavigationService : Service() {
             result.locations.forEach { loc ->
                 updateSpeed(loc)
                 Navigator.onFix(this@NavigationService, loc.toFix())
+            }
+            onSignal(true)
+        }
+
+        override fun onLocationAvailability(availability: LocationAvailability) {
+            onSignal(availability.isLocationAvailable)
+        }
+    }
+
+    /** 위치를 10초 넘게 못 받으면 배너에 '신호 약함' (지하·실내). 다시 받으면 바로 지움 */
+    private fun onSignal(available: Boolean) {
+        if (available) {
+            signalJob?.cancel()
+            signalJob = null
+            if (Navigator.state.value.signalLost) Navigator.setSignalLost(false)
+        } else if (signalJob?.isActive != true) {
+            signalJob = scope.launch {
+                delay(SIGNAL_LOST_AFTER_MS)
+                Navigator.setSignalLost(true)
             }
         }
     }
@@ -114,7 +149,7 @@ class NavigationService : Service() {
             return START_NOT_STICKY
         }
         val active = RouteRepository.activeRoute
-        if (active == null || !active.startNavigation || !Locator.hasPermission(this)) {
+        if (active == null || !active.startNavigation || !Locator.hasPrecise(this)) {
             shutdown()
             return START_NOT_STICKY
         }
@@ -151,7 +186,8 @@ class NavigationService : Service() {
             LocPower.PASSIVE -> Priority.PRIORITY_PASSIVE
         }
         val request = LocationRequest.Builder(priority, p.intervalMs)
-            .setMinUpdateIntervalMillis(minOf(p.intervalMs, 1_000L))
+            // 다른 앱(운동 기록 등)이 GPS 를 1초마다 받아도 우리 앱까지 1초마다 깨지 않게: 최소 간격 = 계획 간격
+            .setMinUpdateIntervalMillis(p.intervalMs)
             .setMaxUpdateDelayMillis(p.maxDelayMs)
             .setMinUpdateDistanceMeters(p.minDistanceM)
             .build()
@@ -200,12 +236,24 @@ class NavigationService : Service() {
             if (active == null || !active.startNavigation) shutdown()
             return
         }
+        if (active.tripId != tripId) {
+            // 새 길찾기: 재탐색 횟수·간격·시작 시각을 새로 센다 (재탐색으로 바뀐 경로는 같은 여정이라 이어감)
+            tripId = active.tripId
+            rerouteCount = 0
+            reroutesWithoutMatch = 0
+            lastRerouteAt = 0L
+            startedAt = SystemClock.elapsedRealtime()
+        }
         updateNotification(active, s)
-        if (s.matched && !s.offRoute) reroutesWithoutMatch = 0
+        if (s.matched && !s.offRoute && !s.passedStop) reroutesWithoutMatch = 0
         if (s.arrived) {
-            // 도착해도 끝내지 않는다: 진행 중이던 재탐색만 버리고, 위치는 저전력으로 (2분 뒤엔 추가 전력 0)
+            // 도착: 진행 중이던 재탐색은 버리고, 위치는 저전력으로 (2분 뒤엔 추가 전력 0), 5분 뒤 또는 300m 넘게 떠나면 끝
             if (rerouteJob?.isActive == true) rerouteJob?.cancel()
             if (s.rerouting) Navigator.setRerouting(false)
+            if (s.finished) {
+                finishRoute()
+                return
+            }
             if (arrivedVersion != s.routeVersion) {
                 arrivedVersion = s.routeVersion
                 arrivedAt = SystemClock.elapsedRealtime()
@@ -214,12 +262,27 @@ class NavigationService : Service() {
                     delay(LocationPolicy.AFTER_ARRIVAL_ACTIVE_MS + 1_000)
                     onState(Navigator.state.value)   // 저전력 → 얻어 쓰기로 전환
                 }
+                finishJob?.cancel()
+                finishJob = scope.launch {
+                    // 위치가 안 들어와도(얻어 쓰기라 서 있으면 거의 안 옴) 5분 뒤엔 끝낸다
+                    delay(NavEngine.FINISH_AFTER_MS)
+                    if (Navigator.state.value.arrived && RouteRepository.activeRouteVersion == s.routeVersion) finishRoute()
+                }
             }
             applyPlan(planFor(active, s))
             return
         }
         applyPlan(planFor(active, s))
-        if (s.offRoute && !s.rerouting && active.mode != TravelMode.TRANSIT) maybeReroute(active)
+        // 도보·자전거: 경로를 벗어나면 다시 찾기. 대중교통: 정류장을 지나쳤거나 환승 도보 중 벗어나면 대중교통으로 다시 찾기
+        if ((s.offRoute || s.passedStop) && !s.rerouting) maybeReroute(active)
+    }
+
+    /** 도착 후 안내를 스스로 끝낸다 (지도 화면이 열려 있으면 다음에 돌아올 때 경로가 지워져 있다) */
+    private fun finishRoute() {
+        if (RouteRepository.activeRoute == null) return
+        RouteRepository.activeRoute = null
+        Navigator.sync()
+        shutdown()
     }
 
     /**
@@ -230,17 +293,31 @@ class NavigationService : Service() {
     private fun maybeReroute(active: ActiveRoute) {
         val now = SystemClock.elapsedRealtime()
         val interval = REROUTE_INTERVAL_MS shl reroutesWithoutMatch.coerceAtMost(3)
-        if (rerouteJob?.isActive == true || now - lastRerouteAt < interval) return
+        if (rerouteJob?.isActive == true || now - lastRerouteAt < interval || rerouteCount >= MAX_REROUTES) return
         val fix = RouteRepository.freshFix(10_000)?.takeIf { !it.accuracyM.isNaN() && it.accuracyM <= 30f } ?: return
         val from = fix.coord
         lastRerouteAt = now
         reroutesWithoutMatch++
+        rerouteCount++
         Navigator.setRerouting(true)
         rerouteJob = scope.launch {
             val result = withContext(Dispatchers.IO) {
                 runCatching {
-                    if (active.mode == TravelMode.BIKE) KakaoApi.bike(from, active.destination, active.destinationName)
-                    else KakaoApi.walk(from, active.destination, active.destinationName)
+                    when (active.mode) {
+                        TravelMode.BIKE -> RoutePresentation.activeFromSimple(
+                            KakaoApi.bike(from, active.destination, active.destinationName), active.place, from, navigate = true,
+                        )
+                        TravelMode.WALK -> RoutePresentation.activeFromSimple(
+                            KakaoApi.walk(from, active.destination, active.destinationName), active.place, from, navigate = true,
+                        )
+                        // 가장 빨리 도착하는 대중교통 경로 (목록은 소요 시간 순). 없으면(남은 거리가 짧음 등) 걸어서
+                        TravelMode.TRANSIT -> runCatching { KakaoApi.transit(from, active.destination, active.destinationName) }
+                            .getOrNull()?.firstOrNull()
+                            ?.let { RoutePresentation.activeFromTransit(it, active.place, from, navigate = true) }
+                            ?: RoutePresentation.activeFromSimple(
+                                KakaoApi.walk(from, active.destination, active.destinationName), active.place, from, navigate = true,
+                            )
+                    }.copy(tripId = active.tripId)
                 }
             }
             if (RouteRepository.activeRoute !== active) return@launch   // 그 사이 경로가 바뀜
@@ -248,24 +325,41 @@ class NavigationService : Service() {
                 Navigator.setRerouting(false)
                 return@launch
             }
-            result.onSuccess { r ->
-                RouteRepository.activeRoute = RoutePresentation.activeFromSimple(r, active.place, from, navigate = true)
+            result.onSuccess { next ->
+                RouteRepository.activeRoute = next
                 Navigator.sync()
                 Navigator.vibrate(this@NavigationService, NavEvent.REROUTED)
             }.onFailure {
                 Log.w(MapApp.TAG, "재탐색 실패", it)
                 Navigator.setRerouting(false)
+                // 네트워크 끊김 등 — 아직 벗어나 있으면 간격(30초·1분·2분…)을 두고 다시 시도
+                retryJob?.cancel()
+                retryJob = scope.launch {
+                    delay(REROUTE_INTERVAL_MS shl reroutesWithoutMatch.coerceIn(0, 3))
+                    val st = Navigator.state.value
+                    if ((st.offRoute || st.passedStop) && RouteRepository.activeRoute === active) onState(st)
+                }
             }
         }
     }
 
-    private fun planFor(active: ActiveRoute, s: NavState): LocPlan =
-        LocationPolicy.navigation(
+    private fun planFor(active: ActiveRoute, s: NavState): LocPlan {
+        val now = SystemClock.elapsedRealtime()
+        if (now - batteryCheckedAt > BATTERY_CHECK_MS || batteryCheckedAt == 0L) {
+            lowBattery = BatteryInfo.isLow(this)
+            batteryCheckedAt = now
+        }
+        // 재탐색을 다 쓴 뒤에도 벗어나 있으면 1초 GPS 를 계속 쓰지 않는다 (경로로 돌아오면 다시 촘촘히)
+        if ((s.offRoute || s.passedStop) && rerouteCount >= MAX_REROUTES) return LocPlan(LocPower.HIGH, 3_000)
+        return LocationPolicy.navigation(
             s,
             bike = active.mode == TravelMode.BIKE,
             speedMps = speedMps,
-            sinceArrivalMs = SystemClock.elapsedRealtime() - arrivedAt,
+            sinceArrivalMs = now - arrivedAt,
+            sinceStartMs = now - startedAt,
+            lowBattery = lowBattery,
         )
+    }
 
     // ───────── 알림 · 진행 중 활동 ─────────
 
@@ -379,6 +473,12 @@ class NavigationService : Service() {
         stopTracking()
         rerouteJob?.cancel()
         passiveTimerJob?.cancel()
+        finishJob?.cancel()
+        signalJob?.cancel()
+        retryJob?.cancel()
+        if (Navigator.state.value.signalLost) Navigator.setSignalLost(false)
+        // 안내 중이라 미뤄 둔 자동 업데이트가 있으면 이제 설치 예약 (조건이 맞으면 곧바로)
+        UpdateInstallWorker.enqueueSoon(this)
         if (foreground) {
             ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
             foreground = false
@@ -394,6 +494,9 @@ class NavigationService : Service() {
         private const val ACTION_END = "com.mywatch.kakaomap.END_NAVIGATION"
         private const val REROUTE_INTERVAL_MS = 30_000L
         private const val PLAN_DWELL_MS = 5_000L
+        private const val SIGNAL_LOST_AFTER_MS = 10_000L
+        private const val MAX_REROUTES = 10
+        private const val BATTERY_CHECK_MS = 60_000L
         private const val MOVING_MPS = 0.9f
 
         /** 서비스가 돌고 있는지 (메인 스레드에서 쓰고, 업데이트 작업이 다른 스레드에서 읽음) */
@@ -404,7 +507,7 @@ class NavigationService : Service() {
         /** 화면이 떠 있을 때(앱이 앞에 있을 때) 불러야 한다 — 백그라운드 시작은 안드로이드가 막는다 */
         fun start(context: Context) {
             val active = RouteRepository.activeRoute ?: return
-            if (!active.startNavigation || !Locator.hasPermission(context)) return
+            if (!active.startNavigation || !Locator.hasPrecise(context)) return
             runCatching {
                 ContextCompat.startForegroundService(context, Intent(context, NavigationService::class.java))
             }.onFailure { Log.w(MapApp.TAG, "안내 서비스 시작 실패", it) }

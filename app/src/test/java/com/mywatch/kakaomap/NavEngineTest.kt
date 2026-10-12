@@ -31,7 +31,8 @@ class NavEngineTest {
         assertTrue(e.state.matched)
         assertTrue(e.state.guide!!.contains("후 우회전"))
 
-        assertEquals(listOf(NavEvent.STEP_CHANGED), e.update(Coord(37.0, 127.006), 5f))
+        // 구간이 바뀌는 것만으로는 진동하지 않는다 (회전은 갈림길 '전에' 알림)
+        assertTrue(e.update(Coord(37.0, 127.006), 5f).isEmpty())
         assertEquals(1, e.state.stepIndex)
         assertTrue(e.state.guide!!.contains("후 도착"))
         assertTrue(e.state.remainingM!! in 300..400)
@@ -47,7 +48,7 @@ class NavEngineTest {
         // 갈림길(B) 근처에 3분 서 있음: 경도 ±3.5m, 위도 ±2m 흔들림
         for (i in 0 until 90) {
             val p = Coord(37.0 + 0.00002 * cos(i * 1.7), 127.005 + 0.00004 * sin(i * 2.3))
-            buzzes += e.update(p, 5f).count { it == NavEvent.STEP_CHANGED }
+            buzzes += e.update(p, 5f).size
             if (e.state.stepIndex != prev) flips++
             prev = e.state.stepIndex
         }
@@ -66,8 +67,9 @@ class NavEngineTest {
         assertEquals("한 번은 보류", 1, e.state.stepIndex)
         e.update(Coord(37.0, 127.0029), 5f)
         assertEquals(0, e.state.stepIndex)
-        // 다시 갈림길을 지나면 다시 알림
-        assertEquals(listOf(NavEvent.STEP_CHANGED), e.update(Coord(37.0, 127.006), 5f))
+        // 다시 갈림길을 지나면 다시 뒤 구간
+        e.update(Coord(37.0, 127.006), 5f)
+        assertEquals(1, e.state.stepIndex)
     }
 
     @Test
@@ -183,14 +185,17 @@ class NavEngineTest {
         val e = NavEngine(transit, dest, 1)
         e.update(Coord(37.0, 127.001), 5f)
         assertEquals(0, e.state.stepIndex)
-        // 버스를 타고 서쪽으로: 내릴 곳까지 약 440m → 문구는 '곧 하차', 진동은 두 번 확인 후
-        assertEquals(listOf(NavEvent.STEP_CHANGED), e.update(Coord(37.0001, 126.995), 5f))
+        // 버스를 타고 서쪽으로: 탄 뒤 첫 위치는 '탔는지' 확인 대기
+        e.update(Coord(37.0001, 126.996), 5f)
+        assertEquals(0, e.state.stepIndex)
+        // 두 번째 → 버스 구간. 내릴 곳까지 약 440m → 문구는 '곧 하차', 진동은 두 번 확인 후
+        e.update(Coord(37.0001, 126.995), 5f)
         assertEquals(1, e.state.stepIndex)
         assertTrue(e.state.guide!!.startsWith("곧 하차 · B정류장"))
         assertEquals(listOf(NavEvent.ALIGHT_SOON), e.update(Coord(37.0001, 126.993), 5f))
         assertTrue("하차 알림은 한 번만", e.update(Coord(37.0001, 126.992), 5f).isEmpty())
         // 내려서 마지막 도보 구간으로
-        assertEquals(listOf(NavEvent.STEP_CHANGED), e.update(Coord(37.00015, 126.990), 5f))
+        e.update(Coord(37.00015, 126.990), 5f)
         assertEquals(2, e.state.stepIndex)
     }
 
@@ -213,7 +218,8 @@ class NavEngineTest {
             events += e.update(Coord(37.00005 + 0.00003 * cos(i * 1.3), 127.003 + 0.00004 * sin(i * 0.7)), 5f)
         }
         assertFalse("기다리는 동안 하차 알림 없음", NavEvent.ALIGHT_SOON in events)
-        assertTrue("탈 차례 알림은 많아야 한 번", events.count { it == NavEvent.STEP_CHANGED } <= 1)
+        assertTrue("승차 알림은 많아야 한 번", events.count { it == NavEvent.BOARD_SOON } <= 1)
+        assertEquals("기다리는 동안 버스 구간으로 넘어가지 않음", 0, e.state.stepIndex)
         // 타고 가다 내릴 곳 가까이에서 알림
         val ride = listOf(127.004, 127.005, 127.006, 127.0065, 127.007).flatMap { e.update(Coord(37.0001, it), 5f) }
         assertEquals(1, ride.count { it == NavEvent.ALIGHT_SOON })

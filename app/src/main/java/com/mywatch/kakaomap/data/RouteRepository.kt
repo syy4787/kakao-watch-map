@@ -34,6 +34,8 @@ data class ActiveRoute(
     val simple: SimpleRoute? = null,
     /** 이 경로를 받은 시각 — 대중교통 도착 예정 시각 계산용 */
     val startedAtMs: Long = System.currentTimeMillis(),
+    /** 한 번의 길찾기(여정) 번호 — 재탐색으로 경로가 바뀌어도 그대로 이어받는다 */
+    val tripId: Long = System.nanoTime(),
 ) {
     val destinationName: String get() = place.name
     val destination: Coord get() = place.coord

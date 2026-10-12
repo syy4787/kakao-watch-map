@@ -92,7 +92,8 @@ object RoutePresentation {
             summary = simpleSummary(r),
             origin = origin,
             segments = if (all.size >= 2) listOf(MapSegment(all, color, 7f)) else emptyList(),
-            steps = r.steps.map { GuideStep(it.guidance.ifBlank { "직진" }, it.points) },
+            // 도보·자전거 API 문구는 '이 구간 시작에서 할 일'이라 회전 안내(미리 알림·화살표)에 쓴다
+            steps = r.steps.map { GuideStep(it.guidance, it.points, turnGuidance = true) },
             startNavigation = navigate,
             simple = r,
         )

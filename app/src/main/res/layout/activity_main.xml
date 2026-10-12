@@ -20,42 +20,77 @@
             android:layout_width="match_parent"
             android:layout_height="match_parent" />
 
-        <!-- 안내 배너: 첫 줄 '다음에 할 일'(굵게) + 둘째 줄 장소(작게). 지도를 덜 가리게 두 줄까지만.
-             톡 → 한 줄로 접기 / 다시 톡 → 펼치기 -->
+        <!-- 안내 배너 (카카오맵 길안내처럼): 왼쪽 [화살표·탈것 아이콘 + 거리], 오른쪽 [짧은 할 일(굵게) + 장소 하나].
+             글자 폭만큼만 차지하고 원 위쪽 가장자리에 붙는다. 톡 → 둘째 줄 접기 / 다시 톡 → 펼치기 -->
         <LinearLayout
             android:id="@+id/guide"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_gravity="top|center_horizontal"
             android:background="@drawable/bg_guide"
-            android:gravity="center_horizontal"
-            android:orientation="vertical"
-            android:paddingHorizontal="10dp"
-            android:paddingVertical="5dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingStart="7dp"
+            android:paddingTop="5dp"
+            android:paddingEnd="9dp"
+            android:paddingBottom="5dp"
             android:visibility="gone">
 
-            <TextView
-                android:id="@+id/guide_main"
+            <LinearLayout
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:ellipsize="end"
-                android:includeFontPadding="false"
-                android:maxLines="1"
-                android:textColor="@android:color/white"
-                android:textSize="14sp"
-                android:textStyle="bold" />
+                android:gravity="center_horizontal"
+                android:orientation="vertical">
 
-            <TextView
-                android:id="@+id/guide_sub"
+                <ImageView
+                    android:id="@+id/guide_icon"
+                    android:layout_width="22dp"
+                    android:layout_height="22dp"
+                    android:importantForAccessibility="no"
+                    android:src="@drawable/ic_walk"
+                    android:tint="@android:color/white" />
+
+                <TextView
+                    android:id="@+id/guide_dist"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:includeFontPadding="false"
+                    android:maxLines="1"
+                    android:textColor="@android:color/white"
+                    android:textSize="11sp"
+                    android:textStyle="bold"
+                    android:visibility="gone" />
+            </LinearLayout>
+
+            <LinearLayout
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="1dp"
-                android:ellipsize="end"
-                android:includeFontPadding="false"
-                android:maxLines="1"
-                android:textColor="#D9FFFFFF"
-                android:textSize="12sp"
-                android:visibility="gone" />
+                android:layout_marginStart="6dp"
+                android:orientation="vertical">
+
+                <TextView
+                    android:id="@+id/guide_main"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:ellipsize="end"
+                    android:includeFontPadding="false"
+                    android:maxLines="1"
+                    android:textColor="@android:color/white"
+                    android:textSize="14sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/guide_sub"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="1dp"
+                    android:ellipsize="end"
+                    android:includeFontPadding="false"
+                    android:maxLines="1"
+                    android:textColor="#D9FFFFFF"
+                    android:textSize="12sp"
+                    android:visibility="gone" />
+            </LinearLayout>
         </LinearLayout>
 
         <!-- 새 버전 알림 -->

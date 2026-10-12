@@ -113,7 +113,7 @@ class ParsersTest {
         assertNull(TagoParsers.errorMessage(arr))
 
         val single = JSONObject("""{"response":{"header":{"resultCode":"00"},
-            "body":{"items":{"item":{"citycode":25,"gpslati":36.35,"gpslong":127.38,"nodeid":"DJB8001793","nodenm":"송촌동"}}}}}""")
+            "body":{"items":{"item":{"citycode":25,"gpslati":36.35,"gpslong":127.38,"nodeid":"DJB8001793","nodenm":"둔산동"}}}}}""")
         val s = TagoParsers.stops(single).single()
         assertEquals(25, s.cityCode)
         assertEquals("DJB8001793", s.nodeId)

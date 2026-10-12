@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 도착 깃발 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">
+    <path android:fillColor="@android:color/white"  android:pathData="M5,22 L5,3 L7,3 L7,4 L19,4 L16,8.5 L19,13 L7,13 L7,22 Z" />
+</vector>

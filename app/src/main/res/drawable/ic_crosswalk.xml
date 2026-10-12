@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 횡단보도 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">
+    <path android:fillColor="@android:color/white"  android:pathData="M3,4.5 h18 v3 h-18 Z M3,10.5 h18 v3 h-18 Z M3,16.5 h18 v3 h-18 Z" />
+</vector>

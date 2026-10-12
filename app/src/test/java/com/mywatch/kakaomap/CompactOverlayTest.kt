@@ -24,10 +24,10 @@ class CompactOverlayTest {
     private val busEnd = Coord(37.0001, 126.990)
     private val dest = Coord(37.0005, 126.990)
     private val steps = listOf(
-        GuideStep("선비마을입구까지 도보", listOf(a, stop), approx = true),
+        GuideStep("시청역까지 도보", listOf(a, stop), approx = true),
         GuideStep(
-            "617번 버스 · 선비마을입구 → 은하수네거리", listOf(Coord(37.0001, 127.003), busEnd),
-            ride = true, alight = "은하수네거리", line = "617번", board = "선비마을입구",
+            "617번 버스 · 시청역 → 은하수네거리", listOf(Coord(37.0001, 127.003), busEnd),
+            ride = true, alight = "은하수네거리", line = "617번", board = "시청역",
         ),
         GuideStep("도보 1분 · 44m", listOf(busEnd, dest)),
     )
@@ -39,13 +39,14 @@ class CompactOverlayTest {
         assertEquals(0, e.state.stepIndex)
         val (main, sub) = NavOverlayText.bannerLines(e.state.guide!!)
         assertTrue(main, Regex("""\d+m 후 617번 승차""").matches(main))
-        assertEquals("선비마을입구", sub)
+        assertEquals("시청역", sub)
     }
 
     @Test
     fun ridingShowsHowFarToGetOffThenTheStop() {
         val e = NavEngine(steps, dest, 1)
         e.update(Coord(37.0, 127.001), 5f)
+        e.update(Coord(37.0001, 126.9985), 5f)     // 버스 위 첫 위치는 '탔는지' 확인 대기
         e.update(Coord(37.0001, 126.998), 5f)      // 버스 위, 내릴 곳까지 약 710m
         assertEquals(1, e.state.stepIndex)
         val (main, sub) = NavOverlayText.bannerLines(e.state.guide!!)
@@ -103,7 +104,7 @@ class CompactOverlayTest {
             steps = listOf(
                 TransitStep(
                     TransitStepType.BUS, "일반 617", 6000, 1800,
-                    stops = listOf("선비마을입구", "중리네거리", "은하수네거리"), vehicles = listOf(Vehicle("일반", "617")),
+                    stops = listOf("시청역", "중리네거리", "은하수네거리"), vehicles = listOf(Vehicle("일반", "617")),
                     points = listOf(stop, busEnd),
                 ),
                 TransitStep(
@@ -115,10 +116,10 @@ class CompactOverlayTest {
         )
         val (bus, subway) = TransitGuide.steps(r)
         assertEquals("617번", bus.line)
-        assertEquals("선비마을입구", bus.board)
+        assertEquals("시청역", bus.board)
         assertEquals("은하수네거리", bus.alight)
         assertTrue(bus.ride && !bus.subway)
-        assertEquals("617번 버스 · 선비마을입구 → 은하수네거리", bus.text)
+        assertEquals("617번 버스 · 시청역 → 은하수네거리", bus.text)
         assertEquals("대전 1호선", subway.line)
         assertEquals("대전역", subway.board)
         assertTrue(subway.ride && subway.subway)

@@ -29,6 +29,8 @@
     <string name="show_on_map">지도에서 보기</string>
     <string name="start_navigation">안내 시작</string>
     <string name="end_route">안내 종료</string>
+    <string name="precise_location_needed">길안내는 \'정확한 위치\'를 허용해야 해요</string>
+    <string name="gps_weak">GPS 신호 약함 · 위치 추정 중</string>
     <string name="transit_note">버스 도착 시간은 공공데이터(TAGO) 실시간 정보예요. 고속·시외버스·KTX 같은 장거리 노선은 카카오 대중교통 API에 없어요.</string>
     <string name="tago_missing">실시간 버스 도착은 공공데이터 키를 넣으면 보여요</string>
 

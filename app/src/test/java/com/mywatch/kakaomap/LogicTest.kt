@@ -86,11 +86,11 @@ class LogicTest {
 
         val here = Coord(36.35, 127.38)
         val stops = listOf(
-            BusStop(25, "A", "송촌동 (건너편)", Coord(36.3502, 127.3801)),
-            BusStop(25, "B", "선비마을", Coord(36.3500, 127.3800)),
+            BusStop(25, "A", "둔산동 (건너편)", Coord(36.3502, 127.3801)),
+            BusStop(25, "B", "목련아파트", Coord(36.3500, 127.3800)),
         )
         // 이름이 같은 정류장을 우선 (괄호·공백 무시)
-        assertEquals("A", TransitMatching.pickStop(stops, "송촌동", here)?.nodeId)
+        assertEquals("A", TransitMatching.pickStop(stops, "둔산동", here)?.nodeId)
         // 이름이 안 맞으면 60m 안의 가장 가까운 곳
         assertEquals("B", TransitMatching.pickStop(stops, "없는정류장", here)?.nodeId)
         // 아무것도 가깝지 않으면 null

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 우회전 화살표 (왼쪽은 뒤집어서 씀) -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">
+    <path android:fillColor="@android:color/white"  android:pathData="M6,21 L6,12 Q6,8 10,8 L14.5,8 L14.5,4.5 L20.5,10 L14.5,15.5 L14.5,12 L10,12 L10,21 Z" />
+</vector>
