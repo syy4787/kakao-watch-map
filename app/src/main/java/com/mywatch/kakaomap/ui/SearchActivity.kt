@@ -22,6 +22,7 @@ import com.mywatch.kakaomap.net.KakaoApi
 import com.mywatch.kakaomap.tile.ShortcutTileService
 import com.mywatch.kakaomap.update.UpdateActivity
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -39,13 +40,15 @@ class SearchActivity : ComponentActivity() {
     /** 길게 눌러 연 메뉴의 대상 */
     private var menuPlace: Place? = null
     private var menuFavorite: Favorite? = null
+    /** 지금 검색 결과(또는 검색 실패)를 보여 주는 중인지 */
+    private var resultsShown = false
+    private var searchJob: Job? = null
 
     private val inputLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { res ->
         val text = res.data?.let { RemoteInput.getResultsFromIntent(it)?.getCharSequence(KEY_QUERY) }?.toString()
         if (!text.isNullOrBlank()) search(text.trim())
-        else if (registering != null && ui.rows.none { it is Row.PlaceItem }) {
+        else if (registering != null && !resultsShown) {
             // 등록하려다 입력을 취소했으면 첫 화면으로
-            registering = null
             showHome()
         }
     }
@@ -54,8 +57,9 @@ class SearchActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_list)
         ui = WearList(this, ::onRow, ::onLongRow)
-        registering = savedInstanceState?.getString(STATE_REGISTERING)?.let { runCatching { Favorite.valueOf(it) }.getOrNull() }
         showHome()
+        // 음성 입력 중에 화면이 다시 만들어졌으면 '등록 중'을 이어 간다 (입력 결과가 곧 돌아옴)
+        registering = savedInstanceState?.getString(STATE_REGISTERING)?.let { runCatching { Favorite.valueOf(it) }.getOrNull() }
         if (savedInstanceState == null) handleShortcut(intent)
     }
 
@@ -84,6 +88,9 @@ class SearchActivity : ComponentActivity() {
     }
 
     private fun showHome() {
+        searchJob?.cancel()
+        registering = null
+        resultsShown = false
         menuPlace = null
         menuFavorite = null
         val recents = RouteRepository.recents(this)
@@ -112,10 +119,7 @@ class SearchActivity : ComponentActivity() {
                     showHome()
                 }
                 ACTION_UPDATE -> startActivity(Intent(this, UpdateActivity::class.java))
-                ACTION_CANCEL -> {
-                    registering = null
-                    showHome()
-                }
+                ACTION_CANCEL -> showHome()
                 ACTION_SET_HOME, ACTION_SET_WORK -> menuPlace?.let { register(if (row.id == ACTION_SET_HOME) Favorite.HOME else Favorite.WORK, it) }
                 ACTION_FAV_CHANGE -> menuFavorite?.let { startRegister(it) }
                 ACTION_FAV_REMOVE -> menuFavorite?.let {
@@ -148,6 +152,7 @@ class SearchActivity : ComponentActivity() {
     private fun showPlaceMenu(place: Place) {
         menuPlace = place
         menuFavorite = null
+        resultsShown = false
         ui.rows = listOf(
             Row.Header(place.name, place.displayAddress.ifBlank { null }),
             Row.Action(ACTION_SET_HOME, R.drawable.ic_home, getString(R.string.fav_set, Favorite.HOME.toward), accent = true),
@@ -160,6 +165,7 @@ class SearchActivity : ComponentActivity() {
     private fun showFavoriteMenu(kind: Favorite, place: Place) {
         menuFavorite = kind
         menuPlace = null
+        resultsShown = false
         ui.rows = listOf(
             Row.Header(kind.label, place.name),
             Row.Action(ACTION_FAV_CHANGE, R.drawable.ic_edit, getString(R.string.fav_change), accent = true),
@@ -172,6 +178,7 @@ class SearchActivity : ComponentActivity() {
         registering = kind
         menuFavorite = null
         menuPlace = null
+        resultsShown = false
         ui.rows = listOf(
             Row.Header(getString(R.string.fav_pick, kind.toward)),
             Row.Action(ACTION_INPUT, R.drawable.ic_search, getString(R.string.search_hint), accent = true),
@@ -183,7 +190,6 @@ class SearchActivity : ComponentActivity() {
     private fun register(kind: Favorite, place: Place) {
         Favorites.set(this, kind, place)
         ShortcutTileService.refresh(this)
-        registering = null
         Toast.makeText(this, getString(R.string.fav_registered, kind.toward), Toast.LENGTH_SHORT).show()
         showHome()
     }
@@ -214,7 +220,8 @@ class SearchActivity : ComponentActivity() {
 
     private fun search(query: String) {
         ui.showStatus(getString(R.string.searching))
-        lifecycleScope.launch {
+        searchJob?.cancel()
+        searchJob = lifecycleScope.launch {
             val near = RouteRepository.freshLocation(30 * 60_000L)
             val result = withContext(Dispatchers.IO) { runCatching { KakaoApi.searchPlaces(query, near) } }
             val kind = registering
@@ -226,7 +233,9 @@ class SearchActivity : ComponentActivity() {
                 rows += Row.Action(ACTION_INPUT, R.drawable.ic_search, "다시 검색")
                 if (kind != null) rows += Row.Action(ACTION_CANCEL, R.drawable.ic_close, getString(R.string.cancel))
                 ui.rows = rows
+                resultsShown = true
             }.onFailure { e ->
+                resultsShown = true
                 ui.rows = listOfNotNull(
                     Row.Header(title),
                     Row.Note(e.message ?: "검색하지 못했어요"),

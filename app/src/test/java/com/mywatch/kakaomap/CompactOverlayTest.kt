@@ -124,4 +124,23 @@ class CompactOverlayTest {
         assertEquals("대전역", subway.board)
         assertTrue(subway.ride && subway.subway)
     }
+
+    @Test
+    fun routeCardNamesTheFirstRideWithoutDoubledWords() {
+        fun bus(vararg names: String) = TransitStep(
+            TransitStepType.BUS, "", 1000, 300, stops = listOf("시청역", "중리네거리"),
+            vehicles = names.map { Vehicle("일반", it) }, points = listOf(stop, busEnd),
+        )
+        assertEquals("617번 · 시청역 승차", TransitGuide.boardText(bus("617")))
+        assertEquals("617/618번 · 시청역 승차", TransitGuide.boardText(bus("617", "618")))
+        // 번호를 모르는 버스는 '버스번'이 아니라 '버스'
+        assertEquals("버스 · 시청역 승차", TransitGuide.boardText(bus()))
+        val subway = TransitStep(
+            TransitStepType.SUBWAY, "", 3000, 600, stops = listOf("대전역", "중앙로"),
+            vehicles = listOf(Vehicle("도시철도", "대전 1호선")), points = listOf(busEnd, dest),
+        )
+        assertEquals("대전 1호선 · 대전역 승차", TransitGuide.boardText(subway))
+        // 정류장 이름이 없으면 '승차'만 덩그러니 남기지 않는다
+        assertEquals("617번 승차", TransitGuide.boardText(bus("617").copy(stops = emptyList())))
+    }
 }

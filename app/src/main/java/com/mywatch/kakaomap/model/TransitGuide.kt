@@ -18,6 +18,13 @@ object TransitGuide {
         else -> null
     }
 
+    /** 경로 카드의 첫 탈 것 줄: "617번 · 시청역 승차", "대전 1호선 · 대전역 승차" */
+    fun boardText(step: TransitStep): String {
+        val name = lineName(step) ?: label(step)
+        val stop = step.boardingStop?.ifBlank { null }
+        return if (stop != null) "$name · $stop 승차" else "$name 승차"
+    }
+
     /** 경로 상세·알림에 쓰는 전체 문구 */
     fun text(step: TransitStep): String {
         val stops = "${step.boardingStop ?: ""} → ${step.alightingStop ?: ""}"

@@ -12,12 +12,11 @@ import androidx.recyclerview.widget.RecyclerView
 import com.mywatch.kakaomap.R
 import com.mywatch.kakaomap.data.Favorite
 import com.mywatch.kakaomap.data.FavoriteSlot
-import com.mywatch.kakaomap.data.RoutePresentation
 import com.mywatch.kakaomap.model.Format
 import com.mywatch.kakaomap.model.Place
 import com.mywatch.kakaomap.model.SimpleRoute
+import com.mywatch.kakaomap.model.TransitGuide
 import com.mywatch.kakaomap.model.TransitRoute
-import com.mywatch.kakaomap.model.TransitStepType
 import com.mywatch.kakaomap.model.TravelMode
 
 /** 목록 화면에 들어가는 줄 종류 */
@@ -173,12 +172,7 @@ class RowAdapter(
         ).joinToString(" · ")
         v.findViewById<SegmentBarView>(R.id.bar).setRoute(r)
         val first = r.firstRide
-        v.text(R.id.first).text = when {
-            first == null -> "도보로 이동"
-            first.type == TransitStepType.BUS ->
-                "${RoutePresentation.stepLabel(first)}번 · ${first.boardingStop ?: ""} 승차"
-            else -> "${RoutePresentation.stepLabel(first)} · ${first.boardingStop ?: ""} 승차"
-        }
+        v.text(R.id.first).text = if (first == null) "도보로 이동" else TransitGuide.boardText(first)
         v.text(R.id.live).show(row.live)
         v.setOnClickListener { onClick(row) }
     }
