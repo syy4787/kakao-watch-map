@@ -2,6 +2,7 @@ package com.mywatch.kakaomap.nav
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.app.AlarmManager
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -12,6 +13,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.os.SystemClock
@@ -35,6 +37,7 @@ import com.mywatch.kakaomap.data.RoutePresentation
 import com.mywatch.kakaomap.data.RouteRepository
 import com.mywatch.kakaomap.location.Locator
 import com.mywatch.kakaomap.location.toFix
+import com.mywatch.kakaomap.model.Coord
 import com.mywatch.kakaomap.model.Format
 import com.mywatch.kakaomap.model.TravelMode
 import com.mywatch.kakaomap.net.KakaoApi
@@ -60,6 +63,7 @@ import kotlinx.coroutines.withContext
 class NavigationService : Service() {
 
     private val scope = MainScope()
+    private val mainHandler = Handler(Looper.getMainLooper())
     private val fused by lazy { LocationServices.getFusedLocationProviderClient(this) }
     private var tracking = false
     private var foreground = false
@@ -87,33 +91,40 @@ class NavigationService : Service() {
     private var plan: LocPlan? = null
     private var arrivedAt = 0L
     private var arrivedVersion = -1
-    private var speedMps: Float? = null
-    private var still = false
-    private var lastSpeedFix: android.location.Location? = null
+    /** 멈춤/움직임 (GPS 속도, 없으면 멈춘 곳에서 멀어졌는지) — 위치 간격을 정하는 데 씀 */
+    private val motion = StillDetector()
     private var lastPlanAt = 0L
-    private var passiveTimerJob: Job? = null
-    private var finishJob: Job? = null
     /** 경로를 못 받은(안내 시작 후 아직 경로 위가 아닌) 시각 — 1초 간격을 무한정 쓰지 않게 */
     private var startedAt = 0L
     private var signalJob: Job? = null
     /** 경로 밖에 있는 시간 (10분: 저전력 위치로, 벗어난 채 30분: 안내 끝냄) */
     private val lostClock = LostClock()
-    /** 위치가 안 들어와도(멈춰 있으면 거의 안 옴) 그 시각에 다시 판단하는 타이머 */
-    private var lostTimerJob: Job? = null
-    private var lostTimerAt: Long? = null
+    /**
+     * 위치가 안 들어와도(멈춰 있으면 거의 안 옴) 정한 시각에 다시 판단하는 알람.
+     * 코루틴 delay 는 워치가 잠든(CPU 꺼짐) 동안 시간이 안 가서 몇 시간씩 늦어지므로, 부팅 후 시각 기준 알람을 쓴다
+     * (정확 알람이 아니라 몇 분 늦을 수 있음 — 권한 불필요, 배터리 부담 없음).
+     */
+    private val lostWake by lazy { Wake("kakaomap:lost") { onState(Navigator.state.value) } }
+    private val passiveWake by lazy { Wake("kakaomap:passive") { onState(Navigator.state.value) } }
+    private val finishWake by lazy { Wake("kakaomap:finish") { finishIfStillArrived() } }
+    private var finishVersion = -1
 
     private val callback = object : LocationCallback() {
         override fun onLocationResult(result: LocationResult) {
             // 모아서 받은 경우(배칭) 순서대로 모두 처리해야 갈림길·하차를 놓치지 않는다
-            val wasStill = still
+            val wasStill = motion.still
             result.locations.forEach { loc ->
-                updateSpeed(loc)
+                motion.update(
+                    loc.elapsedRealtimeNanos / 1_000_000, Coord(loc.latitude, loc.longitude),
+                    if (loc.hasAccuracy()) loc.accuracy else null,
+                    if (loc.hasSpeed()) loc.speed else null,
+                )
                 Navigator.onFix(this@NavigationService, loc.toFix())
             }
             onSignal(true)
             // 멈춤 ↔ 움직임이 바뀌면 위치 계획을 다시 본다: 저전력(Wi-Fi·기지국) 위치는 거칠어서 엔진이 버리므로
             // 안내 상태가 안 바뀌어도, 걷기 시작하면 GPS 를 다시 켜야 한다
-            if (still != wasStill) RouteRepository.activeRoute?.let { a ->
+            if (motion.still != wasStill) RouteRepository.activeRoute?.let { a ->
                 val st = Navigator.state.value
                 if (foreground && a.startNavigation && !st.arrived && st.routeVersion == RouteRepository.activeRouteVersion) {
                     applyPlan(planFor(a, st))
@@ -175,6 +186,9 @@ class NavigationService : Service() {
     override fun onDestroy() {
         running = false
         stopTracking()
+        lostWake.cancel()
+        passiveWake.cancel()
+        finishWake.cancel()
         scope.cancel()
         super.onDestroy()
     }
@@ -221,26 +235,6 @@ class NavigationService : Service() {
         fused.removeLocationUpdates(callback)
     }
 
-    /**
-     * 최근 속도 (GPS 가 준 값, 없으면 두 위치 사이로 계산) — 멈춰 있는지 판단용.
-     * 멈춤 판단엔 여유를 둔다: 0.4m/s 아래로 내려가면 '멈춤', 0.9m/s 넘어야 '움직임'으로 되돌림.
-     */
-    private fun updateSpeed(loc: android.location.Location) {
-        val prev = lastSpeedFix
-        val raw = when {
-            loc.hasSpeed() -> loc.speed
-            prev != null && loc.elapsedRealtimeNanos > prev.elapsedRealtimeNanos -> {
-                val dt = (loc.elapsedRealtimeNanos - prev.elapsedRealtimeNanos) / 1e9f
-                if (dt in 0.5f..60f) loc.distanceTo(prev) / dt else null
-            }
-            else -> null
-        }
-        lastSpeedFix = loc
-        if (raw == null) return
-        if (raw < LocationPolicy.STILL_MPS) still = true else if (raw > MOVING_MPS) still = false
-        speedMps = if (still) 0f else raw
-    }
-
     // ───────── 상태 변화 ─────────
 
     private fun onState(s: NavState) {
@@ -279,17 +273,11 @@ class NavigationService : Service() {
             if (arrivedVersion != s.routeVersion) {
                 arrivedVersion = s.routeVersion
                 arrivedAt = SystemClock.elapsedRealtime()
-                passiveTimerJob?.cancel()
-                passiveTimerJob = scope.launch {
-                    delay(LocationPolicy.AFTER_ARRIVAL_ACTIVE_MS + 1_000)
-                    onState(Navigator.state.value)   // 저전력 → 얻어 쓰기로 전환
-                }
-                finishJob?.cancel()
-                finishJob = scope.launch {
-                    // 위치가 안 들어와도(얻어 쓰기라 서 있으면 거의 안 옴) 5분 뒤엔 끝낸다
-                    delay(NavEngine.FINISH_AFTER_MS)
-                    if (Navigator.state.value.arrived && RouteRepository.activeRouteVersion == s.routeVersion) finishRoute()
-                }
+                // 2분 뒤 저전력 → 얻어 쓰기로 전환
+                passiveWake.schedule(arrivedAt + LocationPolicy.AFTER_ARRIVAL_ACTIVE_MS + 1_000)
+                // 위치가 안 들어와도(얻어 쓰기라 서 있으면 거의 안 옴) 5분 뒤엔 끝낸다
+                finishVersion = s.routeVersion
+                finishWake.schedule(arrivedAt + NavEngine.FINISH_AFTER_MS)
             }
             applyPlan(planFor(active, s))
             return
@@ -299,20 +287,41 @@ class NavigationService : Service() {
         if ((s.offRoute || s.passedStop) && !s.rerouting) maybeReroute(active)
     }
 
-    /** 경로 밖에 있는 시간을 잰다. 위치가 안 들어와도 다음 판단 시각(10분·30분)에 다시 보도록 타이머를 건다 */
+    /** 경로 밖에 있는 시간을 잰다. 위치가 안 들어와도 다음 판단 시각(10분·30분)에 다시 보도록 알람을 건다 */
     private fun trackLost(s: NavState) {
         val now = SystemClock.elapsedRealtime()
         lostClock.update(s, now)
-        val at = lostClock.nextDeadline(now)
-        if (at == lostTimerAt && (at == null || lostTimerJob?.isActive == true)) return
-        lostTimerJob?.cancel()
-        lostTimerAt = at
-        lostTimerJob = at?.let {
-            scope.launch {
-                delay(it - now)
-                lostTimerAt = null
-                onState(Navigator.state.value)
-            }
+        lostWake.schedule(lostClock.nextDeadline(now))
+    }
+
+    private fun finishIfStillArrived() {
+        if (Navigator.state.value.arrived && RouteRepository.activeRouteVersion == finishVersion) finishRoute()
+    }
+
+    /** 부팅 후 시각 기준의 (정확하지 않은) 깨우기 알람 하나. 같은 시각이면 다시 걸지 않는다 */
+    private inner class Wake(private val tag: String, private val action: () -> Unit) : AlarmManager.OnAlarmListener {
+        private var at: Long? = null
+
+        override fun onAlarm() {
+            at = null
+            if (running) action()
+        }
+
+        fun schedule(atElapsedMs: Long?) {
+            if (atElapsedMs == at) return
+            cancel()
+            if (atElapsedMs == null) return
+            val alarms = getSystemService(AlarmManager::class.java) ?: return
+            runCatching {
+                alarms.set(AlarmManager.ELAPSED_REALTIME_WAKEUP, atElapsedMs, tag, this, mainHandler)
+                at = atElapsedMs
+            }.onFailure { Log.w(MapApp.TAG, "알람 설정 실패 ($tag)", it) }
+        }
+
+        fun cancel() {
+            if (at == null) return
+            at = null
+            runCatching { getSystemService(AlarmManager::class.java)?.cancel(this) }
         }
     }
 
@@ -411,7 +420,7 @@ class NavigationService : Service() {
         val plan = LocationPolicy.navigation(
             s,
             bike = active.mode == TravelMode.BIKE,
-            speedMps = speedMps,
+            speedMps = motion.speedMps,
             sinceArrivalMs = now - arrivedAt,
             sinceStartMs = now - startedAt,
             lowBattery = lowBattery,
@@ -533,12 +542,11 @@ class NavigationService : Service() {
     private fun shutdown() {
         stopTracking()
         rerouteJob?.cancel()
-        passiveTimerJob?.cancel()
-        finishJob?.cancel()
+        passiveWake.cancel()
+        finishWake.cancel()
         signalJob?.cancel()
         retryJob?.cancel()
-        lostTimerJob?.cancel()
-        lostTimerAt = null
+        lostWake.cancel()
         lostClock.reset()
         if (Navigator.state.value.signalLost) Navigator.setSignalLost(false)
         // 안내 중이라 미뤄 둔 자동 업데이트가 있으면 이제 설치 예약 (조건이 맞으면 곧바로)
@@ -562,7 +570,6 @@ class NavigationService : Service() {
         private const val SIGNAL_LOST_AFTER_MS = 10_000L
         private const val MAX_REROUTES = 10
         private const val BATTERY_CHECK_MS = 60_000L
-        private const val MOVING_MPS = 0.9f
 
         /** 서비스가 돌고 있는지 (메인 스레드에서 쓰고, 업데이트 작업이 다른 스레드에서 읽음) */
         @Volatile
