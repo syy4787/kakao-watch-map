@@ -92,8 +92,9 @@ class UpdateInstallWorker(context: Context, params: WorkerParameters) : Coroutin
     private fun onWifi(c: Context): Boolean {
         val cm = c.getSystemService(ConnectivityManager::class.java) ?: return false
         val caps = cm.getNetworkCapabilities(cm.activeNetwork) ?: return false
-        return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED) &&
-            !caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)
+        // 폰 블루투스 연결(컴패니언 프록시)도 '무제한'으로 잡히지만 실제로는 폰의 LTE 를 쓰므로 Wi-Fi 만 인정
+        return caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) &&
+            caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED)
     }
 
     private fun charging(c: Context): Boolean {
