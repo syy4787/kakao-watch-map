@@ -100,7 +100,8 @@ class ShortcutTileService : Material3TileService() {
 
         /** 집·회사를 바꿨을 때 타일을 다시 그리게 한다 */
         fun refresh(context: Context) {
-            runCatching { TileService.getUpdater(context).requestUpdate(ShortcutTileService::class.java) }
+            // 화면(Activity) Context 로 묶으면 화면이 닫힌 뒤 풀 때 오류가 날 수 있어 앱 Context 로
+            runCatching { TileService.getUpdater(context.applicationContext).requestUpdate(ShortcutTileService::class.java) }
         }
     }
 }

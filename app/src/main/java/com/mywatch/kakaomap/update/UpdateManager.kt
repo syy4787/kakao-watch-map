@@ -252,19 +252,25 @@ object UpdateManager {
             }
         }
         val sessionId = installer.createSession(params)
-        installer.openSession(sessionId).use { session ->
-            file.inputStream().use { input ->
-                session.openWrite("base.apk", 0, file.length()).use { out ->
-                    input.copyTo(out)
-                    session.fsync(out)
+        try {
+            installer.openSession(sessionId).use { session ->
+                file.inputStream().use { input ->
+                    session.openWrite("base.apk", 0, file.length()).use { out ->
+                        input.copyTo(out)
+                        session.fsync(out)
+                    }
                 }
+                val intent = Intent(c, InstallResultReceiver::class.java).setPackage(c.packageName)
+                val flags = PendingIntent.FLAG_UPDATE_CURRENT or
+                    (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) PendingIntent.FLAG_MUTABLE else 0)
+                val pending = PendingIntent.getBroadcast(c, sessionId, intent, flags)
+                prefs(c).edit { putBoolean(KEY_PENDING, false).remove(KEY_ERROR) }
+                session.commit(pending.intentSender)
             }
-            val intent = Intent(c, InstallResultReceiver::class.java).setPackage(c.packageName)
-            val flags = PendingIntent.FLAG_UPDATE_CURRENT or
-                (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) PendingIntent.FLAG_MUTABLE else 0)
-            val pending = PendingIntent.getBroadcast(c, sessionId, intent, flags)
-            prefs(c).edit { putBoolean(KEY_PENDING, false).remove(KEY_ERROR) }
-            session.commit(pending.intentSender)
+        } catch (e: Exception) {
+            // 쓰다 실패(저장공간 부족 등)한 설치 세션은 버린다 — 남겨 두면 다시 시도할 때마다 십수 MB 씩 쌓인다
+            runCatching { installer.abandonSession(sessionId) }
+            throw e
         }
     }
 

@@ -47,9 +47,13 @@
 
     <string name="back_to_map">지도로 돌아가기</string>
     <string name="nav_channel">길 안내</string>
+    <string name="nav_gave_up_title">%1$s 안내를 끝냈어요</string>
+    <string name="nav_gave_up_text">경로를 30분 넘게 벗어나 있어서 배터리를 아끼려고 안내를 껐어요. 다시 가려면 길찾기에서 안내 시작을 눌러 주세요.</string>
     <string name="transit_nav_note">‘안내 시작’을 누르면 화면이 꺼져도 위치를 따라가며, 갈아탈 곳과 내릴 정류장 근처에서 진동으로 알려 줘요.</string>
 
     <string name="update_available">새 버전 · 탭해서 업데이트</string>
+    <string name="update_deferred">화면을 닫아서 설치를 미뤘어요. 앱을 다 닫으면 알아서 설치돼요</string>
+    <string name="update_after_navigation">길안내 중이라 지금은 설치하지 않아요. 안내가 끝나고 앱을 닫으면 알아서 설치돼요</string>
 
     <string name="err_401">인증 실패 (401)\n카카오 콘솔에 패키지명·키 해시를\n등록했는지 확인하세요</string>
     <string name="err_403">권한 오류 (403)\n카카오맵 “사용 설정”이\nON 인지 확인하세요</string>

@@ -61,6 +61,38 @@ class BatteryAndAccessTest {
     }
 
     @Test
+    fun leftTheRouteIndoorsDoesNotKeepGpsAtOneSecond() {
+        val min = 60_000L
+        // 경로를 벗어나 걷는 중: 재탐색을 위해 1초
+        assertEquals(1_000L, LocationPolicy.navigation(nav(off = true), false, 1.3f, 0, sinceLostMs = 30_000).intervalMs)
+        // 벗어난 채로 멈춰 있음(카페에 들어감 등): 5초 — 움직이면 바로 1초로
+        assertEquals(5_000L, LocationPolicy.navigation(nav(off = true), false, 0f, 0, sinceLostMs = 30_000).intervalMs)
+        assertEquals(5_000L, LocationPolicy.navigation(nav(matched = false), false, 0f, 0, sinceLostMs = 30_000).intervalMs)
+        // 10분 넘게 경로 밖에 멈춰 있음: GPS 끄고 Wi-Fi·기지국 위치 15초
+        val parked = LocationPolicy.navigation(nav(off = true), false, 0f, 0, sinceLostMs = 11 * min)
+        assertEquals(LocPower.BALANCED, parked.power)
+        assertEquals(15_000L, parked.intervalMs)
+        assertEquals(LocPower.BALANCED, LocationPolicy.navigation(nav(matched = false), false, 0f, 0, sinceStartMs = 11 * min, sinceLostMs = 11 * min).power)
+        // 10분 넘게 벗어난 채 움직이는 중: GPS 3초 (밖에 나오면 재탐색할 수 있게)
+        val wandering = LocationPolicy.navigation(nav(off = true), false, 1.3f, 0, sinceLostMs = 11 * min)
+        assertEquals(LocPower.HIGH, wandering.power)
+        assertEquals(3_000L, wandering.intervalMs)
+        // 재탐색 중에는 언제나 1초
+        assertEquals(1_000L, LocationPolicy.navigation(nav(off = true).copy(rerouting = true), false, 0f, 0, sinceLostMs = 11 * min).intervalMs)
+    }
+
+    @Test
+    fun navigationEndsItselfAfterHalfAnHourOffTheRoute() {
+        val min = 60_000L
+        assertTrue(LocationPolicy.shouldGiveUp(nav(off = true), 31 * min))
+        assertTrue(!LocationPolicy.shouldGiveUp(nav(off = true), 29 * min))
+        // 출발 전 실내에서 오래 기다리는 것(한 번도 경로에 오르지 않음)은 끝내지 않는다
+        assertTrue(!LocationPolicy.shouldGiveUp(nav(matched = false), 60 * min))
+        // 버스·지하철 타는 중은 이탈로 보지 않는다
+        assertTrue(!LocationPolicy.shouldGiveUp(nav(ride = true), 60 * min))
+    }
+
+    @Test
     fun afterArrivalLocationCostsAlmostNothing() {
         val justArrived = LocationPolicy.navigation(nav(arrived = true), false, 0f, 30_000)
         assertEquals(LocPower.BALANCED, justArrived.power)

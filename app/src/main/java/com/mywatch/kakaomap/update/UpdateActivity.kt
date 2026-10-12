@@ -15,9 +15,11 @@ import androidx.lifecycle.lifecycleScope
 import androidx.wear.input.RemoteInputIntentHelper
 import com.kakao.vectormap.KakaoMapSdk
 import com.mywatch.kakaomap.R
+import com.mywatch.kakaomap.nav.NavigationService
 import com.mywatch.kakaomap.ui.Row
 import com.mywatch.kakaomap.ui.WearList
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
@@ -165,23 +167,41 @@ class UpdateActivity : ComponentActivity() {
             render()
             return
         }
+        if (NavigationService.running) {
+            // 설치하면 앱이 다시 시작돼 안내가 끊긴다 → 안내가 끝나면 알아서 설치
+            UpdateManager.recordError(this, getString(R.string.update_after_navigation))
+            render()
+            return
+        }
         busy = "내려받는 중…"
         render()
+        val app = applicationContext
         lifecycleScope.launch {
+            var deferred: String? = null
             val error = withContext(Dispatchers.IO) {
                 runCatching {
-                    val file = UpdateManager.download(this@UpdateActivity, info) { pct ->
+                    val file = UpdateManager.download(app, info) { pct ->
                         runOnUiThread {
                             busy = "내려받는 중… $pct%"
                             render()
                         }
                     }
-                    UpdateManager.verify(this@UpdateActivity, file, info)?.let { throw IllegalStateException(it) }
-                    UpdateManager.install(this@UpdateActivity, file)
+                    UpdateManager.verify(app, file, info)?.let { throw IllegalStateException(it) }
+                    if (!isActive || NavigationService.running) {
+                        // 받는 사이 화면을 닫았거나 안내를 시작함 → 지금 설치하면 쓰던 화면·안내가 끊기므로 미룬다
+                        // (받은 파일은 남겨 두고, 앱을 다 닫았을 때·안내가 끝났을 때 자동 설치가 이어서 설치)
+                        deferred = app.getString(
+                            if (NavigationService.running) R.string.update_after_navigation else R.string.update_deferred
+                        )
+                        UpdateInstallWorker.enqueueSoon(app)
+                    } else {
+                        UpdateManager.install(app, file)
+                    }
                 }.exceptionOrNull()
             }
-            busy = if (error == null) "$INSTALLING 앱이 잠시 닫혔다가 바뀌어요" else null
-            error?.let { UpdateManager.recordError(this@UpdateActivity, it.message ?: "업데이트 실패") }
+            busy = if (error == null && deferred == null) "$INSTALLING 앱이 잠시 닫혔다가 바뀌어요" else null
+            deferred?.let { UpdateManager.recordError(app, it) }
+            error?.let { UpdateManager.recordError(app, it.message ?: "업데이트 실패") }
             render()
         }
     }

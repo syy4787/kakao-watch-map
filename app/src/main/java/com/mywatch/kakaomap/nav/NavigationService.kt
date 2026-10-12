@@ -96,6 +96,10 @@ class NavigationService : Service() {
     /** 경로를 못 받은(안내 시작 후 아직 경로 위가 아닌) 시각 — 1초 간격을 무한정 쓰지 않게 */
     private var startedAt = 0L
     private var signalJob: Job? = null
+    /** 경로를 벗어났거나(이탈·정류장 지나침) 아직 경로에 못 오른 상태가 시작된 시각 (경로 위면 0) */
+    private var lostSince = 0L
+    /** 경로 밖에 오래 있을 때 위치가 안 들어와도 다시 판단하게 (10분: 저전력 위치로, 30분: 안내 끝냄) */
+    private var lostTimerJob: Job? = null
 
     private val callback = object : LocationCallback() {
         override fun onLocationResult(result: LocationResult) {
@@ -243,9 +247,18 @@ class NavigationService : Service() {
             reroutesWithoutMatch = 0
             lastRerouteAt = 0L
             startedAt = SystemClock.elapsedRealtime()
+            lostSince = 0L
+            lostTimerJob?.cancel()
         }
         updateNotification(active, s)
         if (s.matched && !s.offRoute && !s.passedStop) reroutesWithoutMatch = 0
+        trackLost(s)
+        if (LocationPolicy.shouldGiveUp(s, sinceLost())) {
+            // 경로를 벗어난 채 30분 — 잊고 둔 안내가 배터리를 다 쓰지 않게 스스로 끝낸다
+            notifyGaveUp(active)
+            finishRoute()
+            return
+        }
         if (s.arrived) {
             // 도착: 진행 중이던 재탐색은 버리고, 위치는 저전력으로 (2분 뒤엔 추가 전력 0), 5분 뒤 또는 300m 넘게 떠나면 끝
             if (rerouteJob?.isActive == true) rerouteJob?.cancel()
@@ -275,6 +288,46 @@ class NavigationService : Service() {
         applyPlan(planFor(active, s))
         // 도보·자전거: 경로를 벗어나면 다시 찾기. 대중교통: 정류장을 지나쳤거나 환승 도보 중 벗어나면 대중교통으로 다시 찾기
         if ((s.offRoute || s.passedStop) && !s.rerouting) maybeReroute(active)
+    }
+
+    /** 경로 밖에 있는 시간을 잰다. 위치가 안 들어와도 10분·30분 지점에서 다시 판단하도록 타이머를 건다 */
+    private fun trackLost(s: NavState) {
+        val lost = !s.arrived && (s.offRoute || s.passedStop || !s.matched)
+        if (!lost) {
+            lostSince = 0L
+            lostTimerJob?.cancel()
+            lostTimerJob = null
+            return
+        }
+        if (lostSince != 0L) return
+        lostSince = SystemClock.elapsedRealtime()
+        lostTimerJob?.cancel()
+        lostTimerJob = scope.launch {
+            delay(LocationPolicy.LOST_LONG_MS + 1_000)
+            onState(Navigator.state.value)
+            delay(LocationPolicy.GIVE_UP_MS - LocationPolicy.LOST_LONG_MS)
+            onState(Navigator.state.value)
+        }
+    }
+
+    private fun sinceLost(): Long = if (lostSince == 0L) 0L else SystemClock.elapsedRealtime() - lostSince
+
+    /** 안내를 스스로 끝냈다는 알림 (소리 없이) */
+    private fun notifyGaveUp(active: ActiveRoute) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) return
+        ensureChannel()
+        val n = NotificationCompat.Builder(this, CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_navigation)
+            .setContentTitle(getString(R.string.nav_gave_up_title, active.destinationName))
+            .setContentText(getString(R.string.nav_gave_up_text))
+            .setStyle(NotificationCompat.BigTextStyle().bigText(getString(R.string.nav_gave_up_text)))
+            .setContentIntent(openMapIntent())
+            .setAutoCancel(true)
+            .setSilent(true)
+            .build()
+        runCatching { getSystemService(NotificationManager::class.java)?.notify(GAVE_UP_NOTIFICATION_ID, n) }
     }
 
     /** 도착 후 안내를 스스로 끝낸다 (지도 화면이 열려 있으면 다음에 돌아올 때 경로가 지워져 있다) */
@@ -349,16 +402,18 @@ class NavigationService : Service() {
             lowBattery = BatteryInfo.isLow(this)
             batteryCheckedAt = now
         }
-        // 재탐색을 다 쓴 뒤에도 벗어나 있으면 1초 GPS 를 계속 쓰지 않는다 (경로로 돌아오면 다시 촘촘히)
-        if ((s.offRoute || s.passedStop) && rerouteCount >= MAX_REROUTES) return LocPlan(LocPower.HIGH, 3_000)
-        return LocationPolicy.navigation(
+        val plan = LocationPolicy.navigation(
             s,
             bike = active.mode == TravelMode.BIKE,
             speedMps = speedMps,
             sinceArrivalMs = now - arrivedAt,
             sinceStartMs = now - startedAt,
             lowBattery = lowBattery,
+            sinceLostMs = sinceLost(),
         )
+        // 재탐색을 다 쓴 뒤에도 벗어나 있으면 1초 GPS 를 계속 쓰지 않는다 (경로로 돌아오면 다시 촘촘히)
+        val exhausted = (s.offRoute || s.passedStop) && rerouteCount >= MAX_REROUTES
+        return if (exhausted && plan.power == LocPower.HIGH && plan.intervalMs < 3_000) plan.copy(intervalMs = 3_000) else plan
     }
 
     // ───────── 알림 · 진행 중 활동 ─────────
@@ -476,6 +531,8 @@ class NavigationService : Service() {
         finishJob?.cancel()
         signalJob?.cancel()
         retryJob?.cancel()
+        lostTimerJob?.cancel()
+        lostSince = 0L
         if (Navigator.state.value.signalLost) Navigator.setSignalLost(false)
         // 안내 중이라 미뤄 둔 자동 업데이트가 있으면 이제 설치 예약 (조건이 맞으면 곧바로)
         UpdateInstallWorker.enqueueSoon(this)
@@ -491,6 +548,7 @@ class NavigationService : Service() {
     companion object {
         private const val CHANNEL_ID = "navigation"
         private const val NOTIFICATION_ID = 42
+        private const val GAVE_UP_NOTIFICATION_ID = 43
         private const val ACTION_END = "com.mywatch.kakaomap.END_NAVIGATION"
         private const val REROUTE_INTERVAL_MS = 30_000L
         private const val PLAN_DWELL_MS = 5_000L

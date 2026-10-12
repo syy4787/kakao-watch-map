@@ -68,6 +68,17 @@ class DirectionsActivity : ComponentActivity() {
         load()
     }
 
+    override fun onResume() {
+        super.onResume()
+        // 그 사이 다른 목적지로 길찾기를 했으면(타일의 '집으로' 등) 이 화면의 경로 번호가 새 목록과 어긋나므로 닫는다
+        if (RouteRepository.destination !== dest) {
+            finish()
+            return
+        }
+        // 상세 화면 등에서 돌아오면 실시간 버스 도착을 새로 (30초 안에 받은 것은 저장해 둔 값을 씀)
+        if (mode == TravelMode.TRANSIT && liveTexts.isNotEmpty()) fetchLiveArrivals()
+    }
+
     private fun head(): List<Row> = listOf(
         Row.Header("→ ${dest.name}", originLabel),
         Row.ModeTabs(mode),

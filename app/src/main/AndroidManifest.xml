@@ -58,11 +58,12 @@
             </intent-filter>
         </activity>
 
-        <!-- 타일의 '집으로·회사로·검색' 버튼이 바로 여는 화면이라 exported (받는 값은 집/회사/검색 세 가지뿐) -->
+        <!-- 타일의 '집으로·회사로·검색' 버튼이 바로 여는 화면이라 exported (받는 값은 집/회사/검색 세 가지뿐).
+             singleTask: 타일로 다시 열면 그 위에 쌓인 옛 길찾기·상세 화면을 치우고 이 화면에서 새로 시작 -->
         <activity
             android:name=".ui.SearchActivity"
             android:exported="true"
-            android:launchMode="singleTop"
+            android:launchMode="singleTask"
             android:taskAffinity="com.mywatch.kakaomap.main" />
         <activity
             android:name=".ui.DirectionsActivity"

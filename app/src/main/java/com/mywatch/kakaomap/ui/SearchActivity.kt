@@ -57,9 +57,9 @@ class SearchActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_list)
         ui = WearList(this, ::onRow, ::onLongRow)
-        showHome()
-        // 음성 입력 중에 화면이 다시 만들어졌으면 '등록 중'을 이어 간다 (입력 결과가 곧 돌아옴)
-        registering = savedInstanceState?.getString(STATE_REGISTERING)?.let { runCatching { Favorite.valueOf(it) }.getOrNull() }
+        // 등록하던 중에 화면이 다시 만들어졌으면(음성 입력 중 앱이 정리됨 등) 등록 화면으로 이어 간다
+        val restored = savedInstanceState?.getString(STATE_REGISTERING)?.let { runCatching { Favorite.valueOf(it) }.getOrNull() }
+        if (restored != null) showRegister(restored) else showHome()
         if (savedInstanceState == null) handleShortcut(intent)
     }
 
@@ -175,6 +175,13 @@ class SearchActivity : ComponentActivity() {
     }
 
     private fun startRegister(kind: Favorite) {
+        showRegister(kind)
+        openInput()
+    }
+
+    /** 집·회사 등록 화면 (검색해서 고르면 등록) */
+    private fun showRegister(kind: Favorite) {
+        searchJob?.cancel()
         registering = kind
         menuFavorite = null
         menuPlace = null
@@ -184,7 +191,6 @@ class SearchActivity : ComponentActivity() {
             Row.Action(ACTION_INPUT, R.drawable.ic_search, getString(R.string.search_hint), accent = true),
             Row.Action(ACTION_CANCEL, R.drawable.ic_close, getString(R.string.cancel)),
         )
-        openInput()
     }
 
     private fun register(kind: Favorite, place: Place) {

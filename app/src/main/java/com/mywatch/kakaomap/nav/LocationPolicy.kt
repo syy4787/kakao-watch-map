@@ -29,6 +29,7 @@ data class LocPlan(
  *      버스에서 내릴 곳이 3km 넘게 → 15초, 1.5km 넘게 → 10초(모아 받기), 그 안 → 3초
  *      지하철(지하) → GPS 대신 기지국·Wi-Fi 위치 10초 (지하에선 GPS 가 위성을 찾느라 전기만 씀)
  *      실내 출발 등으로 1분 넘게 경로에 못 오름 → 3초 / 도착 → 2분간 저전력 10초, 그 뒤엔 추가 전력 0 인 '얻어 쓰기'
+ *      경로 밖에 멈춰 있음 → 5초, 10분 넘게 → GPS 끄고 Wi-Fi·기지국 15초, 벗어난 채 30분 → 안내를 스스로 끝냄
  *      배터리 15% 이하(충전 중 아님) → 간격 두 배 (회전 앞도 2초)
  *  · 워치가 폰과 연결돼 있으면 시스템이 폰·워치 중 전력이 덜 드는 쪽 위치를 쓴다 (Wear OS 기본 동작)
  * 순수 계산이라 단위 테스트로 검증한다.
@@ -42,6 +43,17 @@ object LocationPolicy {
     val AMBIENT_VIEW_ONLY = LocPlan(LocPower.HIGH, 10_000, maxDelayMs = 20_000, minDistanceM = 5f)
 
     const val STILL_MPS = 0.4f
+    /** 경로 밖에 이만큼 넘게 있으면 GPS 대신 Wi-Fi·기지국 위치(멈춰 있을 때) */
+    const val LOST_LONG_MS = 10 * 60_000L
+    /** 경로를 벗어난 채 이만큼 지나면 안내를 스스로 끝낸다 (잊고 둔 안내가 배터리를 다 쓰지 않게) */
+    const val GIVE_UP_MS = 30 * 60_000L
+
+    /**
+     * 안내를 스스로 끝낼지: 경로를 '벗어난'(이탈·정류장 지나침) 채 30분.
+     * 한 번도 경로에 오르지 않은 출발 전 대기, 버스·지하철 타는 중은 끝내지 않는다.
+     */
+    fun shouldGiveUp(s: NavState, sinceLostMs: Long): Boolean =
+        !s.arrived && !s.onRide && (s.offRoute || s.passedStop) && sinceLostMs >= GIVE_UP_MS
     const val AFTER_ARRIVAL_ACTIVE_MS = 2 * 60_000L
     private const val NOT_MATCHED_FAST_MS = 60_000L
 
@@ -52,6 +64,7 @@ object LocationPolicy {
      * @param sinceArrivalMs 도착한 뒤 지난 시간 (도착 전이면 무시)
      * @param sinceStartMs 안내를 시작한 뒤 지난 시간
      * @param lowBattery 배터리 15% 이하이면서 충전 중이 아님
+     * @param sinceLostMs 경로를 벗어났거나(이탈·정류장 지나침) 아직 경로에 못 오른 채 지난 시간 (경로 위면 0)
      */
     fun navigation(
         s: NavState,
@@ -60,8 +73,9 @@ object LocationPolicy {
         sinceArrivalMs: Long,
         sinceStartMs: Long = 0,
         lowBattery: Boolean = false,
+        sinceLostMs: Long = 0,
     ): LocPlan {
-        val plan = basePlan(s, bike, speedMps, sinceArrivalMs, sinceStartMs)
+        val plan = basePlan(s, bike, speedMps, sinceArrivalMs, sinceStartMs, sinceLostMs)
         if (!lowBattery || plan.power != LocPower.HIGH) return plan
         return plan.copy(
             intervalMs = maxOf(plan.intervalMs * 2, 2_000L),
@@ -69,17 +83,30 @@ object LocationPolicy {
         )
     }
 
-    private fun basePlan(s: NavState, bike: Boolean, speedMps: Float?, sinceArrivalMs: Long, sinceStartMs: Long): LocPlan {
+    private fun basePlan(
+        s: NavState, bike: Boolean, speedMps: Float?, sinceArrivalMs: Long, sinceStartMs: Long, sinceLostMs: Long,
+    ): LocPlan {
         if (s.arrived) {
             return if (sinceArrivalMs < AFTER_ARRIVAL_ACTIVE_MS) LocPlan(LocPower.BALANCED, 10_000, minDistanceM = 5f)
             else LocPlan(LocPower.PASSIVE, 60_000)
         }
-        // 이탈·재탐색·정류장 지나침 중에는 정확히 따라간다
-        if (s.offRoute || s.rerouting || s.passedStop) return LocPlan(LocPower.HIGH, 1_000)
-        // 아직 경로에 오르기 전: 처음 1분만 1초, 그 뒤(실내 등)엔 3초
-        if (!s.matched) return LocPlan(LocPower.HIGH, if (sinceStartMs < NOT_MATCHED_FAST_MS) 1_000 else 3_000)
-        val toNext = s.toActionM ?: s.toStepEndM ?: Int.MAX_VALUE
         val still = speedMps != null && speedMps < STILL_MPS
+        // 재탐색 중에는 정확히 따라간다 (잠깐)
+        if (s.rerouting) return LocPlan(LocPower.HIGH, 1_000)
+        if (s.offRoute || s.passedStop || !s.matched) {
+            return when {
+                // 10분 넘게 경로 밖: 멈춰 있으면(실내 등) GPS 를 끄고 Wi-Fi·기지국 위치, 움직이면 3초
+                sinceLostMs >= LOST_LONG_MS ->
+                    if (still) LocPlan(LocPower.BALANCED, 15_000, minDistanceM = 10f) else LocPlan(LocPower.HIGH, 3_000)
+                // 벗어난 채 멈춰 있음 → 5초 (움직이면 바로 촘촘히)
+                still -> LocPlan(LocPower.HIGH, 5_000, minDistanceM = 3f)
+                // 이탈·정류장 지나침: 재탐색할 수 있게 1초
+                s.offRoute || s.passedStop -> LocPlan(LocPower.HIGH, 1_000)
+                // 아직 경로에 오르기 전: 처음 1분만 1초, 그 뒤(실내 등)엔 3초
+                else -> LocPlan(LocPower.HIGH, if (sinceStartMs < NOT_MATCHED_FAST_MS) 1_000 else 3_000)
+            }
+        }
+        val toNext = s.toActionM ?: s.toStepEndM ?: Int.MAX_VALUE
         if (s.onRide) {
             if (s.onSubway) return LocPlan(LocPower.BALANCED, 10_000)                   // 지하: 기지국·Wi-Fi 위치
             return when {
