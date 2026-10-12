@@ -25,7 +25,7 @@ jobs:
         env:
           RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
         run: |
-          if [ -z "$RELEASE_KEY_PASSWORD" ]; then
+          if [ -z "$(printf '%s' "$RELEASE_KEY_PASSWORD" | tr -d '[:space:]')" ]; then
             echo "::warning::저장소 Settings > Secrets and variables > Actions 에 RELEASE_KEY_PASSWORD 를 추가하면 다음 커밋부터 배포돼요"
             echo "ready=false" >> "$GITHUB_OUTPUT"
           else
@@ -67,10 +67,17 @@ jobs:
         env:
           RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
         run: |
-          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -in signing/release.jks.enc \
-            -out "$RUNNER_TEMP/release.jks" -pass env:RELEASE_KEY_PASSWORD
-          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -in signing/secrets.properties.enc \
-            -out "$RUNNER_TEMP/secrets.properties" -pass env:RELEASE_KEY_PASSWORD
+          # 붙여넣다 섞인 공백·줄바꿈·'비밀번호:' 글자는 떼고 쓴다
+          PW=$(bash .github/scripts/signing-password.sh)
+          echo "::add-mask::$PW"
+          export PW
+          for f in release.jks secrets.properties; do
+            openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -in "signing/$f.enc" \
+              -out "$RUNNER_TEMP/$f" -pass env:PW || {
+                echo "::error::서명 비밀번호가 맞지 않아요. Settings > Secrets and variables > Actions 에서 RELEASE_KEY_PASSWORD 를 서명키_비밀번호.txt 의 값으로 다시 넣어 주세요"
+                exit 1
+              }
+          done
 
       # 키를 바꾸거나(TAGO 실시간 버스 키 추가 등) 할 때는 저장소 Secrets 에 같은 이름으로 넣으면
       # 암호화 파일보다 우선한다 (비어 있으면 무시)
@@ -82,7 +89,10 @@ jobs:
           SECRETS_FILE: ${{ runner.temp }}/secrets.properties
           KAKAO_REST_API_KEY: ${{ secrets.KAKAO_REST_API_KEY }}
           TAGO_SERVICE_KEY: ${{ secrets.TAGO_SERVICE_KEY }}
-        run: ./gradlew --no-daemon testDebugUnitTest assembleRelease
+        run: |
+          RELEASE_KEY_PASSWORD=$(bash .github/scripts/signing-password.sh)
+          export RELEASE_KEY_PASSWORD
+          ./gradlew --no-daemon testDebugUnitTest assembleRelease
 
       - name: Prepare release files
         if: steps.check.outputs.ready == 'true'
