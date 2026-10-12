@@ -83,6 +83,10 @@ object BusArrivalService {
     private class Cached(val text: String, val at: Long)
     private val cache = HashMap<String, Cached>()
     private const val TTL_MS = 30_000L
+    /** 승차 정류장 후보 (정류장 정보는 하루 한 번 바뀌므로 앱이 켜져 있는 동안 재사용 — 호출 수 절반) */
+    private val candidatesCache = HashMap<String, List<BusStop>>()
+    /** 이 노선 도착이 실제로 나온 정류장 — 다음 새로 고침부터 그곳을 먼저 물어본다 */
+    private val servingStop = HashMap<String, String>()
 
     /** 백그라운드 스레드에서 호출. 키가 없거나 못 찾으면 null */
     fun describe(step: TransitStep): String? {
@@ -95,9 +99,16 @@ object BusArrivalService {
             cache[cacheKey]?.let { if (System.currentTimeMillis() - it.at < TTL_MS) return it.text }
         }
         val text = try {
-            val stop = TransitMatching.pickStop(TagoApi.nearbyStops(boardCoord), step.boardingStop, boardCoord)
-                ?: return "실시간 정보 없음"
-            val mine = TransitMatching.arrivalsFor(TagoApi.arrivals(stop), names)
+            val candidates = synchronized(cache) { candidatesCache[cacheKey] } ?: TransitMatching.stopCandidates(
+                TagoApi.nearbyStops(boardCoord), step.boardingStop, boardCoord,
+            ).also { found -> synchronized(cache) { candidatesCache[cacheKey] = found } }
+            if (candidates.isEmpty()) return "실시간 정보 없음"
+            // 지난번에 맞았던 정류장을 먼저 (대전 시청처럼 같은 이름이 이웃 도시 데이터로도 있는 곳)
+            val known = synchronized(cache) { servingStop[cacheKey] }
+            val ordered = candidates.sortedBy { if (it.nodeId == known) 0 else 1 }
+            val hit = TransitMatching.firstServing(ordered, names) { TagoApi.arrivals(it) }
+            if (hit != null) synchronized(cache) { servingStop[cacheKey] = hit.first.nodeId }
+            val mine = hit?.second.orEmpty()
             when {
                 mine.isEmpty() -> "도착 정보 없음"
                 mine.size == 1 -> "${mine[0].routeNo}번 ${Format.busArrival(mine[0])}"

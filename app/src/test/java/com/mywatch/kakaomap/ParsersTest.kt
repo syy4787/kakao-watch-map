@@ -128,7 +128,11 @@ class ParsersTest {
     fun tagoErrorsAreReadable() {
         val err = JSONObject("""{"OpenAPI_ServiceResponse":{"cmmMsgHeader":{"errMsg":"SERVICE_KEY_IS_NOT_REGISTERED_ERROR",
             "returnAuthMsg":"등록되지 않은 서비스키","returnReasonCode":"30"}}}""")
-        assertEquals("등록되지 않은 서비스키", TagoParsers.errorMessage(err))
+        assertEquals("공공데이터 키가 이 기능에 아직 등록되지 않았어요", TagoParsers.errorMessage(err))
+        // 모르는 오류는 포털이 준 한국어 문구 그대로
+        val other = JSONObject("""{"OpenAPI_ServiceResponse":{"cmmMsgHeader":{"errMsg":"SERVICE_ACCESS_DENIED_ERROR",
+            "returnAuthMsg":"서비스 접근거부","returnReasonCode":"20"}}}""")
+        assertEquals("서비스 접근거부", TagoParsers.errorMessage(other))
     }
 
     @Test

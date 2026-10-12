@@ -137,11 +137,22 @@ object TagoParsers {
     fun errorMessage(json: JSONObject): String? {
         json.optJSONObject("OpenAPI_ServiceResponse")?.let { r ->
             val h = r.optJSONObject("cmmMsgHeader")
-            return h?.optString("returnAuthMsg")?.ifBlank { null } ?: h?.optString("errMsg") ?: "공공데이터 오류"
+            return portalError(h?.optString("errMsg").orEmpty(), h?.optString("returnReasonCode").orEmpty())
+                ?: h?.optString("returnAuthMsg")?.ifBlank { null } ?: h?.optString("errMsg")?.ifBlank { null } ?: "공공데이터 오류"
         }
         val header = json.optJSONObject("response")?.optJSONObject("header") ?: return "공공데이터 응답 형식 오류"
         val code = header.optString("resultCode")
         return if (code == "00" || code == "0") null else header.optString("resultMsg").ifBlank { "공공데이터 오류($code)" }
+    }
+
+    /** 공공데이터포털 공통 오류 → 알아듣기 쉬운 말 (모르는 것은 null) */
+    private fun portalError(msg: String, code: String): String? = when {
+        msg.startsWith("SERVICE_KEY_IS_NOT_REGISTERED") || code == "30" -> "공공데이터 키가 이 기능에 아직 등록되지 않았어요"
+        msg.startsWith("LIMITED_NUMBER_OF_SERVICE_REQUESTS") || code == "22" -> "오늘 공공데이터 사용량을 다 썼어요"
+        msg.startsWith("HTTP_ERROR") || msg.startsWith("APPLICATION_ERROR") || code == "04" || code == "4" || code == "01" || code == "1" ->
+            "실시간 정보를 잠시 받을 수 없어요"
+        msg.startsWith("DEADLINE_HAS_EXPIRED") || code == "31" -> "공공데이터 활용 기간이 끝났어요"
+        else -> null
     }
 
     /** items 가 비면 "" , 하나면 객체, 여러 개면 배열로 오는 TAGO 특유의 형식을 모두 처리 */

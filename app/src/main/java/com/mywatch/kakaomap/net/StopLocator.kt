@@ -6,6 +6,7 @@ import com.mywatch.kakaomap.data.ActiveRoute
 import com.mywatch.kakaomap.model.Coord
 import com.mywatch.kakaomap.model.Geo
 import com.mywatch.kakaomap.model.StopPlacer
+import com.mywatch.kakaomap.model.TransitMatching
 import com.mywatch.kakaomap.model.TransitStep
 import com.mywatch.kakaomap.model.TransitStepType
 import com.mywatch.kakaomap.nav.Navigator
@@ -73,7 +74,10 @@ object StopLocator {
         val board = step.boardingStop ?: return null
         val alight = step.alightingStop ?: return null
         val start = step.points.firstOrNull() ?: return null
-        val city = TagoApi.nearbyStops(start).firstOrNull()?.cityCode ?: return null
+        // 같은 정류장이 이웃 도시 데이터로도 나오므로 이 도시(가장 많이 나온 도시 코드) 것을 고른다
+        val nearby = TagoApi.nearbyStops(start)
+        val city = TransitMatching.stopCandidates(nearby, board, start).firstOrNull()?.cityCode
+            ?: TransitMatching.dominantCity(nearby) ?: return null
         val names = step.vehicles.map { it.name }.filter { it.isNotBlank() }
         for (no in names.take(2)) {
             for (r in TagoApi.routes(city, no).filter { it.routeNo == no }.take(3)) {
