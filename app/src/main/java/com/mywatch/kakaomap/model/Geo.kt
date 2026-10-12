@@ -62,6 +62,8 @@ data class GuideStep(
     val board: String? = null,
     /** 도보·자전거 경로 API 구간 — 문구가 '이 구간 시작에서 할 일'(좌회전·횡단보도 …)을 담고 있어 회전 안내에 쓴다 */
     val turnGuidance: Boolean = false,
+    /** 이 구간 예상 소요 시간(초, 모르면 0) — 타는 중 '7분' 계산용 */
+    val timeSec: Int = 0,
 )
 
 /** 경로 위 현재 진행 상황 */

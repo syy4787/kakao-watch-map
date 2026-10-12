@@ -9,6 +9,7 @@ import com.mywatch.kakaomap.model.Maneuver
 import com.mywatch.kakaomap.model.Maneuvers
 import com.mywatch.kakaomap.model.RouteProgress
 import kotlin.math.abs
+import kotlin.math.ceil
 import kotlin.math.cos
 import kotlin.math.max
 import kotlin.math.min
@@ -378,7 +379,7 @@ class NavEngine(
                 }
             } else {
                 alightCount = 0
-                say = rideSay(cur, p.toStepEndM, left)
+                say = rideSay(cur, p.toStepEndM, left, len)
             }
             icon = vehicleIcon(cur)
         } else {
@@ -490,15 +491,23 @@ class NavEngine(
 
     /**
      * 타고 가는 중: "1.2km 후 하차" / "은하수네거리 · 617번".
-     * 배너는 [버스 1.2km] 3정거장 남음 / 은하수네거리 하차 (정류장 정보가 없으면 '617번 타는 중')
+     * 배너는 카카오맵 알림("정류장 3개(7분)")처럼 [버스 1.2km] 3정거장 · 7분 / 은하수네거리 하차.
+     * 정류장 위치를 모르면 '7분 후 하차', 소요 시간도 모르면 '617번 타는 중'.
      */
-    private fun rideSay(cur: GuideStep, d: Int, left: Int?): Say {
+    private fun rideSay(cur: GuideStep, d: Int, left: Int?, len: Double): Say {
         val where = listOfNotNull(cur.alight, cur.line).joinToString(" · ")
         val main = if (left != null) "${left}정거장 남음 · ${Format.distance(d)}" else "${Format.distance(d)} 후 하차"
         val name = cur.line ?: (if (cur.subway) "지하철" else "버스")
+        // 남은 시간 ≈ 구간 소요 시간 × 남은 거리 비율 (올림, 최소 1분)
+        val minutes = if (cur.timeSec > 0 && len > 1.0) ceil(cur.timeSec * (d / len) / 60.0).toInt().coerceAtLeast(1) else null
         // 정류장 이름이 길면 '하차'는 빼서 이름이 잘리지 않게
-        val sub = cur.alight?.let { if (it.length <= 6) "$it 하차" else it }
-        val title = if (left != null) "${left}정거장 남음" else "$name 타는 중"
+        val stopSub = cur.alight?.let { if (it.length <= 6) "$it 하차" else it }
+        val (title, sub) = when {
+            left != null && minutes != null -> "${left}정거장 · ${minutes}분" to stopSub
+            left != null -> "${left}정거장 남음" to stopSub
+            minutes != null -> "${minutes}분 후 하차" to cur.alight
+            else -> "$name 타는 중" to stopSub
+        }
         return Say(if (where.isEmpty()) main else "$main\n$where", title, sub, d)
     }
 

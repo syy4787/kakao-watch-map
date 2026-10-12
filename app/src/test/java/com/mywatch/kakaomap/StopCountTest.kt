@@ -70,6 +70,33 @@ class StopCountTest {
     }
 
     @Test
+    fun ridingShowsStopsAndMinutesLikeKakao() {
+        // 카카오맵 알림처럼 "정류장 3개(7분)" — 구간 소요 시간(10분)을 남은 거리 비율로 나눠 셈
+        val timed = route.mapIndexed { i, s -> if (i == 1) s.copy(timeSec = 600) else s }
+        fun ride(withStops: Boolean, check: (NavEngine) -> Unit) {
+            val e = NavEngine(timed, dest, 1)
+            if (withStops) e.setStops(1, listOf(500.0, 1_000.0, 1_500.0, 2_000.0))
+            var t = 0L
+            var s = 0.0
+            while (s <= 800.0) {
+                e.update(Coord(37.0, 127.0 + s / 88_900.0), 5f, t)
+                s += 40.0
+                t += 5_000
+            }
+            check(e)
+        }
+        ride(withStops = true) { e ->
+            assertTrue(e.state.bannerTitle!!, Regex("""3정거장 · [67]분""").matches(e.state.bannerTitle!!))
+            assertEquals("E 하차", e.state.bannerSub)
+        }
+        // 정류장 위치를 모르면 시간만: "6분 후 하차" / 내릴 곳 이름
+        ride(withStops = false) { e ->
+            assertTrue(e.state.bannerTitle!!, Regex("""[5-7]분 후 하차""").matches(e.state.bannerTitle!!))
+            assertEquals("E", e.state.bannerSub)
+        }
+    }
+
+    @Test
     fun withoutStopPositionsDistanceIsUsed() {
         val e = NavEngine(route, dest, 1)
         var t = 0L

@@ -48,6 +48,7 @@ object TransitGuide {
             approx = it.approx,
             line = lineName(it),
             board = if (ride) it.boardingStop?.ifBlank { null } else null,
+            timeSec = it.timeSec,
         )
     }
 }
