@@ -107,6 +107,11 @@ class MainActivity : ComponentActivity() {
     private var mapFailed = false
     private var controlsShown = false
     private var inAmbient = false
+    /**
+     * onResume ~ onPause 사이인지. lifecycle.currentState 는 onResume() 이 '끝난 뒤'에야 RESUMED 가 되므로
+     * onResume 안에서 위치 요청을 판단하려면 직접 표시해 둔 값을 써야 한다 (실기기에서 복귀 후 위치가 멈추던 문제)
+     */
+    private var screenResumed = false
     private var ambientRouteVersion = -1
     private var lastAmbientKey: Any? = null
     private var lastAmbientAt = 0L
@@ -359,6 +364,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        screenResumed = true
         if (mapStarted && !inAmbient) mapView.resume()   // 카카오 필수
         if (kakaoMap != null) {
             syncRoute()
@@ -370,6 +376,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onPause() {
+        screenResumed = false
         super.onPause()
         if (mapStarted && !mapView.isPaused) mapView.pause()    // 카카오 필수
         // 화면 쪽 위치 수신은 멈춘다. '안내 시작'한 경로는 안내 서비스가 계속 따라간다
@@ -630,7 +637,7 @@ class MainActivity : ComponentActivity() {
     @SuppressLint("MissingPermission")
     private fun refreshLocationPlan() {
         val wanted = Locator.hasPermission(this) && kakaoMap != null &&
-            lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED) &&
+            screenResumed &&
             (locMode != LocMode.NONE || RouteRepository.activeRoute != null)
         val plan = when {
             !wanted -> null
