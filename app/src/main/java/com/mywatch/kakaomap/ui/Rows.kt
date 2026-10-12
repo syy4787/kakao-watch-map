@@ -10,6 +10,8 @@ import androidx.annotation.DrawableRes
 import androidx.core.content.ContextCompat
 import androidx.recyclerview.widget.RecyclerView
 import com.mywatch.kakaomap.R
+import com.mywatch.kakaomap.data.Favorite
+import com.mywatch.kakaomap.data.FavoriteSlot
 import com.mywatch.kakaomap.data.RoutePresentation
 import com.mywatch.kakaomap.model.Format
 import com.mywatch.kakaomap.model.Place
@@ -23,6 +25,7 @@ sealed class Row {
     data class Header(val title: String, val subtitle: String? = null) : Row()
     data class Action(val id: String, @param:DrawableRes val icon: Int, val text: String, val accent: Boolean = false) : Row()
     data class PlaceItem(val place: Place, val recent: Boolean = false) : Row()
+    data class FavoriteItem(val slot: FavoriteSlot) : Row()
     data class ModeTabs(val selected: TravelMode) : Row()
     data class TransitCard(val index: Int, val route: TransitRoute, val live: String? = null) : Row()
     data class SimpleCard(val route: SimpleRoute) : Row()
@@ -38,8 +41,11 @@ sealed class Row {
     data class Note(val text: String) : Row()
 }
 
-/** 여러 줄 종류를 한 목록에 그리는 어댑터 */
-class RowAdapter(private val onClick: (Row) -> Unit) : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
+/** 여러 줄 종류를 한 목록에 그리는 어댑터. [onLongClick] 이 있으면 장소·집·회사 줄을 길게 눌러 메뉴를 연다 */
+class RowAdapter(
+    private val onClick: (Row) -> Unit,
+    private val onLongClick: ((Row) -> Unit)? = null,
+) : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
 
     var rows: List<Row> = emptyList()
         set(value) {
@@ -58,6 +64,7 @@ class RowAdapter(private val onClick: (Row) -> Unit) : RecyclerView.Adapter<Recy
         is Row.Header -> R.layout.item_header
         is Row.Action -> R.layout.item_action
         is Row.PlaceItem -> R.layout.item_place
+        is Row.FavoriteItem -> R.layout.item_favorite
         is Row.ModeTabs -> R.layout.item_mode_tabs
         is Row.TransitCard -> R.layout.item_transit_card
         is Row.SimpleCard -> R.layout.item_simple_card
@@ -94,6 +101,21 @@ class RowAdapter(private val onClick: (Row) -> Unit) : RecyclerView.Adapter<Recy
                 v.text(R.id.meta).show(meta.ifBlank { null })
                 v.text(R.id.address).show(p.displayAddress.ifBlank { null })
                 v.setOnClickListener { onClick(row) }
+                v.longClick(row)
+            }
+            is Row.FavoriteItem -> {
+                val slot = row.slot
+                v.findViewById<ImageView>(R.id.icon).setImageResource(
+                    if (slot.kind == Favorite.HOME) R.drawable.ic_home else R.drawable.ic_work
+                )
+                v.text(R.id.title).text = slot.title
+                v.text(R.id.subtitle).apply {
+                    text = slot.subtitle
+                    setTextColor(color(v, if (slot.place == null) R.color.accent_light else R.color.text_secondary))
+                }
+                v.contentDescription = "${slot.title}, ${slot.subtitle}"
+                v.setOnClickListener { onClick(row) }
+                if (slot.place != null) v.longClick(row) else v.longClick(null)
             }
             is Row.ModeTabs -> {
                 val tabs = mapOf(
@@ -162,6 +184,16 @@ class RowAdapter(private val onClick: (Row) -> Unit) : RecyclerView.Adapter<Recy
     }
 
     private fun View.text(id: Int): TextView = findViewById(id)
+
+    private fun View.longClick(row: Row?) {
+        val handler = onLongClick
+        if (row == null || handler == null) {
+            setOnLongClickListener(null)
+            isLongClickable = false
+        } else {
+            setOnLongClickListener { handler(row); true }
+        }
+    }
 
     private fun TextView.show(value: String?) {
         if (value.isNullOrBlank()) {

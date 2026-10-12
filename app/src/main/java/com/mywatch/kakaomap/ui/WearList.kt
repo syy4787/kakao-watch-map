@@ -8,11 +8,11 @@ import androidx.wear.widget.WearableRecyclerView
 import com.mywatch.kakaomap.R
 
 /** 둥근 화면용 목록 화면 공통 설정 */
-class WearList(activity: Activity, onClick: (Row) -> Unit) {
+class WearList(activity: Activity, onClick: (Row) -> Unit, onLongClick: ((Row) -> Unit)? = null) {
 
     val list: WearableRecyclerView = activity.findViewById(R.id.list)
     private val status: TextView = activity.findViewById(R.id.status)
-    val adapter = RowAdapter(onClick)
+    val adapter = RowAdapter(onClick, onLongClick)
 
     init {
         val dm = activity.resources.displayMetrics

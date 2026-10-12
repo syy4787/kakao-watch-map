@@ -7,11 +7,11 @@ import com.mywatch.kakaomap.model.Coord
 import com.mywatch.kakaomap.model.Fix
 import com.mywatch.kakaomap.model.GuideStep
 import com.mywatch.kakaomap.model.Place
+import com.mywatch.kakaomap.model.PlaceJson
 import com.mywatch.kakaomap.model.SimpleRoute
 import com.mywatch.kakaomap.model.TransitRoute
 import com.mywatch.kakaomap.model.TravelMode
 import org.json.JSONArray
-import org.json.JSONObject
 
 /** 지도에 그릴 선 한 토막 */
 data class MapSegment(val points: List<Coord>, val color: Int, val widthDp: Float)
@@ -98,36 +98,18 @@ object RouteRepository {
         val raw = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_RECENTS, null) ?: return emptyList()
         return runCatching {
             val arr = JSONArray(raw)
-            (0 until arr.length()).mapNotNull { i -> arr.optJSONObject(i)?.toPlace() }
+            (0 until arr.length()).mapNotNull { i -> arr.optJSONObject(i)?.let(PlaceJson::fromJson) }
         }.getOrDefault(emptyList())
     }
 
     fun addRecent(context: Context, place: Place) {
         val list = (listOf(place) + recents(context).filter { it.id != place.id || it.name != place.name }).take(10)
         val arr = JSONArray()
-        list.forEach { arr.put(it.toJson()) }
+        list.forEach { arr.put(PlaceJson.toJson(it)) }
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit { putString(KEY_RECENTS, arr.toString()) }
     }
 
     fun clearRecents(context: Context) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit { remove(KEY_RECENTS) }
-    }
-
-    private fun Place.toJson() = JSONObject()
-        .put("id", id).put("name", name).put("category", category)
-        .put("address", address).put("road", roadAddress)
-        .put("lat", coord.lat).put("lng", coord.lng)
-
-    private fun JSONObject.toPlace(): Place? {
-        if (!has("lat") || !has("lng")) return null
-        return Place(
-            id = optString("id"),
-            name = optString("name"),
-            category = optString("category"),
-            address = optString("address"),
-            roadAddress = optString("road"),
-            coord = Coord(optDouble("lat"), optDouble("lng")),
-            distanceM = null,
-        )
     }
 }

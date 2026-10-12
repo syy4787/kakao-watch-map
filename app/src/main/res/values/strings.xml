@@ -24,6 +24,14 @@
     <string name="searching">검색 중…</string>
     <string name="no_results">검색 결과가 없어요</string>
     <string name="app_info_update">앱 정보 · 업데이트</string>
+    <string name="fav_hint">최근 목적지를 길게 누르면 집·회사로 등록돼요</string>
+    <string name="fav_registered">%1$s 등록했어요</string>
+    <string name="fav_pick">%1$s 등록할 곳</string>
+    <string name="fav_prompt">%1$s 등록할 곳을 말하거나 입력하세요</string>
+    <string name="fav_change">다른 곳으로 바꾸기</string>
+    <string name="fav_remove">%1$s 지우기</string>
+    <string name="fav_set">%1$s 등록</string>
+    <string name="cancel">취소</string>
 
     <string name="routing">경로 찾는 중…</string>
     <string name="show_on_map">지도에서 보기</string>
