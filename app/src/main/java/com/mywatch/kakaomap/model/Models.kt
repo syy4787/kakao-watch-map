@@ -18,9 +18,14 @@ data class Place(
     val roadAddress: String,
     val coord: Coord,
     val distanceM: Int?,
+    /** 카카오 카테고리 그룹 코드 (SW8 = 지하철역 …) */
+    val group: String = "",
 ) {
     val displayAddress: String get() = roadAddress.ifBlank { address }
 }
+
+/** TAGO 버스 노선 (노선 번호로 찾은 것) */
+data class BusRoute(val routeId: String, val routeNo: String)
 
 enum class TravelMode { TRANSIT, WALK, BIKE }
 

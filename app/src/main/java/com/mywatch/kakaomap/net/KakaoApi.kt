@@ -32,6 +32,14 @@ object KakaoApi {
         return KakaoParsers.places(call("/v2/local/search/keyword.json", params))
     }
 
+    /** 지하철역 찾기 (카테고리 SW8 만) */
+    fun subwayStations(query: String, near: Coord): List<Place> = KakaoParsers.places(
+        call("/v2/local/search/keyword.json", linkedMapOf(
+            "query" to query, "category_group_code" to "SW8", "x" to near.lng.fmt(), "y" to near.lat.fmt(),
+            "radius" to "20000", "sort" to "accuracy", "size" to "15",
+        ))
+    ).filter { it.group == "SW8" }
+
     fun transit(from: Coord, to: Coord, toName: String): List<TransitRoute> =
         KakaoParsers.transitRoutes(call("/v2/routing/publictraffic", routeParams(from, to, toName)))
             .map { TransitAccess.withAccessWalks(it, from, to, toName) }
@@ -72,7 +80,7 @@ object KakaoApi {
             "카카오맵 사용 설정이 꺼져 있어요\n(디벨로퍼스 > 카카오맵 > 사용 설정 ON)"
         code == 401 -> "REST API 키 인증 실패 (401)"
         code == 403 -> "권한 오류 (403)"
-        code == 429 -> "오늘 사용량을 다 썼어요 (429)"
+        code == 429 || (code == 400 && Regex(""""code"\s*:\s*-10\b""").containsMatchIn(body)) -> "오늘 사용량을 다 썼어요"
         code >= 500 -> "카카오 서버 오류 ($code)"
         else -> "요청 오류 ($code)"
     }

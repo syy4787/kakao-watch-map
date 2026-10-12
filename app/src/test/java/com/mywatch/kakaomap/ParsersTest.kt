@@ -6,6 +6,7 @@ import com.mywatch.kakaomap.model.TagoParsers
 import com.mywatch.kakaomap.model.TransitStepType
 import com.mywatch.kakaomap.model.TravelMode
 import com.mywatch.kakaomap.update.UpdateInfo
+import com.mywatch.kakaomap.net.KakaoApi
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -135,5 +136,31 @@ class ParsersTest {
         assertEquals(105L, info.versionCode)
         assertEquals("abcdef", info.sha256)   // 소문자로 맞춤
         assertEquals(info, UpdateInfo.parse(info.toJson()))
+    }
+
+    @Test
+    fun tagoRouteListAndStopsInRouteOrder() {
+        val routes = TagoParsers.routes(JSONObject("""{"response":{"header":{"resultCode":"00","resultMsg":"OK"},
+            "body":{"items":{"item":[{"routeid":"DJB30300004","routeno":707,"routetp":"간선버스"},
+                                     {"routeid":"DJB30300005","routeno":"707-1"}]}}}}"""))
+        assertEquals(listOf("DJB30300004", "DJB30300005"), routes.map { it.routeId })
+        assertEquals("707", routes[0].routeNo)
+        // 응답 순서가 섞여 와도 nodeord(노선 순서)로 정렬
+        val stops = TagoParsers.routeStops(JSONObject("""{"response":{"header":{"resultCode":"00","resultMsg":"OK"},
+            "body":{"items":{"item":[
+              {"nodeid":"DJB2","nodenm":"시청역","nodeord":2,"gpslati":36.351,"gpslong":127.386},
+              {"nodeid":"DJB1","nodenm":"대전광역시청","nodeord":1,"gpslati":36.350,"gpslong":127.384},
+              {"nodeid":"DJB3","nodenm":"목련아파트","nodeord":3,"gpslati":36.352}]}}}}"""))
+        assertEquals(listOf("대전광역시청", "시청역"), stops.map { it.name })
+    }
+
+    @Test
+    fun kakaoPlacesKeepCategoryGroupAndQuotaIsExplained() {
+        val places = KakaoParsers.places(JSONObject("""{"documents":[
+            {"id":"1","place_name":"탄방역 대전1호선","category_name":"교통,수송 > 지하철,전철 > 대전1호선",
+             "category_group_code":"SW8","address_name":"","road_address_name":"","x":"127.38456","y":"36.34554"}]}"""))
+        assertEquals("SW8", places[0].group)
+        assertEquals("오늘 사용량을 다 썼어요", KakaoApi.errorMessage(400, """{"code":-10,"msg":"API limit has been exceeded."}"""))
+        assertEquals("오늘 사용량을 다 썼어요", KakaoApi.errorMessage(429, ""))
     }
 }

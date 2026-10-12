@@ -2,6 +2,7 @@ package com.mywatch.kakaomap.net
 
 import com.mywatch.kakaomap.BuildConfig
 import com.mywatch.kakaomap.model.BusArrival
+import com.mywatch.kakaomap.model.BusRoute
 import com.mywatch.kakaomap.model.BusStop
 import com.mywatch.kakaomap.model.Coord
 import com.mywatch.kakaomap.model.Format
@@ -39,6 +40,20 @@ object TagoApi {
             "nodeId" to stop.nodeId,
             "numOfRows" to "50",
             "pageNo" to "1",
+        ))
+    )
+
+    /** 노선 번호로 노선 찾기 (같은 번호의 여러 노선이 나올 수 있음) */
+    fun routes(cityCode: Int, routeNo: String): List<BusRoute> = TagoParsers.routes(
+        call("/BusRouteInfoInqireService/getRouteNoList", mapOf(
+            "cityCode" to cityCode.toString(), "routeNo" to routeNo, "numOfRows" to "20", "pageNo" to "1",
+        ))
+    )
+
+    /** 노선이 지나는 정류소 (노선 순서대로, 좌표 포함) */
+    fun routeStops(cityCode: Int, routeId: String): List<BusStop> = TagoParsers.routeStops(
+        call("/BusRouteInfoInqireService/getRouteAcctoThrghSttnList", mapOf(
+            "cityCode" to cityCode.toString(), "routeId" to routeId, "numOfRows" to "300", "pageNo" to "1",
         ))
     )
 

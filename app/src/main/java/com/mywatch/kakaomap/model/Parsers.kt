@@ -23,6 +23,7 @@ object KakaoParsers {
                 roadAddress = d.optString("road_address_name"),
                 coord = Coord(lat, lng),
                 distanceM = d.optString("distance").toIntOrNull(),
+                group = d.optString("category_group_code"),
             )
         }
     }
@@ -166,6 +167,22 @@ object TagoParsers {
             coord = Coord(lat, lng),
         )
     }
+
+    /** 노선 번호 검색 결과 (getRouteNoList) */
+    fun routes(json: JSONObject): List<BusRoute> = items(json).mapNotNull { o ->
+        val id = o.optString("routeid").ifBlank { null } ?: return@mapNotNull null
+        BusRoute(id, o.opt("routeno")?.toString()?.trim().orEmpty())
+    }
+
+    /** 노선이 지나는 정류소 (getRouteAcctoThrghSttnList) — 노선 순서(nodeord)대로 */
+    fun routeStops(json: JSONObject): List<BusStop> = items(json).mapNotNull { o ->
+        val lat = o.optDouble("gpslati", Double.NaN)
+        val lng = o.optDouble("gpslong", Double.NaN)
+        if (lat.isNaN() || lng.isNaN()) return@mapNotNull null
+        o.optInt("nodeord", Int.MAX_VALUE) to BusStop(
+            cityCode = 0, nodeId = o.optString("nodeid"), name = o.optString("nodenm"), coord = Coord(lat, lng),
+        )
+    }.sortedBy { it.first }.map { it.second }
 
     fun arrivals(json: JSONObject): List<BusArrival> = items(json).mapNotNull { o ->
         val routeNo = o.opt("routeno")?.toString()?.trim().orEmpty()

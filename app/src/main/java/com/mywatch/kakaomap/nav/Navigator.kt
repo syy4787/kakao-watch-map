@@ -10,6 +10,7 @@ import androidx.annotation.MainThread
 import com.mywatch.kakaomap.data.RouteRepository
 import com.mywatch.kakaomap.model.Fix
 import com.mywatch.kakaomap.model.TravelMode
+import com.mywatch.kakaomap.net.StopLocator
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
@@ -38,6 +39,8 @@ object Navigator {
         if (engine?.routeVersion == version) return
         engine = NavEngine(active.steps, active.destination, version, bike = active.mode == TravelMode.BIKE, destinationName = active.destinationName)
             .also { _state.value = it.state }
+        // 버스·지하철 정류장 위치는 네트워크로 받아 와서 나중에 넣는다 ('정류장 n개 남음')
+        if (active.mode == TravelMode.TRANSIT) StopLocator.start(active, version)
         lastFixElapsed = 0L
     }
 
@@ -60,6 +63,14 @@ object Navigator {
         val eng = engine ?: return
         eng.setRerouting(on)
         _state.value = eng.state
+    }
+
+    /** 탈 것 구간의 정류장 위치 (다른 경로로 바뀌었으면 무시) */
+    @MainThread
+    fun setStops(routeVersion: Int, stepIndex: Int, along: List<Double>) {
+        val eng = engine ?: return
+        if (eng.routeVersion != routeVersion) return
+        eng.setStops(stepIndex, along)
     }
 
     /** GPS 신호를 한동안 못 받음 / 다시 받음 (배너에 '신호 약함' 표시) */

@@ -130,6 +130,8 @@ class NavEngine(
     /** 정류장에 도착한 적 있는 탈 것 구간 (기다리는 동안 문구 고정) */
     private val atStop = HashSet<Int>()
     private val passedAlerted = HashSet<Int>()
+    /** 탈 것 구간마다 '탄 뒤 지날 정류장들'의 노선상 거리(m, 마지막 = 내릴 곳) — 있으면 '정류장 n개 남음' */
+    private val stopAlong = HashMap<Int, DoubleArray>()
 
     // 튄 위치 거르기: 마지막으로 인정한 '경로상 위치'(출발점부터 m)와 시각
     private var confirmedPos = -1.0
@@ -352,14 +354,23 @@ class NavEngine(
         val icon: NavIcon
         val say: Say
         if (cur.ride) {
-            // ── 하차 알림: 탄 뒤 어느 정도 가고 나서, 내릴 곳까지 기준 거리 안에 두 번 연속 들어오면 한 번
+            // ── 하차 알림: 탄 뒤 어느 정도 가고 나서, 다음 정류장이 내릴 곳이면(정류장 정보가 없으면 남은 거리로)
+            //    두 번 연속 확인되면 한 번
             val len = stepLen[p.stepIndex]
+            val progress = len - p.toStepEndM
             val limit = min((if (cur.subway) SUBWAY_ALIGHT_M else BUS_ALIGHT_M).toDouble(), len * 0.5)
-            if (len - p.toStepEndM >= min(ARM_PROGRESS_M, len * 0.3)) alightArmed += p.stepIndex
-            if (p.stepIndex in alightArmed && p.toStepEndM <= limit) {
+            if (progress >= min(ARM_PROGRESS_M, len * 0.3)) alightArmed += p.stepIndex
+            val left = stopAlong[p.stepIndex]?.count { it > progress + STOP_AHEAD_M }
+            val soon = p.stepIndex in alightArmed && (if (left != null) left <= 1 else p.toStepEndM <= limit)
+            if (soon) {
+                val title = when (left) {
+                    null -> "곧 하차"
+                    1 -> "다음 정류장 하차"
+                    else -> "이번 정류장 하차"
+                }
                 say = Say(
                     (cur.alight?.let { "곧 하차 · $it" } ?: "곧 하차") + "\n${Format.distance(p.toStepEndM)} 남음",
-                    "곧 하차", cur.alight, p.toStepEndM,
+                    title, cur.alight, p.toStepEndM,
                 )
                 val alightAcc = if (cur.subway) SUBWAY_DECISION_ACCURACY_M else DECISION_ACCURACY_M
                 if (acc <= alightAcc && ++alightCount >= CONFIRM_FIXES && alightAlerted.add(p.stepIndex)) {
@@ -367,7 +378,7 @@ class NavEngine(
                 }
             } else {
                 alightCount = 0
-                say = rideSay(cur, p.toStepEndM)
+                say = rideSay(cur, p.toStepEndM, left)
             }
             icon = vehicleIcon(cur)
         } else {
@@ -477,14 +488,27 @@ class NavEngine(
         return Say(main + (ride.board?.let { "\n$it" } ?: ""), "$name 승차", ride.board, if (near) null else d)
     }
 
-    /** 타고 가는 중: "1.2km 후 하차" / "은하수네거리 · 617번" — 배너는 [버스 1.2km] 617번 타는 중 / 은하수네거리 하차 */
-    private fun rideSay(cur: GuideStep, d: Int): Say {
+    /**
+     * 타고 가는 중: "1.2km 후 하차" / "은하수네거리 · 617번".
+     * 배너는 [버스 1.2km] 3정거장 남음 / 은하수네거리 하차 (정류장 정보가 없으면 '617번 타는 중')
+     */
+    private fun rideSay(cur: GuideStep, d: Int, left: Int?): Say {
         val where = listOfNotNull(cur.alight, cur.line).joinToString(" · ")
-        val main = "${Format.distance(d)} 후 하차"
+        val main = if (left != null) "${left}정거장 남음 · ${Format.distance(d)}" else "${Format.distance(d)} 후 하차"
         val name = cur.line ?: (if (cur.subway) "지하철" else "버스")
-        // 정류장 이름이 길면 '하차'는 빼서 이름이 잘리지 않게 (제목이 이미 '타는 중')
+        // 정류장 이름이 길면 '하차'는 빼서 이름이 잘리지 않게
         val sub = cur.alight?.let { if (it.length <= 6) "$it 하차" else it }
-        return Say(if (where.isEmpty()) main else "$main\n$where", "$name 타는 중", sub, d)
+        val title = if (left != null) "${left}정거장 남음" else "$name 타는 중"
+        return Say(if (where.isEmpty()) main else "$main\n$where", title, sub, d)
+    }
+
+    /**
+     * 탈 것 구간 [stepIndex] 의 정류장 위치 (탄 정류장 다음부터 내릴 정류장까지, 노선 시작부터의 거리 m).
+     * 네트워크로 나중에 받아 오므로 안내 도중에 넣을 수 있다.
+     */
+    fun setStops(stepIndex: Int, along: List<Double>) {
+        if (stepIndex !in steps.indices || !steps[stepIndex].ride || along.isEmpty()) return
+        stopAlong[stepIndex] = along.sorted().toDoubleArray()
     }
 
     /** 노선 이름 같은 정보가 없는 예전 형식 구간 */
@@ -613,6 +637,8 @@ class NavEngine(
         private const val PASSED_END_M = 30
         private const val ALIGHTED_OFF_M = 30
         private const val ALIGHTED_MAX_OFF_M = 100
+        /** 이만큼 앞에 있는 정류장부터 '남은 정류장'으로 센다 (정류장에 서 있을 땐 그 정류장은 뺌) */
+        private const val STOP_AHEAD_M = 15.0
         private const val FAR_JUMP_CONFIRM = 3
         private const val VEHICLE_MPS = 3.0
         private const val WALKING_MAX_MPS = 2.5
