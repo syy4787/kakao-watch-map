@@ -127,7 +127,7 @@ Claude 가 코드 수정 → GitHub 에 올림 → GitHub Actions 가 서명된 
 5. (권장) 만든 키 **수정** → **API 제한사항: 키 제한 → YouTube Data API v3** 만 체크 → 저장. 이게 핵심 — 공개 APK 에서 누가 키를 꺼내 써도 유튜브 검색 한도만 줄고(돈이 나가지 않음), 한도를 다 쓰면 앱은 그날 카카오 검색으로 넘어감.
    덤으로 **애플리케이션 제한사항: Android 앱** → 패키지 `com.mywatch.kakaomap`, SHA-1 `2D:B3:DE:4F:C3:E9:9A:A5:67:E3:78:7E:EC:A1:81:A4:AA:C6:09:CA` 도 넣을 수 있음 (앱이 이 두 값을 요청에 붙여 보냄 — 다만 둘 다 공개된 값이라 흉내 낼 수는 있음)
 6. GitHub 저장소 **Settings > Secrets and variables > Actions > New repository secret** — 이름 `YOUTUBE_API_KEY`, 값에 붙여넣기
-7. Claude 에게 말하거나 Actions 에서 **Build & release > Run workflow** → 다음 업데이트부터 유튜브 자체 검색 (검색 결과 위에 '유튜브 검색 · N개'로 표시)
+7. Claude 에게 말하거나 Actions 에서 **Build & release > Run workflow** → 다음 업데이트부터 유튜브 자체 검색 (검색 결과 위에 '유튜브 검색 · N개'로 표시). 배포할 때마다 키가 되는지 확인해 실행 요약에 **유튜브 키 확인** 알림(되면)이나 경고(안 되면, 까닭과 함께)가 뜸
 
 ---
 

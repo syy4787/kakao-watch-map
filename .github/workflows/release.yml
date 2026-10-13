@@ -79,6 +79,16 @@ jobs:
               }
           done
 
+      # 유튜브 키가 실제로 되는지 한 번 물어 실행 요약에 남긴다 (영상 정보 1건 — 하루 한도 1만 중 1).
+      # 안 돼도 배포는 그대로 한다 — 앱은 그때 카카오 동영상 검색으로 찾는다
+      - name: Check YouTube key
+        if: steps.check.outputs.ready == 'true'
+        continue-on-error: true
+        env:
+          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+          SECRETS_FILE: ${{ runner.temp }}/secrets.properties
+        run: bash .github/scripts/check-youtube-key.sh
+
       # 키를 바꾸거나(TAGO 실시간 버스 키 추가 등) 할 때는 저장소 Secrets 에 같은 이름으로 넣으면
       # 암호화 파일보다 우선한다 (비어 있으면 무시)
       - name: Test and build signed APK
