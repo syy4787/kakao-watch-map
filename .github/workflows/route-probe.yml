@@ -1,0 +1,25 @@
+# (임시) 카카오 길찾기 API 응답 확인용 — 확인이 끝나면 이 가지(branch)째 지운다
+name: Route probe (temporary)
+on:
+  push:
+    branches: [ route-probe ]
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Probe
+        env:
+          RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+        run: |
+          PW=$(bash .github/scripts/signing-password.sh)
+          echo "::add-mask::$PW"
+          export PW
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -in signing/secrets.properties.enc -out "$RUNNER_TEMP/s.properties" -pass env:PW
+          KAKAO_KEY=$(sed -n 's/^[[:space:]]*kakao\.rest\.key[[:space:]]*[=:][[:space:]]*//p' "$RUNNER_TEMP/s.properties" | tail -n 1 | tr -d '[:space:]')
+          rm -f "$RUNNER_TEMP/s.properties"
+          echo "::add-mask::$KAKAO_KEY"
+          export KAKAO_KEY
+          python3 .github/scripts/route_probe.py "코스트코 대전점" "송촌동 선비마을"
