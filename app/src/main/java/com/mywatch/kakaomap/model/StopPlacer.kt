@@ -44,6 +44,20 @@ object StopPlacer {
         return if (base.endsWith("역")) base else "${base}역"
     }
 
+    /**
+     * 노선 정류장 목록(순서대로) 중 이번에 탈 구간 [승차 … 하차].
+     * 도는 노선은 같은 이름 정류장이 갈 때·올 때 두 번 나오므로, 이름이 맞는 승차·하차 짝 중에서
+     * 정거장 수가 카카오가 준 수와 ±2 안이고 승차 정류장이 카카오 승차 위치와 가장 가까운 것을 고른다. 없으면 null.
+     */
+    fun rideSlice(seq: List<BusStop>, board: String, alight: String, boardAt: Coord, kakaoStopCount: Int): List<BusStop>? {
+        val pairs = seq.indices.filter { sameStop(seq[it].name, board) }.mapNotNull { bi ->
+            val ai = (bi + 1 until seq.size).firstOrNull { sameStop(seq[it].name, alight) } ?: return@mapNotNull null
+            bi to ai
+        }.filter { (bi, ai) -> kakaoStopCount <= 0 || kotlin.math.abs((ai - bi + 1) - kakaoStopCount) <= 2 }
+        val best = pairs.minByOrNull { (bi, _) -> Geo.distanceM(seq[bi].coord, boardAt) } ?: return null
+        return seq.subList(best.first, best.second + 1)
+    }
+
     /** 정류장 이름 비교 (괄호·띄어쓰기·'정류장' 낱말 무시) */
     fun sameStop(a: String, b: String): Boolean {
         fun norm(s: String) = s.substringBefore('(').replace(" ", "").removeSuffix("정류장").removeSuffix("정류소")

@@ -81,13 +81,10 @@ object StopLocator {
         val names = step.vehicles.map { it.name }.filter { it.isNotBlank() }
         for (no in names.take(2)) {
             for (r in TagoApi.routes(city, no).filter { it.routeNo == no }.take(3)) {
-                val seq = TagoApi.routeStops(city, r.routeId)
-                val bi = seq.indexOfFirst { StopPlacer.sameStop(it.name, board) }
-                if (bi < 0) continue
-                val ai = (bi + 1 until seq.size).firstOrNull { StopPlacer.sameStop(seq[it].name, alight) } ?: continue
-                // 카카오가 준 정거장 수와 크게 다르면 다른 방향·다른 노선
-                if (step.stops.isNotEmpty() && kotlin.math.abs((ai - bi + 1) - step.stops.size) > 2) continue
-                return seq.subList(bi, ai + 1).map { it.coord }
+                // 도는 노선은 같은 이름이 갈 때·올 때 두 번 — 정거장 수·승차 위치가 맞는 쪽 (카카오와 다르면 다른 노선)
+                val slice = StopPlacer.rideSlice(TagoApi.routeStops(city, r.routeId), board, alight, start, step.stops.size)
+                    ?: continue
+                return slice.map { it.coord }
             }
         }
         return null
