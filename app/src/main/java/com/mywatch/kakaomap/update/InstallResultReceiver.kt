@@ -26,8 +26,9 @@ class InstallResultReceiver : BroadcastReceiver() {
                     .onFailure { Log.w(MapApp.TAG, "확인 창을 띄우지 못함", it) }
             }
             PackageInstaller.STATUS_SUCCESS -> UpdateManager.markPendingUserAction(context, false)
-            else -> UpdateManager.recordError(
+            else -> UpdateManager.recordFailure(
                 context,
+                "업데이트 설치",
                 when (status) {
                     PackageInstaller.STATUS_FAILURE_ABORTED -> "설치를 취소했어요"
                     PackageInstaller.STATUS_FAILURE_CONFLICT, PackageInstaller.STATUS_FAILURE_INCOMPATIBLE ->

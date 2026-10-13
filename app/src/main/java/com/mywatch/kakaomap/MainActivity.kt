@@ -86,6 +86,7 @@ import com.mywatch.kakaomap.ui.SearchActivity
 import com.mywatch.kakaomap.update.UpdateActivity
 import com.mywatch.kakaomap.update.UpdateInstallWorker
 import com.mywatch.kakaomap.update.UpdateManager
+import com.mywatch.kakaomap.update.UpdateWorker
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -1062,13 +1063,13 @@ class MainActivity : ComponentActivity() {
         updatePill.visibility = if (show) View.VISIBLE else View.GONE
     }
 
-    /** 3시간에 한 번, 앱을 열 때 조용히 새 버전 확인 */
+    /** 지도를 열 때 조용히 새 버전 확인 — 마지막 확인이 30분 넘었으면 (첫 화면·유튜브와 같은 간격) */
     private fun maybeCheckForUpdate() {
         if (UpdateManager.repo(this) == null) return
-        if (System.currentTimeMillis() - UpdateManager.lastCheckAt(this) < 3 * 3600_000L) return
+        if (System.currentTimeMillis() - UpdateManager.lastCheckAt(this) < UpdateWorker.OPEN_CHECK_EVERY_MS) return
         lifecycleScope.launch {
             val found = withContext(Dispatchers.IO) { runCatching { UpdateManager.check(this@MainActivity) }.getOrNull() }
-            // 새 버전이 있으면 조건(Wi-Fi 또는 충전 중, 안내 중 아님)이 맞을 때 알아서 설치되도록 예약
+            // 새 버전이 있으면 쓰는 중·안내 중이 아닐 때 알아서 설치되도록 예약 (집 밖에서도 폰 데이터로)
             if (found != null) UpdateInstallWorker.enqueue(this@MainActivity)
             refreshUpdatePill()
         }

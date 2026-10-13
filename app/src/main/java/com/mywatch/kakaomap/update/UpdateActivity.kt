@@ -9,6 +9,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Debug
 import android.provider.Settings
+import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.lifecycle.lifecycleScope
@@ -61,6 +62,10 @@ class UpdateActivity : ComponentActivity() {
         // 설치에 성공하면 앱이 새로 시작되므로, 이 화면으로 돌아왔다면 설치는 끝났거나(실패·취소) 확인을 기다리는 중
         if (busy?.startsWith(INSTALLING) == true) busy = null
         render()
+        // 열면 바로 새 버전을 확인한다 — 예전 확인 결과만 보여 주면 새 버전이 나왔어도 '최신 버전이에요'로 보이고
+        // '지금 업데이트' 버튼도 안 나온다 (방금 확인했으면 다시 묻지 않음)
+        val stale = System.currentTimeMillis() - UpdateManager.lastCheckAt(this) >= SCREEN_CHECK_EVERY_MS
+        if (busy == null && stale && UpdateManager.repo(this) != null) check()
     }
 
     override fun onPause() {
@@ -70,6 +75,10 @@ class UpdateActivity : ComponentActivity() {
 
     private fun render() {
         val c = this
+        // 확인·내려받는 동안엔 화면을 켜 둔다 — 밖에서 폰 블루투스로 13MB 를 받는 데 몇 분 걸릴 수 있는데,
+        // 그사이 화면이 꺼지면 받기가 멈출 수 있다
+        if (busy != null) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        else window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         val rows = mutableListOf<Row>(
             Row.Header(
                 getString(R.string.app_name),
@@ -191,7 +200,8 @@ class UpdateActivity : ComponentActivity() {
             render()
             return
         }
-        busy = "내려받는 중…"
+        // 자동 업데이트가 이미 받고 있으면 그것이 끝나길 기다렸다가 그 파일로 설치한다 (같은 파일을 두 번 받지 않음)
+        busy = if (UpdateManager.downloading) "자동 업데이트가 받는 중이에요 — 끝나면 바로 설치해요" else "내려받는 중…"
         render()
         val app = applicationContext
         lifecycleScope.launch {
@@ -219,7 +229,7 @@ class UpdateActivity : ComponentActivity() {
             }
             busy = if (error == null && deferred == null) "$INSTALLING 앱이 잠시 닫혔다가 바뀌어요" else null
             deferred?.let { UpdateManager.recordError(app, it) }
-            error?.let { UpdateManager.recordError(app, it.message ?: "업데이트 실패") }
+            error?.let { UpdateManager.recordFailure(app, "업데이트", it.message ?: "업데이트 실패") }
             render()
         }
     }
@@ -246,5 +256,7 @@ class UpdateActivity : ComponentActivity() {
         const val ACTION_PERMISSION = "permission"
         const val ACTION_CLEAR_ERRORS = "clear_errors"
         private const val SHOWN_ERRORS = 10
+        /** 이 화면을 열 때, 마지막 확인이 이보다 오래됐으면 다시 확인 */
+        private const val SCREEN_CHECK_EVERY_MS = 60_000L
     }
 }

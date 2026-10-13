@@ -37,6 +37,7 @@ import com.mywatch.kakaomap.ui.TubeRows.A_PLAY_MIX
 import com.mywatch.kakaomap.ui.TubeRows.A_PLAY_ONE
 import com.mywatch.kakaomap.ui.TubeRows.A_QUERY
 import com.mywatch.kakaomap.ui.TubeRows.A_SEARCH
+import com.mywatch.kakaomap.update.UpdateWorker
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -142,6 +143,8 @@ class TubeActivity : ComponentActivity() {
         super.onResume()
         // 타일에서 틀었거나 날이 지나 기록이 바뀌었을 수 있다
         if (screen == Screen.HOME && !opening) render()
+        // 타일로 바로 열어 첫 화면을 거치지 않아도 새 버전 확인 (30분에 한 번)
+        UpdateWorker.onAppOpened(this)
     }
 
     private fun handleShortcut(intent: Intent?) {

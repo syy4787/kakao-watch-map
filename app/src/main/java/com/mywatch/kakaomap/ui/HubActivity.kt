@@ -2,6 +2,7 @@ package com.mywatch.kakaomap.ui
 
 import android.app.ActivityManager
 import android.content.Intent
+import android.content.SharedPreferences
 import android.os.Bundle
 import android.view.View
 import android.widget.TextView
@@ -10,6 +11,7 @@ import com.mywatch.kakaomap.MainActivity
 import com.mywatch.kakaomap.R
 import com.mywatch.kakaomap.update.UpdateActivity
 import com.mywatch.kakaomap.update.UpdateManager
+import com.mywatch.kakaomap.update.UpdateWorker
 
 /**
  * '갤럭시워치 전용앱' 첫 화면 (워치 앱 목록의 아이콘은 이것 하나): 카카오맵(길찾기) / 유튜브(노래 검색) 고르기.
@@ -29,9 +31,24 @@ class HubActivity : ComponentActivity() {
         info.setOnClickListener { startActivity(Intent(this, UpdateActivity::class.java)) }
     }
 
+    /** 맡긴 확인이 첫 화면을 보는 사이에 새 버전을 찾으면 아래 글자를 바로 바꾼다 */
+    private val updateListener = SharedPreferences.OnSharedPreferenceChangeListener { _, _ -> showUpdateLabel() }
+
     override fun onResume() {
         super.onResume()
-        // 새 버전이 있으면 아래 글자로 알린다 (누르면 업데이트 화면)
+        showUpdateLabel()
+        UpdateManager.prefsForListening(this).registerOnSharedPreferenceChangeListener(updateListener)
+        // 마지막 확인이 30분 넘었으면 새 버전 확인 (집 밖에서도 — 6시간마다 하는 확인만으론 한참 모름)
+        UpdateWorker.onAppOpened(this)
+    }
+
+    override fun onPause() {
+        UpdateManager.prefsForListening(this).unregisterOnSharedPreferenceChangeListener(updateListener)
+        super.onPause()
+    }
+
+    /** 새 버전이 있으면 아래 글자로 알린다 (누르면 업데이트 화면) */
+    private fun showUpdateLabel() {
         val update = runCatching { UpdateManager.hasUpdate(this) || UpdateManager.isPendingUserAction(this) }.getOrDefault(false)
         info.setText(if (update) R.string.update_available else R.string.app_info_update)
     }

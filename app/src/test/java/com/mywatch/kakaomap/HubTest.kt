@@ -7,14 +7,24 @@ import android.content.Context
 import android.content.Intent
 import android.os.Looper
 import android.view.View
+import android.widget.TextView
+import androidx.work.Configuration
+import androidx.work.WorkManager
+import androidx.work.testing.SynchronousExecutor
+import androidx.work.testing.WorkManagerTestInitHelper
 import com.mywatch.kakaomap.ui.HubActivity
 import com.mywatch.kakaomap.ui.SearchActivity
 import com.mywatch.kakaomap.ui.TubeActivity
+import com.mywatch.kakaomap.update.FakeReleaseServer
+import com.mywatch.kakaomap.update.UpdateManager
+import com.mywatch.kakaomap.update.UpdateWorker
+import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.Robolectric
@@ -92,6 +102,58 @@ class HubTest {
         shadowOf(am).setAppTasks(emptyList())
         val tubeHub = pick(R.id.open_tube)
         assertEquals(TubeActivity::class.java.name, shadowOf(tubeHub).nextStartedActivity?.component?.className)
+    }
+
+    // ───── 새 버전 알기 (집 밖에서도) ─────
+
+    @Before
+    fun testWorkManager() {
+        WorkManagerTestInitHelper.initializeTestWorkManager(
+            context, Configuration.Builder().setExecutor(SynchronousExecutor()).build()
+        )
+    }
+
+    @After
+    fun realReleases() {
+        UpdateManager.baseUrl = UpdateManager.GITHUB
+    }
+
+    private fun checksQueued() =
+        WorkManager.getInstance(context).getWorkInfosForUniqueWork(UpdateWorker.CHECK_NOW_NAME).get()
+
+    @Test
+    fun openingTheAppLooksForANewVersionWhenTheLastLookIsOld() {
+        // 마지막 확인이 오래됨(한 번도 안 함) → 앱을 열면 확인을 맡긴다 (첫 화면이 금방 닫혀도 끝까지)
+        UpdateManager.setOwner(context, "tester")
+        Robolectric.buildActivity(HubActivity::class.java).setup()
+        assertEquals(1, checksQueued().size)
+    }
+
+    @Test
+    fun justCheckedSoOpeningTheAppDoesNotAskAgain() {
+        FakeReleaseServer().use { server ->
+            server.updateJson = """{"versionCode":1,"versionName":"0","apkUrl":"${server.apkUrl}","sha256":"00","notes":""}"""
+            UpdateManager.baseUrl = server.base
+            UpdateManager.setOwner(context, "tester")
+            UpdateManager.check(context)
+            Robolectric.buildActivity(HubActivity::class.java).setup()
+            assertEquals(0, checksQueued().size)
+        }
+    }
+
+    @Test
+    fun aNewVersionFoundWhileTheChooserIsOpenShowsRightAway() {
+        FakeReleaseServer().use { server ->
+            server.updateJson = server.updateJsonFor(999)
+            UpdateManager.baseUrl = server.base
+            UpdateManager.setOwner(context, "tester")
+            val hub = Robolectric.buildActivity(HubActivity::class.java).setup().get()
+            val info = hub.findViewById<TextView>(R.id.hub_info)
+            assertEquals(context.getString(R.string.app_info_update), info.text.toString())
+            UpdateManager.check(context)   // 맡긴 확인이 새 버전을 찾음
+            shadowOf(Looper.getMainLooper()).idle()
+            assertEquals(context.getString(R.string.update_available), info.text.toString())
+        }
     }
 
     @Test

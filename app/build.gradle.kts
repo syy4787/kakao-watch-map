@@ -126,12 +126,13 @@ dependencies {
     implementation("androidx.fragment:fragment:1.9.1")                      // wear 가 끌어오는 옛 버전 교체
     implementation("androidx.activity:activity-ktx:1.13.0")
     implementation("androidx.core:core-ktx:1.17.0")
-    implementation("androidx.work:work-runtime-ktx:2.10.5")                 // 충전 중 자동 업데이트
+    implementation("androidx.work:work-runtime-ktx:2.10.5")                 // 자동 업데이트 (확인·내려받기·설치)
     implementation("com.google.android.gms:play-services-location:21.4.0") // 현재 위치
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303")                            // 단위 테스트용 JSON 구현
     testImplementation("org.robolectric:robolectric:4.17")                  // 워치 화면을 실제로 그려 보는 테스트
+    testImplementation("androidx.work:work-testing:2.10.5")                 // 업데이트 작업(WorkManager) 테스트
 }
 
 /**

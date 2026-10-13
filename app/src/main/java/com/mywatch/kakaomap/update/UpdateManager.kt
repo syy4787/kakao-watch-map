@@ -7,8 +7,10 @@ import android.content.pm.PackageInfo
 import android.content.pm.PackageInstaller
 import android.content.pm.PackageManager
 import android.os.Build
+import androidx.annotation.VisibleForTesting
 import androidx.core.content.edit
 import com.mywatch.kakaomap.BuildConfig
+import com.mywatch.kakaomap.data.ErrorLog
 import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
@@ -61,12 +63,27 @@ data class UpdateInfo(
 object UpdateManager {
     /** GitHub 저장소 이름 (아이디/kakao-watch-map) */
     const val REPO_NAME = "kakao-watch-map"
+    const val GITHUB = "https://github.com"
+
+    /** 릴리스를 받는 곳 — 테스트에서만 가짜 서버로 바꾼다 */
+    @VisibleForTesting
+    internal var baseUrl = GITHUB
     private const val PREFS = "updates"
     private const val KEY_OWNER = "owner"
     private const val KEY_LATEST = "latest"
     private const val KEY_LAST_CHECK = "last_check"
     private const val KEY_ERROR = "error"
     private const val KEY_PENDING = "pending_user_action"
+    private const val KEY_BAD_SHA = "bad_sha"
+    private const val KEY_BAD_SHA_COUNT = "bad_sha_count"
+
+    /** 받은 파일이 update.json 의 SHA-256 과 계속 다르면 같은 릴리스는 자동으로 이만큼만 받아 본다 (밖에선 폰 데이터라) */
+    private const val MAX_AUTO_CORRUPT = 2
+
+    /** 지금 APK 를 받는 중인지 (자동 업데이트든 '지금 업데이트'든) — 화면에 '자동 업데이트가 받는 중'을 보이려고 */
+    @Volatile
+    var downloading = false
+        private set
 
     private fun prefs(c: Context) = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
@@ -102,7 +119,7 @@ object UpdateManager {
     @Throws(IOException::class)
     fun check(c: Context): UpdateInfo? {
         val repo = repo(c) ?: return null
-        val url = "https://github.com/$repo/releases/latest/download/update.json"
+        val url = "$baseUrl/$repo/releases/latest/download/update.json"
         val conn = (URL(url).openConnection() as HttpURLConnection).apply {
             connectTimeout = 15_000
             readTimeout = 15_000
@@ -131,7 +148,27 @@ object UpdateManager {
     /** 자동 업데이트와 화면의 '지금 업데이트'가 동시에 같은 파일을 받지 않게 한 번에 하나씩 */
     @Throws(IOException::class)
     fun download(c: Context, info: UpdateInfo, onProgress: (Int) -> Unit = {}): File = synchronized(downloadLock) {
-        downloadLocked(c, info, onProgress)
+        downloading = true
+        try {
+            downloadLocked(c, info, onProgress)
+        } finally {
+            downloading = false
+        }
+    }
+
+    /**
+     * 자동 업데이트가 이 릴리스를 (다시) 받아도 되는지 — 받을 때마다 손상된 파일이면(update.json 과 다름)
+     * 같은 릴리스는 [MAX_AUTO_CORRUPT] 번까지만. '지금 업데이트'는 언제든 받고, 새 릴리스가 나오면 다시 자동으로
+     */
+    fun autoDownloadAllowed(c: Context, info: UpdateInfo): Boolean {
+        val p = prefs(c)
+        return p.getString(KEY_BAD_SHA, null) != info.sha256 || p.getInt(KEY_BAD_SHA_COUNT, 0) < MAX_AUTO_CORRUPT
+    }
+
+    private fun noteCorrupt(c: Context, sha: String) {
+        val p = prefs(c)
+        val n = if (p.getString(KEY_BAD_SHA, null) == sha) p.getInt(KEY_BAD_SHA_COUNT, 0) + 1 else 1
+        p.edit { putString(KEY_BAD_SHA, sha).putInt(KEY_BAD_SHA_COUNT, n) }
     }
 
     /** 받을 APK 의 저장 이름 — 같은 버전이라도 내용(SHA-256)이 다르면 다른 파일이라 이어받기가 섞이지 않는다 */
@@ -147,6 +184,29 @@ object UpdateManager {
         dir.listFiles()?.filter { it.name != name }?.forEach { it.delete() }
         val file = File(dir, name)
         if (file.exists() && sha256(file) == info.sha256) return file
+        var attempt = 0
+        while (true) {
+            try {
+                fetchOrRestart(info, file, onProgress)
+                break
+            } catch (e: IOException) {
+                // 폰 블루투스로 받을 땐 잠깐씩 끊긴다 — 받은 데까지는 두고 이어받는다.
+                // 서버가 없다고 한 것(4xx)은 다시 물어도 같으니 바로 알린다
+                if (e is HttpStatusException && e.code in 400..499) throw e
+                val wait = RETRY_DELAYS_MS.getOrNull(attempt++) ?: throw e
+                if (wait > 0) Thread.sleep(wait)
+            }
+        }
+        if (sha256(file) != info.sha256) {
+            file.delete()
+            noteCorrupt(c, info.sha256)
+            throw IOException("파일이 손상됐어요 (SHA-256 불일치) — 다시 시도해 주세요")
+        }
+        prefs(c).edit { remove(KEY_BAD_SHA).remove(KEY_BAD_SHA_COUNT) }
+        return file
+    }
+
+    private fun fetchOrRestart(info: UpdateInfo, file: File, onProgress: (Int) -> Unit) {
         try {
             fetch(info, file, resume = file.exists() && file.length() > 0, onProgress)
         } catch (e: RangeNotUsable) {
@@ -154,14 +214,14 @@ object UpdateManager {
             file.delete()
             fetch(info, file, resume = false, onProgress)
         }
-        if (sha256(file) != info.sha256) {
-            file.delete()
-            throw IOException("파일이 손상됐어요 (SHA-256 불일치) — 다시 시도해 주세요")
-        }
-        return file
     }
 
+    /** 끊긴 내려받기를 다시 잇기 전 쉬는 시간 — 첫 번은 바로 (블루투스가 잠깐 끊긴 경우가 대부분) */
+    private val RETRY_DELAYS_MS = listOf(0L, 3_000L, 10_000L)
+
     private class RangeNotUsable : IOException("이어받기 불가")
+
+    private class HttpStatusException(val code: Int) : IOException("다운로드 실패 ($code)")
 
     /** 받다 만 파일이 있으면 Range 요청으로 이어받는다 */
     private fun fetch(info: UpdateInfo, file: File, resume: Boolean, onProgress: (Int) -> Unit) {
@@ -175,7 +235,7 @@ object UpdateManager {
         try {
             val code = conn.responseCode
             if (already > 0 && code == 416) throw RangeNotUsable()
-            if (code != 200 && code != 206) throw IOException("다운로드 실패 ($code)")
+            if (code != 200 && code != 206) throw HttpStatusException(code)
             val append = code == 206 && already > 0
             if (append) {
                 // "bytes 시작-끝/전체" 의 시작이 가진 크기와 같아야 이어 붙일 수 있다
@@ -204,6 +264,8 @@ object UpdateManager {
                     }
                 }
             }
+            // 다 받기 전에 연결이 끝남 — 받은 조각은 두고 이어받는다 (지우고 처음부터 받지 않게)
+            if (total > 0 && done < total) throw IOException("받는 중에 연결이 끊겼어요 (${done * 100 / total}%)")
         } finally {
             conn.disconnect()
         }
@@ -275,6 +337,15 @@ object UpdateManager {
     }
 
     fun recordError(c: Context, message: String) = prefs(c).edit { putString(KEY_ERROR, message) }
+
+    /**
+     * 내려받기·설치가 실패한 까닭 — 화면 위쪽 ⚠ 문구(다음 확인 때 지워짐)와 함께 '최근 오류 기록'에도 남긴다.
+     * 업데이트 화면을 열면 바로 다시 확인하므로, ⚠ 문구만으로는 밖에서 자동 업데이트가 왜 안 됐는지 금방 사라진다
+     */
+    fun recordFailure(c: Context, where: String, message: String) {
+        recordError(c, message)
+        ErrorLog.record(where, message)
+    }
 
     /** 설치 결과(오류·확인 대기)가 바뀌면 알려 준다 — 업데이트 화면의 '설치 중…' 풀기용 */
     fun prefsForListening(c: Context): android.content.SharedPreferences = prefs(c)
