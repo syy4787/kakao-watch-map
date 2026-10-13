@@ -11,6 +11,15 @@
         android:name="android.hardware.sensor.compass"
         android:required="false" />
 
+    <!-- 워치에서 바로 듣기: 재생 화면(https 링크)을 열 인터넷 앱(삼성 인터넷)이 워치에 있는지 -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <category android:name="android.intent.category.BROWSABLE" />
+            <data android:scheme="https" />
+        </intent>
+    </queries>
+
     <!-- 지도·검색·길찾기·업데이트 다운로드 -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
@@ -89,14 +98,22 @@
             android:exported="false"
             android:taskAffinity="com.mywatch.kakaomap.main" />
         <!-- 유튜브 음악: 첫 화면에서 고르거나 타일로 연다(타일이 열므로 exported). 지도와 다른 작업(task)이라 최근 앱에서도 따로 보인다.
-             찾은 곡은 폰의 유튜브 앱이 재생한다 (워치는 검색·고르기만) -->
+             고른 곡은 워치 인터넷 앱의 재생 화면(유튜브 공식 플레이어) 또는 폰의 유튜브 앱이 재생한다 (이 앱은 검색·고르기만) -->
         <activity
             android:name=".ui.TubeActivity"
             android:exported="true"
             android:icon="@mipmap/ic_tube"
             android:label="@string/tube_app_name"
             android:launchMode="singleTop"
-            android:taskAffinity="com.mywatch.kakaomap.tube" />
+            android:taskAffinity="com.mywatch.kakaomap.tube">
+            <!-- 재생 화면의 '다른 곡 찾기' (intent://tube#Intent;scheme=kakaowatch;package=…;end) — 이 화면을 연다 -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="kakaowatch" android:host="tube" />
+            </intent-filter>
+        </activity>
         <activity
             android:name=".update.UpdateActivity"
             android:exported="false"

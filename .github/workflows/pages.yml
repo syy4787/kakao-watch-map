@@ -1,0 +1,52 @@
+name: Watch player page
+
+# web/ (워치에서 유튜브를 트는 둥근 화면용 재생 화면) 을 gh-pages 브랜치로 올린다
+#   → GitHub Pages: https://<owner>.github.io/<repo>/tube/
+# 앱(유튜브 음악)이 곡을 고르면 워치의 인터넷 앱이 이 화면을 열고, 그 안의 유튜브 공식 플레이어가 재생한다.
+# 기존 gh-pages 위에 커밋을 쌓는다 (강제로 덮어쓰지 않음).
+on:
+  push:
+    branches: [ main ]
+    paths: [ 'web/**', '.github/workflows/pages.yml' ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Publish web/ to gh-pages
+        run: |
+          set -euo pipefail
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          OUT="$RUNNER_TEMP/site"
+          if git ls-remote --exit-code --heads origin gh-pages >/dev/null 2>&1; then
+            git fetch --depth=1 origin gh-pages
+            git worktree add --detach "$OUT" FETCH_HEAD
+          else
+            git worktree add --detach "$OUT"
+            git -C "$OUT" checkout -q --orphan gh-pages
+            git -C "$OUT" rm -rfq . || true
+          fi
+          # 사이트 내용 = web/ 그대로 (+ Jekyll 처리 끔). 나중에 붙일 수 있는 도메인 설정(CNAME)은 남긴다
+          find "$OUT" -mindepth 1 -maxdepth 1 ! -name .git ! -name CNAME -exec rm -rf {} +
+          cp -R web/. "$OUT"/
+          touch "$OUT/.nojekyll"
+          cd "$OUT"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "바뀐 것 없음"
+            exit 0
+          fi
+          git commit -qm "web: ${GITHUB_SHA::7}"
+          git push origin HEAD:gh-pages
+          echo "::notice title=워치 재생 화면::https://${GITHUB_REPOSITORY_OWNER,,}.github.io/${GITHUB_REPOSITORY#*/}/tube/ 에 올림"

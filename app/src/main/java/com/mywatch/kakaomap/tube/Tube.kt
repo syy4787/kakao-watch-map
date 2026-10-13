@@ -67,6 +67,38 @@ object TubeLinks {
     /** 320×180 미리보기 그림 */
     fun thumbnail(id: String): String = "https://i.ytimg.com/vi/$id/mqdefault.jpg"
 
+    private val REPO_PART = Regex("[A-Za-z0-9_][A-Za-z0-9._-]*")
+
+    /**
+     * 워치 재생 화면(web/tube)이 올라가는 곳 = 이 저장소의 GitHub Pages (사용자 이름은 주소에서 소문자).
+     * 저장소를 모르면(로컬 빌드) null — 워치 재생 없이 폰으로
+     */
+    fun playerBase(repo: String?): String? {
+        val parts = repo?.trim()?.split('/') ?: return null
+        if (parts.size != 2 || parts.any { !REPO_PART.matches(it) || it.contains("..") }) return null
+        return "https://${parts[0].lowercase()}.github.io/${parts[1]}/tube/"
+    }
+
+    /**
+     * 워치 인터넷 앱으로 열 재생 화면 주소. 곡은 # 뒤에 — 브라우저가 서버로 보내지 않고 화면 안에서만 읽는다.
+     * [mix] = 이 곡으로 시작하는 유튜브 믹스(유튜브가 비슷한 곡을 이어 줌). 제목·채널은 열리자마자 보여 줄 이름.
+     * [nonce] = 같은 곡을 다시 골라도 주소가 달라지게 (같은 탭에서 주소가 똑같으면 화면이 그대로라 다시 틀지 않음)
+     */
+    fun playerUrl(base: String, video: TubeVideo, mix: Boolean, nonce: Long? = null): String = buildString {
+        append(base).append("#v=").append(video.id)
+        if (mix) append("&mix=1")
+        takeChars(video.title.trim(), MAX_TITLE).takeIf { it.isNotEmpty() }?.let { append("&t=").append(encode(it)) }
+        takeChars(video.channel.trim(), MAX_CHANNEL).takeIf { it.isNotEmpty() }?.let { append("&c=").append(encode(it)) }
+        if (nonce != null) append("&n=").append(nonce)
+    }
+
+    /** 글자 수로 자르기 — 이모지(두 칸짜리 글자)를 반으로 잘라 '?'가 되지 않게 */
+    private fun takeChars(s: String, max: Int): String =
+        if (s.codePointCount(0, s.length) <= max) s else s.substring(0, s.offsetByCodePoints(0, max))
+
+    private const val MAX_TITLE = 100
+    private const val MAX_CHANNEL = 40
+
     /** URLEncoder 는 띄어쓰기를 + 로 바꾸는데, 검색어 속 진짜 + 와 헷갈리지 않게 %20 으로 */
     private fun encode(s: String) = URLEncoder.encode(s, "UTF-8").replace("+", "%20")
 }

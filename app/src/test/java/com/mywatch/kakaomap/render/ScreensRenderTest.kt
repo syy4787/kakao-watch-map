@@ -230,6 +230,15 @@ class ScreensRenderTest {
     }
 
     @Test
+    fun tubeHomeOnWatch() {
+        // 워치에 인터넷 앱이 있으면 곡을 워치에서 바로 튼다
+        TubeThumbs.enabled = false
+        val played = tubeVideos.take(3).mapIndexed { i, v -> Played(v, 1_000L - i) }
+        shoot("tube_home_watch", TubeRows.home(tubeApp, played, listOf("아이유 밤편지"), watch = true), pages = 5)
+        shoot("tube_menu_watch", TubeRows.menu(tubeApp, tubeVideos[0], fromHome = true, watch = true), pages = 3)
+    }
+
+    @Test
     fun tubeHomeEmpty() {
         TubeThumbs.enabled = false
         shoot("tube_home_empty", TubeRows.home(tubeApp, emptyList(), emptyList()), pages = 1)

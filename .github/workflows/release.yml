@@ -5,7 +5,8 @@ name: Build & release (watch auto-update)
 on:
   push:
     branches: [ main ]
-    paths-ignore: [ '**.md' ]
+    # 문서·워치 재생 화면(web/, 따로 GitHub Pages 로 올림)만 바뀌면 앱을 새로 배포하지 않는다
+    paths-ignore: [ '**.md', 'web/**', '.github/workflows/pages.yml' ]
   workflow_dispatch:
 
 permissions:

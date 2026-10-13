@@ -26,6 +26,7 @@ import com.mywatch.kakaomap.tube.TubeLinks
 import com.mywatch.kakaomap.tube.TubeSource
 import com.mywatch.kakaomap.tube.TubeState
 import com.mywatch.kakaomap.tube.TubeVideo
+import com.mywatch.kakaomap.tube.WatchPlayer
 import com.mywatch.kakaomap.tube.YouTubeQuotaException
 import com.mywatch.kakaomap.ui.TubeRows.A_CANCEL
 import com.mywatch.kakaomap.ui.TubeRows.A_CLEAR
@@ -39,6 +40,8 @@ import com.mywatch.kakaomap.ui.TubeRows.A_PLAY_ONE
 import com.mywatch.kakaomap.ui.TubeRows.A_QUERY
 import com.mywatch.kakaomap.ui.TubeRows.A_SEARCH
 import com.mywatch.kakaomap.ui.TubeRows.A_UPDATE
+import com.mywatch.kakaomap.ui.TubeRows.A_WATCH_MIX
+import com.mywatch.kakaomap.ui.TubeRows.A_WATCH_ONE
 import com.mywatch.kakaomap.update.UpdateActivity
 import com.mywatch.kakaomap.update.UpdateManager
 import com.mywatch.kakaomap.update.UpdateWorker
@@ -50,10 +53,11 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
- * 유튜브 음악 리모컨 (워치 앱 목록의 '유튜브 음악'):
- * 말·키보드로 검색 → 유튜브 영상 목록 → 누르면 폰의 유튜브 앱이 그 곡으로 시작하는 '믹스'를 튼다.
- * 믹스와 다음 곡 추천은 폰에 로그인된 내 계정의 알고리즘 그대로이고, 프리미엄이라 폰 화면이 꺼져도 계속 나온다.
- * 길게 누르면 '이 곡만 듣기'. 최근 들은 곡·검색어는 처음 화면에서 바로 다시 틀 수 있다.
+ * 유튜브 음악 (워치 앱 목록의 '유튜브 음악'):
+ * 말·키보드로 검색 → 유튜브 영상 목록 → 누르면 그 곡으로 시작하는 '믹스'를 튼다.
+ *  · 워치에 인터넷 앱(삼성 인터넷)이 있으면 워치에서: 둥근 화면용 재생 화면(유튜브 공식 플레이어) — [WatchPlayer]
+ *  · 없거나 재생 화면에 닿지 못하면 폰에서: 폰의 유튜브 앱(내 계정의 알고리즘, 프리미엄이면 화면이 꺼져도 계속)
+ * 길게 누르면 워치/폰 · 믹스/이 곡만을 고른다. 최근 들은 곡·검색어는 처음 화면에서 바로 다시 틀 수 있다.
  */
 class TubeActivity : ComponentActivity() {
 
@@ -79,8 +83,9 @@ class TubeActivity : ComponentActivity() {
     private var loadingMore = false
     private var searchJob: Job? = null
 
-    /** 폰에 보내는 중 (두 번 눌러 두 번 열리지 않게, 가운데에 '폰에서 여는 중…') */
+    /** 여는 중 (두 번 눌러 두 번 열리지 않게, 가운데에 '폰에서 여는 중…'/'워치에서 여는 중…') */
     private var opening = false
+    @StringRes private var openingText = R.string.tube_sending
 
     /**
      * 타일에서 바로 들어온 한 번의 일([EXTRA_VOICE]·[EXTRA_MIX]). 그 곡을 폰에서 열면 잠깐 알려 주고 닫는다(워치 화면으로).
@@ -166,6 +171,8 @@ class TubeActivity : ComponentActivity() {
         if (intent == null) return
         // '최근 앱'에서 다시 열면 처음 열 때의 요청(믹스 틀기 등)이 그대로 다시 온다 → 그냥 처음 화면
         if ((intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY) != 0) return
+        // 재생 화면의 '다른 곡 찾기'(웹 링크)로 열렸으면 처음 화면만 — 웹 페이지가 끼워 넣은 값으로 곡을 틀거나 말 입력을 열지 않는다
+        if (intent.action == Intent.ACTION_VIEW) return
         when {
             intent.getBooleanExtra(EXTRA_VOICE, false) -> {
                 shortcut = EXTRA_VOICE
@@ -192,13 +199,14 @@ class TubeActivity : ComponentActivity() {
     private fun render() {
         back.isEnabled = screen != Screen.HOME
         if (opening) {
-            ui.showStatus(getString(R.string.tube_sending))
+            ui.showStatus(getString(openingText))
             return
         }
         when (screen) {
             Screen.HOME -> ui.rows = TubeRows.home(
                 this, state.played(), state.searches,
                 update = runCatching { UpdateManager.hasUpdate(this) }.getOrDefault(false),
+                watch = WatchPlayer.available(this),
             )
             Screen.RESULTS -> {
                 val q = query.orEmpty()
@@ -211,7 +219,7 @@ class TubeActivity : ComponentActivity() {
             }
             Screen.MENU -> {
                 val v = menuVideo
-                if (v == null) closeMenu() else ui.rows = TubeRows.menu(this, v, fromHome = menuFrom == Screen.HOME)
+                if (v == null) closeMenu() else ui.rows = TubeRows.menu(this, v, fromHome = menuFrom == Screen.HOME, watch = WatchPlayer.available(this))
             }
         }
     }
@@ -260,8 +268,10 @@ class TubeActivity : ComponentActivity() {
                     shortcut = null
                     goHome()
                 }
-                row.id == A_PLAY_MIX -> menuVideo?.let { play(it, mix = true) }
-                row.id == A_PLAY_ONE -> menuVideo?.let { play(it, mix = false) }
+                row.id == A_WATCH_MIX -> menuVideo?.let { playOnWatch(it, mix = true) }
+                row.id == A_WATCH_ONE -> menuVideo?.let { playOnWatch(it, mix = false) }
+                row.id == A_PLAY_MIX -> menuVideo?.let { playOnPhone(it, mix = true) }
+                row.id == A_PLAY_ONE -> menuVideo?.let { playOnPhone(it, mix = false) }
                 row.id == A_FORGET -> menuVideo?.let {
                     state.removePlayed(it.id)
                     TubeTileService.refresh(this)
@@ -365,18 +375,68 @@ class TubeActivity : ComponentActivity() {
         if (screen == Screen.RESULTS) render()
     }
 
-    // ---------------- 폰에서 재생 ----------------
+    // ---------------- 재생 (워치 또는 폰) ----------------
 
-    /** 폰의 유튜브 앱이 이 곡을 연다. [mix] = 이 곡으로 시작하는 믹스(내 계정의 추천으로 다음 곡이 계속 이어짐) */
-    private fun play(video: TubeVideo, mix: Boolean) = openOnPhone(TubeLinks.watchUrl(video.id, mix), R.string.tube_opened_on_phone) {
+    /** 곡 틀기: 워치에 인터넷 앱이 있으면 워치 재생 화면으로, 없으면 폰 유튜브로. [mix] = 이 곡으로 시작하는 믹스 */
+    private fun play(video: TubeVideo, mix: Boolean) {
+        if (WatchPlayer.available(this)) playOnWatch(video, mix) else playOnPhone(video, mix)
+    }
+
+    /** 틀었음: 기록하고, 메뉴에서 틀었으면 보던 화면으로 (기록이 바뀌었으니 처음 화면은 다시 그림) */
+    private fun played(video: TubeVideo) {
         state.addPlayed(video)
         TubeTileService.refresh(this)
         if (screen == Screen.MENU) {
-            // 메뉴에서 틀었으면 보던 화면으로 (기록이 바뀌었으니 처음 화면은 다시 그림)
             menuVideo = null
             screen = if (menuFrom == Screen.RESULTS && query != null) Screen.RESULTS else Screen.HOME
         }
     }
+
+    /**
+     * 워치의 인터넷 앱이 둥근 화면용 재생 화면을 연다 (그 안의 유튜브 공식 플레이어가 재생).
+     * 재생 화면에 닿지 못하거나 열 앱이 없으면 알리고 폰으로. 타일에서 바로 온 일이면 이 앱은 닫는다(재생 화면이 앞에)
+     */
+    private fun playOnWatch(video: TubeVideo, mix: Boolean) {
+        if (opening) return
+        val link = WatchPlayer.intent(this, video, mix) ?: return playOnPhone(video, mix)
+        opening = true
+        openingText = R.string.tube_opening_watch
+        render()
+        lifecycleScope.launch {
+            val reachable = try {
+                WatchPlayer.reachable()
+            } finally {
+                opening = false
+            }
+            val opened = reachable && try {
+                startActivity(link)
+                true
+            } catch (e: ActivityNotFoundException) {
+                ErrorLog.record("유튜브·워치에서 열기", e)
+                false
+            } catch (e: SecurityException) {
+                ErrorLog.record("유튜브·워치에서 열기", e)
+                false
+            }
+            if (!opened) {
+                render()
+                toast(getString(R.string.tube_watch_unreachable))
+                playOnPhone(video, mix)
+                return@launch
+            }
+            played(video)
+            render()
+            if (shortcut != null) {
+                shortcut = null
+                closeJob?.cancel()
+                finishAndRemoveTask()
+            }
+        }
+    }
+
+    /** 폰의 유튜브 앱이 이 곡을 연다. [mix] = 이 곡으로 시작하는 믹스(내 계정의 추천으로 다음 곡이 계속 이어짐) */
+    private fun playOnPhone(video: TubeVideo, mix: Boolean) =
+        openOnPhone(TubeLinks.watchUrl(video.id, mix), R.string.tube_opened_on_phone) { played(video) }
 
     /** 워치 검색에 원하는 곡이 없을 때: 폰 유튜브 앱의 검색 결과(내 계정 기준)로 */
     private fun searchOnPhone(q: String) = openOnPhone(TubeLinks.searchUrl(q), R.string.tube_opened_search_on_phone) {}
@@ -384,6 +444,7 @@ class TubeActivity : ComponentActivity() {
     private fun openOnPhone(url: String, @StringRes done: Int, onOpened: () -> Unit) {
         if (opening) return
         opening = true
+        openingText = R.string.tube_sending
         render()   // 바로 '폰에서 여는 중…' — 누른 게 먹었는지 보이게
         lifecycleScope.launch {
             val result = try {

@@ -108,6 +108,15 @@
     <string name="tube_forget">기록에서 지우기</string>
     <string name="tube_live">LIVE</string>
     <string name="tube_count">%1$s · %2$d개</string>
+    <string name="tube_subtitle_watch">워치에서 바로 재생\n고른 곡으로 믹스</string>
+    <string name="tube_how_watch">고른 곡은 워치에서 유튜브 공식 플레이어로 틀어요. 믹스라 비슷한 곡이 이어지고, 화면이 켜져 있는 동안 나와요. 길게 누르면 폰에서 틀 수도 있어요.</string>
+    <string name="tube_watch_needs_browser">워치에 ‘삼성 인터넷’을 설치하면 워치에서 바로 들을 수 있어요 (워치 Play 스토어에서 ‘삼성 인터넷’ 검색).</string>
+    <string name="tube_watch_mix">워치에서 믹스로 듣기</string>
+    <string name="tube_watch_one">워치에서 이 곡만</string>
+    <string name="tube_phone_mix">폰 유튜브에서 믹스로</string>
+    <string name="tube_phone_one">폰 유튜브에서 이 곡만</string>
+    <string name="tube_opening_watch">워치에서 여는 중…</string>
+    <string name="tube_watch_unreachable">워치 재생 화면을 열 수 없어 폰에서 틀어요</string>
     <string name="tube_how">고른 곡은 폰의 유튜브 앱이 ‘믹스’로 틀어요. 평소 계정의 추천대로 다음 곡이 이어지고, 일시정지·다음 곡은 워치 미디어 컨트롤로 하면 돼요.</string>
     <string name="tube_opened_on_phone">폰 유튜브에서 재생</string>
     <string name="tube_opened_search_on_phone">폰 유튜브에서 검색</string>
