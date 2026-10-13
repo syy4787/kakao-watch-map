@@ -2,6 +2,11 @@ package com.mywatch.kakaomap.ui
 
 import android.content.res.ColorStateList
 import android.graphics.Typeface
+import android.text.SpannableStringBuilder
+import android.text.Spanned
+import android.text.style.ForegroundColorSpan
+import android.text.style.RelativeSizeSpan
+import android.text.style.StyleSpan
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -229,19 +234,35 @@ class RowAdapter(
 
     private fun bindTransit(v: View, row: Row.TransitCard) {
         val r = row.route
-        v.text(R.id.time).text = Format.duration(r.totalTimeSec)
-        v.text(R.id.arrive).text = "${Format.clockAfter(r.totalTimeSec)} 도착"
+        v.text(R.id.time).text = timeAndArrival(v, r.totalTimeSec)
         v.text(R.id.meta).text = listOfNotNull(
             r.fare?.let { Format.fare(it) },
             Format.transfers(r.transfers),
             "도보 ${Format.duration(r.walkTimeSec)}",
         ).joinToString(" · ")
         v.findViewById<SegmentBarView>(R.id.bar).setRoute(r)
-        val first = r.firstRide
-        v.text(R.id.first).text = if (first == null) "도보로 이동" else TransitGuide.boardText(first)
+        // 기차·고속버스가 있으면 그 출발 시각("KTX 105 · 대전역 09:58 출발"), 없으면 첫 버스·지하철
+        v.text(R.id.first).text = TransitGuide.headline(r) ?: "도보로 이동"
         v.text(R.id.live).show(row.live)
         v.text(R.id.badge).visibility = if (row.fastest) View.VISIBLE else View.GONE
         v.setOnClickListener { onClick(row) }
+    }
+
+    /**
+     * "1시간 41분  오후 11:06 도착" — 총 시간은 굵고 크게(20sp), 도착 시각은 작게(12sp).
+     * 도착 시각은 붙은 빈칸으로 묶어 한 덩어리로 줄바꿈된다 (한 줄에 안 들어가면 통째로 다음 줄)
+     */
+    private fun timeAndArrival(v: View, seconds: Int): CharSequence {
+        val duration = Format.duration(seconds)
+        val arrive = "${Format.clockAfter(seconds)} 도착".replace(' ', '\u00A0')
+        return SpannableStringBuilder(duration).apply {
+            setSpan(StyleSpan(Typeface.BOLD), 0, length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            append("  ")
+            val start = length
+            append(arrive)
+            setSpan(RelativeSizeSpan(12f / 20f), start, length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            setSpan(ForegroundColorSpan(color(v, R.color.text_secondary)), start, length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+        }
     }
 
     private fun modeName(v: View, mode: TravelMode): String = v.context.getString(

@@ -12,13 +12,13 @@ class LostClock {
 
     /** [now] = 부팅 후 ms (SystemClock.elapsedRealtime) */
     fun update(s: NavState, now: Long) {
-        val onRoute = s.arrived || (s.matched && !s.offRoute && !s.passedStop)
+        val onRoute = s.arrived || (s.matched && !s.offRoute && !s.passedStop && !s.missedRide)
         if (onRoute) {
             reset()
             return
         }
         if (lostSince == null) lostSince = now
-        if ((s.offRoute || s.passedStop) && offSince == null) offSince = now
+        if ((s.offRoute || s.passedStop || s.missedRide) && offSince == null) offSince = now
     }
 
     fun reset() {

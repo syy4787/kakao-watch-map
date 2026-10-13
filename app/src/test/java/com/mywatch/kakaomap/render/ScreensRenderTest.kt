@@ -194,6 +194,70 @@ class ScreensRenderTest {
         )
     }
 
+    // ── 장거리: 대전시청 → 서울시청 (KTX · 고속버스 · 카카오 시내버스 갈아타기) ──
+    private val zone = java.time.ZoneId.of("Asia/Seoul")
+    private fun at(h: Int, m: Int) = java.time.LocalDateTime.of(2026, 10, 13, h, m).atZone(zone).toInstant().toEpochMilli()
+    private val cityHall = Coord(36.3504, 127.3849)
+    private val seoulHall = com.mywatch.kakaomap.model.Place("s", "서울시청", "시청", "서울 중구", "", Coord(37.5663, 126.9779), null)
+    private fun kplace(name: String, lat: Double, lng: Double) =
+        com.mywatch.kakaomap.model.Place(name, name, "KTX정차역", "", "", Coord(lat, lng), 1000)
+    private val daejeonSt = kplace("대전역", 36.3326, 127.4344)
+    private val seoulSt = kplace("서울역", 37.5547, 126.9707)
+    private val djTerminal = kplace("대전복합터미널", 36.3500, 127.4370)
+    private val seoulExp = kplace("서울고속버스터미널(경부)", 37.5049, 127.0049)
+    private val subwayToStation = TransitRoute("SUBWAY", 5600, 20 * 60, 0, 1500, listOf(
+        TransitStep(TransitStepType.WALK, "시청역까지 도보", 300, 300, emptyList(), emptyList(), listOf(cityHall, Coord(36.351, 127.388)), approx = true),
+        TransitStep(TransitStepType.SUBWAY, "대전 1호선 (시청 > 대전역)", 5000, 600, listOf("시청", "중앙로", "대전역"),
+            listOf(Vehicle("도시철도", "대전 1호선")), listOf(Coord(36.351, 127.388), Coord(36.332, 127.433))),
+        TransitStep(TransitStepType.WALK, "대전역까지 도보", 300, 300, emptyList(), emptyList(), listOf(Coord(36.332, 127.433), daejeonSt.coord), approx = true),
+    ))
+    private val longRoutes: List<TransitRoute> by lazy {
+        val m = com.mywatch.kakaomap.model.IntercityKind.TRAIN
+        val e = com.mywatch.kakaomap.model.IntercityKind.EXPRESS
+        com.mywatch.kakaomap.model.IntercityItineraries.build(
+            at(9, 25), cityHall, seoulHall,
+            listOf(
+                com.mywatch.kakaomap.model.StationPair(m,
+                    com.mywatch.kakaomap.model.AccessLeg(daejeonSt, subwayToStation, 20 * 60, 1500),
+                    com.mywatch.kakaomap.model.AccessLeg(seoulSt, null, 15 * 60, 0),
+                    listOf(com.mywatch.kakaomap.model.ScheduledRun(m, "105", "KTX-산천", "대전", "서울", at(9, 58), at(10, 51), 23700, weekly = true))),
+                com.mywatch.kakaomap.model.StationPair(e,
+                    com.mywatch.kakaomap.model.AccessLeg(djTerminal, null, 25 * 60, 0),
+                    com.mywatch.kakaomap.model.AccessLeg(seoulExp, null, 35 * 60, 0),
+                    listOf(com.mywatch.kakaomap.model.ScheduledRun(e, "", "심야고속", "대전복합", "서울경부", at(10, 5), at(12, 5), 14800))),
+            ),
+            perKind = 1,
+        )
+    }
+    private val busChain = TransitRoute("BUS", 170_244, 10549, 3, null, listOf(
+        step(TransitStepType.WALK, 5), step(TransitStepType.BUS, 20, Vehicle("일반", "106")), step(TransitStepType.WALK, 3),
+        step(TransitStepType.BUS, 90, Vehicle("시외", "8366")), step(TransitStepType.WALK, 4),
+        step(TransitStepType.BUS, 50, Vehicle("직행", "5005")), step(TransitStepType.WALK, 4),
+    ))
+
+    @Test
+    fun longDistanceCards() = shoot(
+        "intercity",
+        listOf(Row.Header("→ 서울시청", "내 위치에서 출발"), Row.ModeTabs(TravelMode.TRANSIT, mapOf(TravelMode.TRANSIT to longRoutes[0].totalTimeSec), null)) +
+            Row.TransitChoice(TransitFilter.ALL, 3, true, TransitSort.FASTEST) +
+            Row.TransitCard(0, longRoutes[0], "106번 4분 후 (2정거장 전)", fastest = true) +
+            Row.TransitCard(1, longRoutes[1], null) +
+            Row.TransitCard(2, busChain, null) +
+            Row.Note("오늘 열차 시간표에 빠진 KTX가 있어 다음 주 같은 요일 시간표로 채웠어요") +
+            Row.Note("버스 도착 시간은 공공데이터(TAGO) 실시간 정보, 기차·고속·시외버스는 공공데이터(TAGO) 시간표예요."),
+        pages = 4,
+    )
+
+    @Test
+    fun longDistanceDetail() = shoot(
+        "intercity_detail",
+        listOf(
+            Row.Header("1시간 41분 · 오전 11:06 도착", "26,700원 · 환승 1회 · 168km"),
+            Row.Action("navigate", R.drawable.ic_navigation, "안내 시작", accent = true),
+        ) + RouteRows.transitTimeline(longRoutes[0], "서울시청", true) + RouteRows.transitTimeline(longRoutes[1], "서울시청", false),
+        pages = 5,
+    )
+
     @Test
     fun transitCards() = shoot(
         "transit",

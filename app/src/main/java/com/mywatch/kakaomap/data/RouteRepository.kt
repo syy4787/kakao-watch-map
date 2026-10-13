@@ -57,6 +57,8 @@ object RouteRepository {
 
     var destination: Place? = null
     var transitRoutes: List<TransitRoute>? = null
+    /** 대중교통 목록 아래에 붙일 말 (기차·버스 시간표를 받지 못함 · 지난 시간표로 채움 등) */
+    var transitNote: String? = null
     /** 도보·자전거 경로 카드 (카카오맵의 경로 옵션별 결과, 같은 길은 한 카드) */
     var walkChoices: List<RouteChoice>? = null
     var bikeChoices: List<RouteChoice>? = null
@@ -80,6 +82,7 @@ object RouteRepository {
     /** 이 목적지로 받아 둔 경로를 모두 버린다 (출발지가 바뀌었을 때 등) */
     fun clearRoutes() {
         transitRoutes = null
+        transitNote = null
         walkChoices = null
         bikeChoices = null
     }

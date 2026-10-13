@@ -48,25 +48,48 @@ object RoutePresentation {
         return table.firstOrNull { name.contains(it.first) }?.let { Color.parseColor(it.second) } ?: DEFAULT_SUBWAY
     }
 
+    /** KTX·SRT 계열은 짙은 파랑, ITX·무궁화 같은 일반 열차는 회청색 */
+    fun trainColor(grade: String): Int = Color.parseColor(
+        if (grade.contains("KTX") || grade.contains("SRT")) "#2348A8" else "#5B6B8C"
+    )
+
+    /** 고속버스는 보라, 시외버스는 주황 (시내 광역·직행 버스의 빨강과 구별) */
+    fun coachColor(type: String): Int = Color.parseColor(if (type.contains("시외")) "#D35400" else "#7E57C2")
+
     fun stepColor(step: TransitStep): Int = when (step.type) {
         TransitStepType.WALK -> WALK_COLOR
         TransitStepType.BUS -> step.vehicles.firstOrNull()?.let { busColor(it.type) } ?: DEFAULT_BUS
         TransitStepType.SUBWAY -> step.vehicles.firstOrNull()?.let { subwayColor(it.name + it.type) } ?: DEFAULT_SUBWAY
+        TransitStepType.TRAIN -> trainColor(step.vehicles.firstOrNull()?.type.orEmpty())
+        TransitStepType.COACH -> coachColor(step.vehicles.firstOrNull()?.type.orEmpty())
         TransitStepType.OTHER -> DEFAULT_SUBWAY
     }
 
     /** 구간 막대·칩에 쓰는 짧은 이름: 버스 번호 / 지하철 노선 */
     fun stepLabel(step: TransitStep): String = TransitGuide.label(step)
 
-    fun transitSummary(r: TransitRoute): String =
-        "${Format.duration(r.totalTimeSec)} · ${Format.clockAfter(r.totalTimeSec)} 도착"
+    /** "1시간 41분 · 오전 11:06 도착" — 기차·버스 시간표 경로는 정해진 도착 시각 기준 */
+    fun transitSummary(r: TransitRoute): String = r.secondsFrom(System.currentTimeMillis()).let { sec ->
+        "${Format.duration(sec)} · ${Format.clockAfter(sec)} 도착"
+    }
 
     fun simpleSummary(r: SimpleRoute): String {
         val what = if (r.mode == TravelMode.BIKE) "자전거" else "도보"
         return "$what ${Format.duration(r.totalTimeSec)} · ${Format.distance(r.totalDistanceM)}"
     }
 
-    fun activeFromTransit(r: TransitRoute, place: Place, origin: Coord, navigate: Boolean) = ActiveRoute(
+    /**
+     * 지도에 띄울(안내할) 대중교통 경로. 기차·버스 시간표 경로는 지금 시각 기준 남은 시간으로 다시 재서 넣는다 —
+     * 지도의 도착 예정 시각(시작 시각 + 걸리는 시간)이 찾았을 때가 아니라 지금 기준이 되게
+     */
+    fun activeFromTransit(route: TransitRoute, place: Place, origin: Coord, navigate: Boolean): ActiveRoute {
+        val now = System.currentTimeMillis()
+        val r = if (route.arriveAtMs != null) route.copy(totalTimeSec = route.secondsFrom(now)) else route
+        return activeTransit(r, place, origin, navigate, now)
+    }
+
+    private fun activeTransit(r: TransitRoute, place: Place, origin: Coord, navigate: Boolean, now: Long) = ActiveRoute(
+        startedAtMs = now,
         mode = TravelMode.TRANSIT,
         place = place,
         summary = transitSummary(r),

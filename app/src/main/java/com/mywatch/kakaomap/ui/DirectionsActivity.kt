@@ -8,7 +8,9 @@ import android.os.SystemClock
 import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.edit
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import com.mywatch.kakaomap.MainActivity
 import com.mywatch.kakaomap.R
 import com.mywatch.kakaomap.data.ErrorLog
@@ -24,13 +26,17 @@ import com.mywatch.kakaomap.model.RouteChoices
 import com.mywatch.kakaomap.model.RouteOption
 import com.mywatch.kakaomap.model.RouteStatusException
 import com.mywatch.kakaomap.model.TransitFilter
+import com.mywatch.kakaomap.model.TransitGuide
 import com.mywatch.kakaomap.model.TransitOptions
 import com.mywatch.kakaomap.model.TransitRoute
 import com.mywatch.kakaomap.model.TransitSort
 import com.mywatch.kakaomap.model.TransitStepType
 import com.mywatch.kakaomap.model.TravelMode
+import com.mywatch.kakaomap.net.ApiException
 import com.mywatch.kakaomap.net.BusArrivalService
+import com.mywatch.kakaomap.net.IntercityPlanner
 import com.mywatch.kakaomap.net.KakaoApi
+import com.mywatch.kakaomap.net.LiveIntercitySource
 import com.mywatch.kakaomap.net.TagoApi
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -39,8 +45,10 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * 카카오맵 길찾기 결과 화면.
@@ -79,6 +87,11 @@ class DirectionsActivity : ComponentActivity() {
     private val remembered = mutableMapOf<TravelMode, RouteOption?>()
     /** 경로 번호 → 실시간 첫 버스 도착 (거르기·정렬을 바꿔도 다시 받지 않게) */
     private val liveTexts = mutableMapOf<Int, String>()
+    /** 기차·버스 시간표 찾기 (시내 결과와 따로 돌아감) */
+    private var intercityJob: Job? = null
+    /** 대중교통을 마지막으로 찾기 시작한 시각 (지난 편 때문에 다시 찾는 것은 5분에 한 번까지) */
+    private var transitFetchedAt = 0L
+    private var ambient: AmbientCover? = null
 
     /** 위치 권한 창을 띄운 시각 — 곧바로 거절이 오면 시스템이 창을 안 띄운 것(두 번 거절해 막힘) */
     private var permissionAskedAt = 0L
@@ -111,10 +124,22 @@ class DirectionsActivity : ComponentActivity() {
         ui = WearList(this, ::onRow)
         // 손목을 내리면 검은 화면에 목적지만 (Wear OS 6+ 는 이 화면을 켜 둔 채 둔다).
         // 손목을 올리면(화면은 계속 '재개' 상태라 onResume 이 안 옴) 실시간 버스를 새로
-        AmbientCover(this, { "→ ${dest.name}" }) { inAmbient ->
-            if (!inAmbient && mode == TravelMode.TRANSIT && RouteRepository.transitRoutes != null) fetchLiveArrivals()
+        ambient = AmbientCover(this, { "→ ${dest.name}" }) { inAmbient ->
+            if (!inAmbient && mode == TravelMode.TRANSIT && RouteRepository.transitRoutes != null) {
+                fetchLiveArrivals()
+                refreshTimetableRoutes()
+            }
         }
         load()
+        // 기차·버스 시간표 경로의 남은 시간을 1분마다 새로 (손목을 내린 동안은 쉼)
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.RESUMED) {
+                while (true) {
+                    delay(MINUTE_MS)
+                    if (ambient?.inAmbient != true) refreshTimetableRoutes()
+                }
+            }
+        }
     }
 
     override fun onResume() {
@@ -131,6 +156,7 @@ class DirectionsActivity : ComponentActivity() {
         }
         // 상세 화면 등에서 돌아오면 실시간 버스 도착을 새로 (30초 안에 받은 것은 저장해 둔 값을 씀)
         if (mode == TravelMode.TRANSIT && liveTexts.isNotEmpty()) fetchLiveArrivals()
+        refreshTimetableRoutes()
     }
 
     private fun prefs() = getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -147,6 +173,7 @@ class DirectionsActivity : ComponentActivity() {
 
     private fun load() {
         loadJob?.cancel()
+        intercityJob?.cancel()
         fetches.values.forEach { it.cancel() }
         fetches.clear()
         retrying.clear()
@@ -187,6 +214,14 @@ class DirectionsActivity : ComponentActivity() {
             }
             val from = RouteRepository.routeOrigin ?: fix.coord
             origin = from
+            // 전에 찾아 둔 기차·버스 경로 중 이제 못 타는 편이 있으면 다시 찾는다 (다음 편으로)
+            RouteRepository.transitRoutes?.let { r ->
+                if (r.any { it.expired(System.currentTimeMillis()) }) {
+                    RouteRepository.transitRoutes = null
+                    RouteRepository.transitNote = null
+                    liveTexts.clear()
+                }
+            }
             render()
             // 전에 찾아 둔 대중교통 경로를 그대로 보여 줄 때도 실시간 버스는 새로
             if (mode == TravelMode.TRANSIT && RouteRepository.transitRoutes != null && liveTexts.isEmpty()) fetchLiveArrivals()
@@ -204,10 +239,7 @@ class DirectionsActivity : ComponentActivity() {
         if (hasRoutes(m) || m in errors) return null
         fetches[m]?.let { if (it.isActive) return it }
         val job = if (m == TravelMode.TRANSIT) {
-            launchFetch(m, from, { KakaoApi.transit(from, dest.coord, dest.name) }) { routes ->
-                RouteRepository.transitRoutes = routes
-                liveTexts.clear()
-            }
+            fetchTransit(from)
         } else {
             launchFetch(m, from, { simpleChoices(m, from) }) { got ->
                 RouteRepository.setChoices(m, got.choices)
@@ -236,6 +268,122 @@ class DirectionsActivity : ComponentActivity() {
                 refreshTabs()
             }
         }
+
+    /** 직선으로 이만큼 넘게 떨어진 곳이면 기차·고속·시외버스도 찾는다 */
+    private fun far(from: Coord) = Geo.distanceM(from, dest.coord) >= IntercityPlanner.MIN_DISTANCE_M
+
+    /** 그 사이 목적지·출발지가 바뀜 */
+    private fun stale(from: Coord) = RouteRepository.destination !== dest || RouteRepository.routeOrigin != from
+
+    /**
+     * 카카오 대중교통과 (먼 곳이면) 기차·고속·시외버스 시간표 경로를 한 목록으로 — 카카오맵처럼.
+     * 카카오 대중교통 API는 대전→서울을 시외·직행버스 갈아타기(3시간)로만 주고 KTX·고속버스는 없다.
+     * 시내 결과가 오면 먼저 보여 주고(아래에 '시간표 찾는 중…'), 시간표 경로는 오는 대로 목록 뒤에 붙인다
+     * (번호가 그대로라 상세 화면·실시간 버스가 어긋나지 않음). 시간표는 20초까지만 기다리고, 둘 다 없을 때만 실패.
+     */
+    private fun fetchTransit(from: Coord): Job = lifecycleScope.launch {
+        val m = TravelMode.TRANSIT
+        transitFetchedAt = System.currentTimeMillis()
+        // 시간표 찾기는 이 작업과 따로 돌린다 — 막힌 연결이 끝나기를 기다리지 않고 제한 시간에 바로 넘어가려고
+        val longRides = if (far(from) && TagoApi.isConfigured) {
+            lifecycleScope.async(Dispatchers.IO) {
+                runCatching { IntercityPlanner(LiveIntercitySource(applicationContext)).plan(from, dest, System.currentTimeMillis()) }
+            }.also { intercityJob = it }
+        } else null
+        val city = withContext(Dispatchers.IO) { runCatching { KakaoApi.transit(from, dest.coord, dest.name) } }
+        city.exceptionOrNull()?.let { if (it is CancellationException) throw it }
+        if (stale(from)) {
+            longRides?.cancel()
+            return@launch
+        }
+        val cityRoutes = city.getOrNull()
+        val searching = getString(R.string.routing_far)
+        if (longRides != null && !cityRoutes.isNullOrEmpty()) {
+            RouteRepository.transitRoutes = cityRoutes
+            RouteRepository.transitNote = searching
+            liveTexts.clear()
+            showTransit()
+        }
+        val got = try {
+            longRides?.let { job ->
+                withTimeoutOrNull(INTERCITY_TIMEOUT_MS) { job.await() } ?: run {
+                    job.cancel()
+                    Result.failure(ApiException("시간 초과"))
+                }
+            }
+        } finally {
+            // 시간표를 기다리다 취소됐으면(다시 시도·화면 닫힘) 반쪽 목록을 남기지 않는다 — 다음에 처음부터 찾게
+            if (!isActive && RouteRepository.transitRoutes === cityRoutes && RouteRepository.transitNote == searching) {
+                longRides?.cancel()
+                RouteRepository.transitRoutes = null
+                RouteRepository.transitNote = null
+            }
+        }
+        if (stale(from)) return@launch
+        got?.exceptionOrNull()?.let { e ->
+            if (e is CancellationException) throw e
+            ErrorLog.record("길찾기·기차·버스", e)
+        }
+        val found = got?.getOrNull()
+        found?.problems?.firstOrNull()?.let { ErrorLog.record("길찾기·기차·버스", it) }
+        val routes = cityRoutes.orEmpty() + found?.routes.orEmpty()
+        if (routes.isEmpty()) {
+            // 둘 다 경로가 없으면 카카오의 답(대중교통 길 없음·끊김)을 그대로
+            val e = city.exceptionOrNull()
+            errors[m] = e?.message ?: getString(R.string.no_transit)
+            if (e != null && e !is RouteStatusException) ErrorLog.record("길찾기·${modeName(m)}", e)
+            RouteRepository.transitRoutes = null
+            RouteRepository.transitNote = null
+        } else {
+            if (RouteRepository.transitRoutes !== cityRoutes) liveTexts.clear()
+            RouteRepository.transitRoutes = routes
+            RouteRepository.transitNote = when {
+                got?.isFailure == true -> getString(R.string.intercity_failed)
+                found != null && found.problems.isNotEmpty() -> getString(R.string.intercity_partial)
+                found?.weekly == true -> getString(R.string.intercity_weekly)
+                else -> null
+            }
+        }
+        showTransit()
+    }
+
+    private fun showTransit() {
+        if (mode == TravelMode.TRANSIT) {
+            render()
+            if (RouteRepository.transitRoutes != null) fetchLiveArrivals()
+        } else {
+            refreshTabs()
+        }
+    }
+
+    /**
+     * 기차·버스 시간표 경로는 도착 시각이 정해져 있어 시간이 지나면 남은 시간이 줄고, 나가야 할 시각이 지나면 못 탄다.
+     * 1분마다(그리고 다른 화면에서 돌아올 때) 다시 그리고, 못 타게 된 편이 생기면 다음 편으로 다시 찾는다.
+     */
+    private fun refreshTimetableRoutes() {
+        val routes = RouteRepository.transitRoutes ?: return
+        if (routes.none { it.arriveAtMs != null }) return
+        val from = origin ?: return
+        if (fetches[TravelMode.TRANSIT]?.isActive == true) return
+        val now = System.currentTimeMillis()
+        val (kept, ranOut) = TransitOptions.dropExpired(routes, now)
+        if (kept.size != routes.size) {
+            if (ranOut && (kept.isEmpty() || now - transitFetchedAt >= REFETCH_GAP_MS)) {
+                // 열차(또는 고속·시외버스) 편이 다 지나감 → 다음 편을 다시 찾는다 (5분에 한 번까지)
+                RouteRepository.transitRoutes = null
+                RouteRepository.transitNote = null
+                liveTexts.clear()
+                errors.remove(TravelMode.TRANSIT)
+                fetch(TravelMode.TRANSIT, from)
+            } else {
+                // 지난 편만 빼고 그대로 (번호가 바뀌므로 실시간 버스는 새로)
+                RouteRepository.transitRoutes = kept
+                liveTexts.clear()
+                if (mode == TravelMode.TRANSIT) fetchLiveArrivals()
+            }
+        }
+        if (mode == TravelMode.TRANSIT) render() else refreshTabs()
+    }
 
     /** 옵션별로 받은 결과: 카드 + 이번에 받지 못한 옵션(잠깐 끊김 등 — 다시 받아 볼 만한 것) */
     private class SimpleResult(val choices: List<RouteChoice>, val missing: List<RouteOption>)
@@ -294,7 +442,8 @@ class DirectionsActivity : ComponentActivity() {
         if (!TagoApi.isConfigured) return
         val routes = RouteRepository.transitRoutes ?: return
         routes.forEachIndexed { i, r ->
-            val bus = r.steps.firstOrNull { it.type == TransitStepType.BUS } ?: return@forEachIndexed
+            // 기차·고속버스 경로는 타러 가는 버스만 (내려서 탈 버스는 몇 시간 뒤라 지금 도착 정보는 엉뚱함)
+            val bus = TransitGuide.liveBusIndexes(r).firstOrNull()?.let { r.steps[it] } ?: return@forEachIndexed
             lifecycleScope.launch {
                 val text = withContext(Dispatchers.IO) { BusArrivalService.describe(bus) } ?: return@launch
                 if (RouteRepository.transitRoutes !== routes) return@launch
@@ -323,7 +472,8 @@ class DirectionsActivity : ComponentActivity() {
     private fun tabs(): Row.ModeTabs {
         val seconds = mutableMapOf<TravelMode, Int>()
         if (origin != null && blocked == null) {
-            RouteRepository.transitRoutes?.let { r ->
+            RouteRepository.transitRoutes?.let { all ->
+                val r = TransitOptions.current(all, System.currentTimeMillis())
                 TransitOptions.fastestIndex(r)?.let { seconds[TravelMode.TRANSIT] = r[it].totalTimeSec }
             }
             for (m in SIMPLE_MODES) {
@@ -341,11 +491,19 @@ class DirectionsActivity : ComponentActivity() {
             TravelMode.TRANSIT -> RouteRepository.transitRoutes?.let(::transitRows)
             TravelMode.WALK, TravelMode.BIKE -> RouteRepository.choices(mode)?.let { simpleRows(mode, it) }
         }
-        return rows ?: listOf(Row.Note(getString(R.string.routing)))
+        val from = origin
+        val searching = if (mode == TravelMode.TRANSIT && from != null && far(from) && TagoApi.isConfigured) {
+            R.string.routing_far   // 기차·버스 시간표까지 찾느라 몇 초 더 걸림
+        } else {
+            R.string.routing
+        }
+        return rows ?: listOf(Row.Note(getString(searching)))
     }
 
     /** 경로 카드 목록: 거르기·정렬 칩 + (거르고 정렬한) 카드. 카드 번호는 원래 목록의 번호 */
-    private fun transitRows(routes: List<TransitRoute>): List<Row> {
+    private fun transitRows(stored: List<TransitRoute>): List<Row> {
+        // 기차·버스 시간표 경로는 지금 시각 기준 남은 시간으로 (번호는 그대로)
+        val routes = TransitOptions.current(stored, System.currentTimeMillis())
         val choices = TransitOptions.filters(routes)
         filter = TransitOptions.valid(filter, choices.map { it.first })
         val shown = TransitOptions.apply(routes, filter, sort)
@@ -364,7 +522,11 @@ class DirectionsActivity : ComponentActivity() {
             }
             body += shown.map { Row.TransitCard(it.index, it.value, liveTexts[it.index], fastest = it.index == fastest) }
         }
-        if (!TagoApi.isConfigured) body += Row.Note(getString(R.string.tago_missing))
+        RouteRepository.transitNote?.let { body += Row.Note(it) }
+        if (!TagoApi.isConfigured) {
+            val far = origin?.let(::far) == true
+            body += Row.Note(getString(if (far) R.string.intercity_tago_missing else R.string.tago_missing))
+        }
         body += Row.Note(getString(R.string.transit_note))
         return body
     }
@@ -468,6 +630,10 @@ class DirectionsActivity : ComponentActivity() {
         private const val ACTION_MAP = "map"
         private const val ACTION_RETRY_OPTIONS = "retry_options"
         private const val RETRY_DELAY_MS = 400L
+        private const val MINUTE_MS = 60_000L
+        private const val REFETCH_GAP_MS = 5 * 60_000L
+        /** 기차·버스 시간표를 이만큼 기다려도 안 오면 시내 대중교통 결과만 */
+        private const val INTERCITY_TIMEOUT_MS = 20_000L
         private val SIMPLE_MODES = listOf(TravelMode.WALK, TravelMode.BIKE)
 
         private fun optionKey(m: TravelMode) = "option_${m.name}"

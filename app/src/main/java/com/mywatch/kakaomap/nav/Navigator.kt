@@ -101,7 +101,7 @@ object Navigator {
             NavEvent.ACTION_SOON -> longArrayOf(0, 300)
             NavEvent.BOARD_SOON -> longArrayOf(0, 200, 150, 200)
             NavEvent.ALIGHT_SOON -> longArrayOf(0, 350, 150, 350, 150, 350)
-            NavEvent.PASSED_STOP -> longArrayOf(0, 600, 200, 600)
+            NavEvent.PASSED_STOP, NavEvent.MISSED_RIDE -> longArrayOf(0, 600, 200, 600)
             NavEvent.OFF_ROUTE -> longArrayOf(0, 60, 60, 60, 60, 60, 60, 60, 60, 60)
             NavEvent.ARRIVED -> longArrayOf(0, 600)
             NavEvent.REROUTED -> longArrayOf(0, 150)

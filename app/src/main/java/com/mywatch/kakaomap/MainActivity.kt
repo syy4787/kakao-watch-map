@@ -682,6 +682,7 @@ class MainActivity : ComponentActivity() {
             NavIcon.WALK -> if (active.mode == TravelMode.BIKE) R.drawable.ic_bike else R.drawable.ic_walk
             NavIcon.BUS -> R.drawable.ic_bus
             NavIcon.SUBWAY -> R.drawable.ic_subway
+            NavIcon.TRAIN -> R.drawable.ic_train
             NavIcon.FLAG -> R.drawable.ic_flag
             NavIcon.WARNING -> R.drawable.ic_warning
         }

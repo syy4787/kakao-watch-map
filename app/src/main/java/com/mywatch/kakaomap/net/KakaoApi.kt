@@ -33,6 +33,14 @@ object KakaoApi {
         return KakaoParsers.places(call("/v2/local/search/keyword.json", params))
     }
 
+    /** [near] 에서 [radiusM](최대 20km) 안을 가까운 순으로 — 역·터미널 찾기용 */
+    fun searchNear(query: String, near: Coord, radiusM: Int): List<Place> = KakaoParsers.places(
+        call("/v2/local/search/keyword.json", linkedMapOf(
+            "query" to query, "x" to near.lng.fmt(), "y" to near.lat.fmt(),
+            "radius" to radiusM.coerceIn(0, 20_000).toString(), "sort" to "distance", "size" to "15",
+        ))
+    )
+
     /** 지하철역 찾기 (카테고리 SW8 만) */
     fun subwayStations(query: String, near: Coord): List<Place> = KakaoParsers.places(
         call("/v2/local/search/keyword.json", linkedMapOf(

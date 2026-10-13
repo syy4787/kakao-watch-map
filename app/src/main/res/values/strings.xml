@@ -44,7 +44,13 @@
     <string name="end_route">안내 종료</string>
     <string name="precise_location_needed">길안내는 \'정확한 위치\'를 허용해야 해요</string>
     <string name="gps_weak">GPS 신호 약함 · 위치 추정 중</string>
-    <string name="transit_note">버스 도착 시간은 공공데이터(TAGO) 실시간 정보예요. 고속·시외버스·KTX 같은 장거리 노선은 카카오 대중교통 API에 없어요.</string>
+    <string name="transit_note">버스 도착 시간은 공공데이터(TAGO) 실시간 정보, 기차·고속·시외버스는 공공데이터(TAGO) 시간표예요.</string>
+    <string name="routing_far">기차·고속·시외버스 시간표까지 찾는 중…</string>
+    <string name="no_transit">대중교통 경로가 없어요</string>
+    <string name="intercity_failed">기차·고속·시외버스 시간표를 받지 못했어요</string>
+    <string name="intercity_partial">기차·버스 시간표 일부를 받지 못했어요</string>
+    <string name="intercity_weekly">오늘 열차 시간표에 빠진 KTX가 있어 다음 주 같은 요일 시간표로 채웠어요</string>
+    <string name="intercity_tago_missing">기차·고속·시외버스는 공공데이터 키를 넣으면 보여요</string>
     <string name="tago_missing">실시간 버스 도착은 공공데이터 키를 넣으면 보여요</string>
 
     <string name="back_to_map">지도로 돌아가기</string>

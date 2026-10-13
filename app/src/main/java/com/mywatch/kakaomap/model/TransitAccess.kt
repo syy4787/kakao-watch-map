@@ -46,7 +46,7 @@ object TransitAccess {
             )
         }
 
-        val firstRide = steps.firstOrNull { it.type == TransitStepType.BUS || it.type == TransitStepType.SUBWAY }
+        val firstRide = steps.firstOrNull { it.type.ride }
         val lead = if (needLead) walk(dIn, "${firstRide?.boardingStop ?: "정류장"}까지 도보", listOf(origin, first)) else null
         val tail = if (needTail) walk(dOut, "${destinationName.ifBlank { "도착지" }}까지 도보", listOf(last, destination)) else null
         return route.copy(steps = listOfNotNull(lead) + steps + listOfNotNull(tail))

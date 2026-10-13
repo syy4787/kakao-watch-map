@@ -15,8 +15,8 @@ import com.mywatch.kakaomap.model.Coord
 import com.mywatch.kakaomap.model.Format
 import com.mywatch.kakaomap.model.Place
 import com.mywatch.kakaomap.model.SimpleRoute
+import com.mywatch.kakaomap.model.TransitGuide
 import com.mywatch.kakaomap.model.TransitRoute
-import com.mywatch.kakaomap.model.TransitStepType
 import com.mywatch.kakaomap.nav.NavigationService
 import com.mywatch.kakaomap.nav.Navigator
 import com.mywatch.kakaomap.net.BusArrivalService
@@ -94,7 +94,9 @@ class RouteDetailActivity : ComponentActivity() {
         val t = transit
         val s = simple
         return when {
-            t != null -> "→ ${place.name}\n${Format.duration(t.totalTimeSec)} · ${Format.clockAfter(t.totalTimeSec)} 도착"
+            t != null -> t.secondsFrom(System.currentTimeMillis()).let { sec ->
+                "→ ${place.name}\n${Format.duration(sec)} · ${Format.clockAfter(sec)} 도착"
+            }
             s != null -> "→ ${place.name}\n${RoutePresentation.simpleSummary(s)}"
             else -> "→ ${place.name}"
         }
@@ -105,8 +107,10 @@ class RouteDetailActivity : ComponentActivity() {
         val t = transit
         val s = simple
         if (t != null) {
+            // 기차·버스 시간표 경로는 도착 시각이 정해져 있다 — 지금 기준 남은 시간
+            val sec = t.secondsFrom(System.currentTimeMillis())
             rows += Row.Header(
-                "${Format.duration(t.totalTimeSec)} · ${Format.clockAfter(t.totalTimeSec)} 도착",
+                "${Format.duration(sec)} · ${Format.clockAfter(sec)} 도착",
                 listOfNotNull(t.fare?.let { Format.fare(it) }, Format.transfers(t.transfers), Format.distance(t.totalDistanceM))
                     .joinToString(" · "),
             )
@@ -143,9 +147,10 @@ class RouteDetailActivity : ComponentActivity() {
 
     private suspend fun refreshLive() {
         val t = transit ?: return
-        t.steps.forEachIndexed { i, s ->
-            if (s.type != TransitStepType.BUS) return@forEachIndexed
-            val text = withContext(Dispatchers.IO) { BusArrivalService.describe(s) } ?: return@forEachIndexed
+        // 기차·고속버스 경로는 타러 가는 버스만 (내려서 탈 버스는 몇 시간 뒤라 지금 도착 정보는 엉뚱함)
+        TransitGuide.liveBusIndexes(t).forEach { i ->
+            val s = t.steps[i]
+            val text = withContext(Dispatchers.IO) { BusArrivalService.describe(s) } ?: return@forEach
             val rows = ui.adapter.rows
             val pos = rows.indexOfFirst { it is Row.Step && it.key == "s$i" }
             if (pos >= 0) ui.adapter.replace(pos, (rows[pos] as Row.Step).copy(live = text))

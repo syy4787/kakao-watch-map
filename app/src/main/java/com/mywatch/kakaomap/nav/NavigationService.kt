@@ -42,19 +42,29 @@ import com.mywatch.kakaomap.location.Locator
 import com.mywatch.kakaomap.location.toFix
 import com.mywatch.kakaomap.model.Coord
 import com.mywatch.kakaomap.model.Format
+import com.mywatch.kakaomap.model.Geo
+import com.mywatch.kakaomap.model.IntercityItineraries
+import com.mywatch.kakaomap.model.IntercitySplice
 import com.mywatch.kakaomap.model.RouteStatusException
 import com.mywatch.kakaomap.model.TransitOptions
 import com.mywatch.kakaomap.model.TransitRoute
+import com.mywatch.kakaomap.model.TransitStep
 import com.mywatch.kakaomap.model.TravelMode
+import com.mywatch.kakaomap.net.IntercityPlanner
 import com.mywatch.kakaomap.net.KakaoApi
+import com.mywatch.kakaomap.net.LiveIntercitySource
+import com.mywatch.kakaomap.net.TagoApi
 import com.mywatch.kakaomap.update.UpdateInstallWorker
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.MainScope
+import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * '안내 시작'한 동안 돌아가는 포그라운드 서비스.
@@ -131,13 +141,14 @@ class NavigationService : Service() {
                 Navigator.onFix(this@NavigationService, loc.toFix())
             }
             onSignal(true)
-            // 멈춤 ↔ 움직임이 바뀌면 위치 계획을 다시 본다: 저전력(Wi-Fi·기지국) 위치는 거칠어서 엔진이 버리므로
-            // 안내 상태가 안 바뀌어도, 걷기 시작하면 GPS 를 다시 켜야 한다
-            if (motion.still != wasStill) RouteRepository.activeRoute?.let { a ->
+            RouteRepository.activeRoute?.let { a ->
                 val st = Navigator.state.value
-                if (foreground && a.startNavigation && !st.arrived && st.routeVersion == RouteRepository.activeRouteVersion) {
-                    applyPlan(planFor(a, st))
-                }
+                if (!foreground || !a.startNavigation || st.arrived || st.routeVersion != RouteRepository.activeRouteVersion) return@let
+                // 멈춤 ↔ 움직임이 바뀌면 위치 계획을 다시 본다: 저전력(Wi-Fi·기지국) 위치는 거칠어서 엔진이 버리므로
+                // 안내 상태가 안 바뀌어도, 걷기 시작하면 GPS 를 다시 켜야 한다
+                if (motion.still != wasStill) applyPlan(planFor(a, st))
+                // 벗어남·지나침·놓침은 상태가 그대로라 다시 알려 오지 않는다 — 위치가 올 때마다 다시 찾기를 시도 (간격은 그쪽에서 지킴)
+                if ((st.offRoute || st.passedStop || st.missedRide) && !st.rerouting) maybeReroute(a, st)
             }
         }
 
@@ -234,7 +245,9 @@ class NavigationService : Service() {
                 plan = p
                 lastPlanAt = now
                 // 저전력 위치로 쉬는 중(도착 뒤 제외)이면 GPS 확인을 예약, 아니면 취소
-                if (p.power == LocPower.BALANCED && !Navigator.state.value.arrived && !Navigator.state.value.onSubway) {
+                val st = Navigator.state.value
+                // (기차·고속버스 안·역에서 기다리는 중 저전력으로 쉬는 건 일부러 — GPS 확인을 하지 않는다)
+                if (p.power == LocPower.BALANCED && !st.arrived && !st.onSubway && !st.onLongRide && !st.waitingLongRide) {
                     probeWake.schedule(now + PROBE_EVERY_MS)
                 } else {
                     probeWake.cancel()
@@ -292,7 +305,7 @@ class NavigationService : Service() {
             lostClock.reset()
         }
         updateNotification(active, s)
-        if (s.matched && !s.offRoute && !s.passedStop) reroutesWithoutMatch = 0
+        if (s.matched && !s.offRoute && !s.passedStop && !s.missedRide) reroutesWithoutMatch = 0
         trackLost(s)
         if (lostClock.shouldGiveUp(s, SystemClock.elapsedRealtime())) {
             // 경로를 벗어난 채 30분 — 잊고 둔 안내가 배터리를 다 쓰지 않게 스스로 끝낸다
@@ -321,8 +334,8 @@ class NavigationService : Service() {
             return
         }
         applyPlan(planFor(active, s))
-        // 도보·자전거: 경로를 벗어나면 다시 찾기. 대중교통: 정류장을 지나쳤거나 환승 도보 중 벗어나면 대중교통으로 다시 찾기
-        if ((s.offRoute || s.passedStop) && !s.rerouting) maybeReroute(active)
+        // 도보·자전거: 경로를 벗어나면 다시 찾기. 대중교통: 정류장을 지나쳤거나 환승 도보 중 벗어나거나 기차를 놓치면 다시 찾기
+        if ((s.offRoute || s.passedStop || s.missedRide) && !s.rerouting) maybeReroute(active, s)
     }
 
     /** 경로 밖에 있는 시간을 잰다. 위치가 안 들어와도 다음 판단 시각(10분·30분)에 다시 보도록 알람을 건다 */
@@ -396,11 +409,19 @@ class NavigationService : Service() {
      * 30초에 한 번까지, 새 경로에 못 올라서고 또 벗어나면 간격을 두 배씩 — 무료 사용량·배터리 보호.
      * 출발점은 10초 안에 잡힌, 정확도 30m 이내 위치만 쓴다 (튄 위치에서 다시 찾지 않게).
      */
-    private fun maybeReroute(active: ActiveRoute) {
+    private fun maybeReroute(active: ActiveRoute, s: NavState) {
         val now = SystemClock.elapsedRealtime()
         val interval = REROUTE_INTERVAL_MS shl reroutesWithoutMatch.coerceAtMost(3)
         if (rerouteJob?.isActive == true || now - lastRerouteAt < interval || rerouteCount >= MAX_REROUTES) return
-        val fix = RouteRepository.freshFix(10_000)?.takeIf { !it.accuracyM.isNaN() && it.accuracyM <= 30f } ?: return
+        // 역에서 기차를 놓쳤으면 역 근처면 충분 (역 안이라 GPS 가 거침), 기차가 역을 지나쳤으면 다음 역에 서야 내릴 수 있으니
+        // 멈출 때까지 기다렸다가(시속 11km 아래) 그 자리에서 — 기지국 위치(1.5km)여도 다음 열차·버스를 찾기엔 충분
+        if (s.passedStop && s.onLongRide && (motion.speedMps ?: 0f) > LONG_RIDE_STOPPED_MPS) return
+        val maxAcc = when {
+            s.missedRide -> 400f
+            s.onLongRide -> 1_500f
+            else -> 30f
+        }
+        val fix = RouteRepository.freshFix(10_000)?.takeIf { !it.accuracyM.isNaN() && it.accuracyM <= maxAcc } ?: return
         val from = fix.coord
         lastRerouteAt = now
         reroutesWithoutMatch++
@@ -415,13 +436,10 @@ class NavigationService : Service() {
                             KakaoApi.simple(active.mode, from, active.destination, active.destinationName, active.simple?.option),
                             active.place, from, navigate = true,
                         )
-                        // 가장 빨리 도착하는 대중교통 경로. 대중교통 길이 없다는 답(남은 거리가 짧음 등)일 때만 걸어서 —
+                        // 기차·고속버스를 아직 안 탔으면 그 역까지만 다시 찾고, 못 타게 됐으면 다음 편까지 처음부터.
+                        // 그 밖엔 가장 빨리 도착하는 대중교통, 대중교통 길이 없다는 답(남은 거리가 짧음 등)일 때만 걸어서 —
                         // 끊김·서버 오류는 실패로 두어 간격을 두고 다시 대중교통으로 찾는다 (잠깐 끊겼다고 몇 km 를 걷게 하지 않게)
-                        TravelMode.TRANSIT -> transitOrNull(from, active)
-                            ?.let { RoutePresentation.activeFromTransit(it, active.place, from, navigate = true) }
-                            ?: RoutePresentation.activeFromSimple(
-                                KakaoApi.walk(from, active.destination, active.destinationName), active.place, from, navigate = true,
-                            )
+                        TravelMode.TRANSIT -> rerouteTransit(from, active, s)
                     }.copy(tripId = active.tripId)
                 }
             }
@@ -443,10 +461,78 @@ class NavigationService : Service() {
                 retryJob = scope.launch {
                     delay(REROUTE_INTERVAL_MS shl reroutesWithoutMatch.coerceIn(0, 3))
                     val st = Navigator.state.value
-                    if ((st.offRoute || st.passedStop) && RouteRepository.activeRoute === active) onState(st)
+                    if ((st.offRoute || st.passedStop || st.missedRide) && RouteRepository.activeRoute === active) onState(st)
                 }
             }
         }
+    }
+
+    /**
+     * 대중교통 다시 찾기. 아직 타지 않은 기차·고속버스가 있으면
+     *  · 그 역까지 지금 위치에서 다시 찾고(카카오 대중교통·도보) 나머지(기차·역에서 목적지까지)는 그대로 — 시간 안에 닿으면
+     *  · 못 닿거나 이미 떠났으면 기차·고속·시외버스까지 처음부터 다시 찾아 가장 빨리 도착하는 것 (다음 편)
+     * 기차·버스가 없는 시내 경로는 가장 빨리 도착하는 대중교통, 대중교통 길이 없다는 답이면 걸어서.
+     */
+    private suspend fun rerouteTransit(from: Coord, active: ActiveRoute, s: NavState): ActiveRoute {
+        val t = active.transit
+        val now = System.currentTimeMillis()
+        fun show(r: TransitRoute) = RoutePresentation.activeFromTransit(r, active.place, from, navigate = true)
+        if (t != null && !s.missedRide) {
+            val k = IntercitySplice.nextScheduled(t, s.stepIndex.coerceAtLeast(0), s.onRide)
+            if (k != null) {
+                val ride = t.steps[k]
+                val access = accessTo(from, ride.points.first(), ride.boardingStop ?: "역")
+                if (access != null && IntercitySplice.canMake(ride, access.second, now)) {
+                    return show(IntercitySplice.splice(t, k, access.first, now))
+                }
+            }
+        }
+        if (s.missedRide || t?.steps?.any { it.type.scheduled } == true) {
+            bestWithIntercity(from, active, now)?.let { return show(it) }
+        }
+        return transitOrNull(from, active)?.let(::show) ?: RoutePresentation.activeFromSimple(
+            KakaoApi.walk(from, active.destination, active.destinationName), active.place, from, navigate = true,
+        )
+    }
+
+    /** 지금 위치 → 역: (구간들, 걸리는 초). 700m 안은 걸어서, 대중교통 길이 없으면 2.5km 안만 걸어서, 그 밖엔 null */
+    private fun accessTo(from: Coord, station: Coord, name: String): kotlin.Pair<List<TransitStep>, Int>? {
+        val d = Geo.distanceM(from, station)
+        val walkSec = IntercityItineraries.walkSec(from, station)
+        val walk = IntercityItineraries.walk(from, station, "${name}까지 도보", walkSec) to walkSec
+        if (d <= IntercityItineraries.WALK_ONLY_M) return walk
+        val routes = try {
+            KakaoApi.transit(from, station, name)
+        } catch (e: RouteStatusException) {
+            return if (d <= 2_500) walk else null
+        }
+        val best = TransitOptions.fastestIndex(routes)?.let(routes::get) ?: return if (d <= 2_500) walk else null
+        return best.steps to best.totalTimeSec
+    }
+
+    /** 시내 대중교통 + (먼 곳이면) 기차·고속·시외버스 중 가장 빨리 도착하는 것 */
+    private suspend fun bestWithIntercity(from: Coord, active: ActiveRoute, now: Long): TransitRoute? {
+        val city = try {
+            KakaoApi.transit(from, active.destination, active.destinationName)
+        } catch (e: RouteStatusException) {
+            emptyList()
+        }
+        val far = Geo.distanceM(from, active.destination) >= IntercityPlanner.MIN_DISTANCE_M
+        val longRides = if (far && TagoApi.isConfigured) {
+            // 따로 돌려 제한 시간에 바로 넘어간다 (막힌 연결이 끝나기를 기다리지 않게)
+            val job = scope.async(Dispatchers.IO) {
+                runCatching { IntercityPlanner(LiveIntercitySource(applicationContext)).plan(from, active.place, now) }
+            }
+            val got = try {
+                withTimeoutOrNull(INTERCITY_TIMEOUT_MS) { job.await() }
+            } finally {
+                job.cancel()   // 시간 초과·재탐색 취소(도착 등) 때 따로 돌던 찾기도 멈춘다 (끝났으면 아무 일 없음)
+            }
+            got?.exceptionOrNull()?.let { if (it is CancellationException) throw it else ErrorLog.record("재탐색·기차·버스", it) }
+            got?.getOrNull()?.routes.orEmpty()
+        } else emptyList()
+        val all = city + longRides
+        return TransitOptions.fastestIndex(all)?.let(all::get)
     }
 
     /** 재탐색용 대중교통 경로: 가장 빨리 도착하는 것. 길이 없다는 답이면 null, 네트워크·서버 오류는 그대로 던진다 */
@@ -475,7 +561,7 @@ class NavigationService : Service() {
             sinceLostMs = sinceLost(),
         )
         // 재탐색을 다 쓴 뒤에도 벗어나 있으면 1초 GPS 를 계속 쓰지 않는다 (경로로 돌아오면 다시 촘촘히)
-        val exhausted = (s.offRoute || s.passedStop) && rerouteCount >= MAX_REROUTES
+        val exhausted = (s.offRoute || s.passedStop || s.missedRide) && rerouteCount >= MAX_REROUTES
         return if (exhausted && plan.power == LocPower.HIGH && plan.intervalMs < 3_000) plan.copy(intervalMs = 3_000) else plan
     }
 
@@ -630,6 +716,10 @@ class NavigationService : Service() {
         private const val BATTERY_CHECK_MS = 60_000L
         private const val PROBE_EVERY_MS = 4 * 60_000L
         private const val PROBE_TIMEOUT_MS = 30_000L
+        /** 다음 기차·버스를 찾을 때 시간표를 이만큼까지 기다린다 */
+        private const val INTERCITY_TIMEOUT_MS = 20_000L
+        /** 역을 지나친 기차가 다음 역에 섰다고 볼 속도 */
+        private const val LONG_RIDE_STOPPED_MPS = 3f
 
         /** 서비스가 돌고 있는지 (메인 스레드에서 쓰고, 업데이트 작업이 다른 스레드에서 읽음) */
         @Volatile

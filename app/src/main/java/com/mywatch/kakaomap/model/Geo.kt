@@ -64,7 +64,18 @@ data class GuideStep(
     val turnGuidance: Boolean = false,
     /** 이 구간 예상 소요 시간(초, 모르면 0) — 타는 중 '7분' 계산용 */
     val timeSec: Int = 0,
+    /** 기차·고속·시외버스 — 시간표대로 떠나고, 선로·도로를 몰라 역과 역을 직선으로 이은 구간 */
+    val longRide: LongRide? = null,
+    /** 긴 탈 것의 시간표 출발·도착 시각 (epoch ms) */
+    val departAtMs: Long? = null,
+    val arriveAtMs: Long? = null,
 )
+
+/**
+ * 시간표대로 다니는 긴 탈 것. 역·터미널을 직선으로 이었을 뿐이라(실제 선로는 수 km 굽음)
+ * 탄 것·하차 알림·지나침을 '역까지 직선거리'로 판단하고, 기차 안의 거친 위치(기지국)도 받는다.
+ */
+enum class LongRide { TRAIN, COACH }
 
 /** 경로 위 현재 진행 상황 */
 data class RouteProgress(
