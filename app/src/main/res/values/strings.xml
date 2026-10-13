@@ -70,6 +70,9 @@
     <string name="transit_nav_note">‘안내 시작’을 누르면 화면이 꺼져도 위치를 따라가며, 갈아탈 곳과 내릴 정류장 근처에서 진동으로 알려 줘요.</string>
 
     <string name="update_available">새 버전 · 탭해서 업데이트</string>
+    <!-- 첫 화면·유튜브의 업데이트 버튼 -->
+    <string name="hub_update">업데이트</string>
+    <string name="hub_update_new">새 버전 업데이트</string>
     <string name="update_deferred">화면을 닫아서 설치를 미뤘어요. 앱을 다 닫으면 알아서 설치돼요</string>
     <string name="update_after_navigation">길안내 중이라 지금은 설치하지 않아요. 안내가 끝나고 앱을 닫으면 알아서 설치돼요</string>
 

@@ -20,7 +20,7 @@ import kotlinx.coroutines.withContext
 import java.util.concurrent.TimeUnit
 
 /**
- * 새 버전 확인 — 6시간마다, 그리고 앱 화면을 열 때 30분에 한 번([onAppOpened]). 인터넷만 되면
+ * 새 버전 확인 — 6시간마다, 그리고 앱 화면을 열 때 5분에 한 번([onAppOpened]). 인터넷만 되면
  * (1KB 도 안 되는 update.json 이라 배터리 부담이 거의 없음). 새 버전이 있으면 설치 작업([UpdateInstallWorker])을 예약한다.
  */
 class UpdateWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
@@ -42,8 +42,11 @@ class UpdateWorker(context: Context, params: WorkerParameters) : CoroutineWorker
         /** 앱 화면을 열 때 맡기는 한 번짜리 확인 */
         const val CHECK_NOW_NAME = "update-check-now"
 
-        /** 앱 화면을 열 때 새 버전을 확인하는 간격 — update.json 은 1KB 도 안 돼 자주 확인해도 부담이 없다 */
-        const val OPEN_CHECK_EVERY_MS = 30 * 60_000L
+        /**
+         * 앱 화면을 열 때 새 버전을 확인하는 간격 — update.json 은 1KB 도 안 돼 자주 확인해도 부담이 없다.
+         * 짧게 잡아 새 버전이 나온 뒤 앱을 열면 곧 '새 버전 업데이트' 버튼이 보이게
+         */
+        const val OPEN_CHECK_EVERY_MS = 5 * 60_000L
 
         /**
          * 앱 화면(첫 화면·지도·유튜브)을 열 때: 마지막 확인이 [OPEN_CHECK_EVERY_MS] 보다 오래됐으면 확인을 맡긴다.

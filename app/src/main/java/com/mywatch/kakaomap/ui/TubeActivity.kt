@@ -4,6 +4,7 @@ import android.app.AlertDialog
 import android.app.RemoteInput
 import android.content.ActivityNotFoundException
 import android.content.Intent
+import android.content.SharedPreferences
 import android.os.Bundle
 import android.text.InputType
 import android.widget.EditText
@@ -37,6 +38,9 @@ import com.mywatch.kakaomap.ui.TubeRows.A_PLAY_MIX
 import com.mywatch.kakaomap.ui.TubeRows.A_PLAY_ONE
 import com.mywatch.kakaomap.ui.TubeRows.A_QUERY
 import com.mywatch.kakaomap.ui.TubeRows.A_SEARCH
+import com.mywatch.kakaomap.ui.TubeRows.A_UPDATE
+import com.mywatch.kakaomap.update.UpdateActivity
+import com.mywatch.kakaomap.update.UpdateManager
 import com.mywatch.kakaomap.update.UpdateWorker
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -139,12 +143,23 @@ class TubeActivity : ComponentActivity() {
         handleShortcut(intent)
     }
 
+    /** 맡긴 확인이 새 버전을 찾으면 첫 화면 맨 위에 '새 버전 업데이트'를 바로 띄운다 */
+    private val updateListener = SharedPreferences.OnSharedPreferenceChangeListener { _, _ ->
+        if (screen == Screen.HOME && !opening) render()
+    }
+
     override fun onResume() {
         super.onResume()
         // 타일에서 틀었거나 날이 지나 기록이 바뀌었을 수 있다
         if (screen == Screen.HOME && !opening) render()
-        // 타일로 바로 열어 첫 화면을 거치지 않아도 새 버전 확인 (30분에 한 번)
+        UpdateManager.prefsForListening(this).registerOnSharedPreferenceChangeListener(updateListener)
+        // 타일로 바로 열어 첫 화면을 거치지 않아도 새 버전 확인
         UpdateWorker.onAppOpened(this)
+    }
+
+    override fun onPause() {
+        UpdateManager.prefsForListening(this).unregisterOnSharedPreferenceChangeListener(updateListener)
+        super.onPause()
     }
 
     private fun handleShortcut(intent: Intent?) {
@@ -181,7 +196,10 @@ class TubeActivity : ComponentActivity() {
             return
         }
         when (screen) {
-            Screen.HOME -> ui.rows = TubeRows.home(this, state.played(), state.searches)
+            Screen.HOME -> ui.rows = TubeRows.home(
+                this, state.played(), state.searches,
+                update = runCatching { UpdateManager.hasUpdate(this) }.getOrDefault(false),
+            )
             Screen.RESULTS -> {
                 val q = query.orEmpty()
                 val err = error
@@ -227,6 +245,7 @@ class TubeActivity : ComponentActivity() {
         when (row) {
             is Row.VideoItem -> play(row.video, mix = true)
             is Row.Action -> when {
+                row.id == A_UPDATE -> startActivity(UpdateActivity.updateNowIntent(this))
                 row.id == A_SEARCH -> openInput()
                 row.id == A_MIX -> state.lastPlayed()?.let { play(it, mix = true) }
                 row.id.startsWith(A_QUERY) -> search(row.id.removePrefix(A_QUERY))

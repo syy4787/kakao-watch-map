@@ -20,16 +20,17 @@ object TubeRows {
     const val A_PLAY_ONE = "play_one"
     const val A_FORGET = "forget"
     const val A_CANCEL = "cancel"
+    const val A_UPDATE = "update"
 
     private const val SHOWN_PLAYED = 10
     private const val SHOWN_SEARCHES = 6
 
     /** 처음 화면: 노래 검색 · 믹스 이어 듣기 · 최근 들은 곡 · 최근 검색 */
-    fun home(c: Context, played: List<Played>, searches: List<String>): List<Row> {
-        val rows = mutableListOf<Row>(
-            Row.Header(c.getString(R.string.tube_title), c.getString(R.string.tube_subtitle)),
-            Row.Action(A_SEARCH, R.drawable.ic_mic, c.getString(R.string.tube_search), accent = true),
-        )
+    /** [update] = 새 버전이 나왔음 — 타일로 바로 열어 첫 화면을 안 거쳐도 맨 위에 '새 버전 업데이트' */
+    fun home(c: Context, played: List<Played>, searches: List<String>, update: Boolean = false): List<Row> {
+        val rows = mutableListOf<Row>(Row.Header(c.getString(R.string.tube_title), c.getString(R.string.tube_subtitle)))
+        if (update) rows += Row.Action(A_UPDATE, R.drawable.ic_download, c.getString(R.string.hub_update_new), accent = true)
+        rows += Row.Action(A_SEARCH, R.drawable.ic_mic, c.getString(R.string.tube_search), accent = true)
         played.firstOrNull()?.let {
             rows += Row.Action(A_MIX, R.drawable.ic_queue_music, c.getString(R.string.tube_continue_mix, it.video.title))
         }

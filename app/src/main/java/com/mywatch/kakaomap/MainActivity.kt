@@ -284,7 +284,8 @@ class MainActivity : ComponentActivity() {
         btnEnd.setOnClickListener { endRoute() }
         controls.forEach { it.isClickable = false }   // 숨겨진 상태로 시작
 
-        updatePill.setOnClickListener { startActivity(Intent(this, UpdateActivity::class.java)) }
+        // 새 버전 알림을 누르면 바로 받아 설치 (업데이트 화면에서 버튼을 또 찾지 않게)
+        updatePill.setOnClickListener { startActivity(UpdateActivity.updateNowIntent(this)) }
         routePill.setOnClickListener { openRouteDetail() }
         guideBox.setOnClickListener { toggleGuideCompact() }
         // 글자가 바뀌어 폭이 달라지면 원 가장자리 쪽으로 다시 붙인다 (레이아웃 중에 바꾸지 않도록 한 박자 뒤에)
@@ -1063,7 +1064,7 @@ class MainActivity : ComponentActivity() {
         updatePill.visibility = if (show) View.VISIBLE else View.GONE
     }
 
-    /** 지도를 열 때 조용히 새 버전 확인 — 마지막 확인이 30분 넘었으면 (첫 화면·유튜브와 같은 간격) */
+    /** 지도를 열 때 조용히 새 버전 확인 — 마지막 확인이 5분 넘었으면 (첫 화면·유튜브와 같은 간격) */
     private fun maybeCheckForUpdate() {
         if (UpdateManager.repo(this) == null) return
         if (System.currentTimeMillis() - UpdateManager.lastCheckAt(this) < UpdateWorker.OPEN_CHECK_EVERY_MS) return

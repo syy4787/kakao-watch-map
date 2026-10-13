@@ -161,10 +161,39 @@ class ScreensRenderTest {
     // ---------- 갤럭시워치 전용앱 첫 화면 (카카오맵 / 유튜브 고르기) ----------
 
     @Test
-    fun hubScreen() {
+    fun hubScreen() = hub("hub_0")
+
+    /** 워치 설정에서 글자를 키운 경우 — 아래쪽 버튼이 둥근 화면 밖으로 밀려 안 보이면 안 됨 */
+    @Test
+    fun hubScreenLargeFonts() {
+        hub("hub_font115", 1.15f)
+        hub("hub_font130", 1.3f)
+    }
+
+    /** 새 버전이 나와 있을 때 — 파란 '새 버전 업데이트' 버튼 */
+    @Test
+    fun hubScreenWithNewVersion() {
+        com.mywatch.kakaomap.update.FakeReleaseServer().use { server ->
+            server.updateJson = server.updateJsonFor(999)
+            com.mywatch.kakaomap.update.UpdateManager.baseUrl = server.base
+            com.mywatch.kakaomap.update.UpdateManager.setOwner(tubeApp, "tester")
+            com.mywatch.kakaomap.update.UpdateManager.check(tubeApp)
+            hub("hub_new_version")
+            hub("hub_new_version_font130", 1.3f)
+            com.mywatch.kakaomap.update.UpdateManager.baseUrl = com.mywatch.kakaomap.update.UpdateManager.GITHUB
+        }
+    }
+
+    private fun hub(name: String, fontScale: Float = 1f) {
         val controller = Robolectric.buildActivity(HubActivity::class.java)
         val activity = controller.get()
         activity.requestWindowFeature(Window.FEATURE_NO_TITLE)
+        if (fontScale != 1f) {
+            val conf = activity.resources.configuration
+            conf.fontScale = fontScale
+            @Suppress("DEPRECATION")
+            activity.resources.updateConfiguration(conf, activity.resources.displayMetrics)
+        }
         controller.setup()
         shadowOf(Looper.getMainLooper()).idle()
         val size = activity.resources.displayMetrics.widthPixels
@@ -177,7 +206,7 @@ class ScreensRenderTest {
             addCircle(size / 2f, size / 2f, size / 2f, Path.Direction.CCW)
         }
         c.drawPath(mask, Paint().apply { color = Color.rgb(40, 40, 40) })
-        FileOutputStream(File(out, "hub_0.png")).use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        FileOutputStream(File(out, "$name.png")).use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
         controller.pause().stop().destroy()
     }
 

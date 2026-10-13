@@ -16,6 +16,7 @@ import com.mywatch.kakaomap.ui.HubActivity
 import com.mywatch.kakaomap.ui.SearchActivity
 import com.mywatch.kakaomap.ui.TubeActivity
 import com.mywatch.kakaomap.update.FakeReleaseServer
+import com.mywatch.kakaomap.update.UpdateActivity
 import com.mywatch.kakaomap.update.UpdateManager
 import com.mywatch.kakaomap.update.UpdateWorker
 import org.junit.After
@@ -148,12 +149,29 @@ class HubTest {
             UpdateManager.baseUrl = server.base
             UpdateManager.setOwner(context, "tester")
             val hub = Robolectric.buildActivity(HubActivity::class.java).setup().get()
-            val info = hub.findViewById<TextView>(R.id.hub_info)
-            assertEquals(context.getString(R.string.app_info_update), info.text.toString())
+            val button = hub.findViewById<TextView>(R.id.hub_update)
+            assertEquals("업데이트", button.text.toString())
+            assertEquals("업데이트", button.contentDescription.toString())
             UpdateManager.check(context)   // 맡긴 확인이 새 버전을 찾음
             shadowOf(Looper.getMainLooper()).idle()
-            assertEquals(context.getString(R.string.update_available), info.text.toString())
+            // 둥근 화면 아래는 좁아 글자는 그대로 짧게, 버튼이 파래지고 읽어 주기가 '새 버전 업데이트'
+            assertEquals("업데이트", button.text.toString())
+            assertEquals("새 버전 업데이트", button.contentDescription.toString())
+            assertEquals(R.drawable.bg_action_accent, shadowOf(button.background).createdFromResId)
         }
+    }
+
+    @Test
+    fun theFirstScreenHasAnUpdateButtonThatStartsTheUpdateInOneTap() {
+        // '앱 정보 · 업데이트' 같은 작은 글씨 대신, 앱을 열면 바로 보이는 '업데이트' 버튼 — 누르면 확인하고 곧바로 받아 설치
+        val hub = Robolectric.buildActivity(HubActivity::class.java).setup().get()
+        val button = hub.findViewById<TextView>(R.id.hub_update)
+        assertEquals(View.VISIBLE, button.visibility)
+        assertTrue(button.isClickable)
+        button.performClick()
+        val started = shadowOf(hub).nextStartedActivity
+        assertEquals(UpdateActivity::class.java.name, started?.component?.className)
+        assertTrue(started.getBooleanExtra(UpdateActivity.EXTRA_UPDATE_NOW, false))
     }
 
     @Test

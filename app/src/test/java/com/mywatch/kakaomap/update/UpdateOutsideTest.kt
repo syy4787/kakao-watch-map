@@ -135,6 +135,26 @@ class UpdateOutsideTest {
     }
 
     @Test
+    fun theUpdateButtonChecksAndStartsDownloadingWithoutAnotherTap() {
+        // 첫 화면의 '업데이트' 버튼으로 열면: 확인 → 새 버전이면 그대로 받아 설치 (버튼을 또 찾아 누르지 않게)
+        server.updateJson = server.updateJsonFor(999)
+        val intent = Intent(context, UpdateActivity::class.java).putExtra(UpdateActivity.EXTRA_UPDATE_NOW, true)
+        val activity = Robolectric.buildActivity(UpdateActivity::class.java, intent).setup().get()
+        waitUntil("확인하고 바로 내려받기 시작") { server.apkRequests.isNotEmpty() }
+        // 테스트 파일은 진짜 APK 가 아니라 설치 전 확인에서 걸린다
+        waitUntil("받기 끝") { rows(activity).any { it is Row.Note && it.text.startsWith("⚠") } }
+    }
+
+    @Test
+    fun theUpdateButtonWithNothingNewJustSaysItIsUpToDate() {
+        server.updateJson = server.updateJsonFor(1)   // 워치에 깔린 것보다 옛 버전
+        val intent = Intent(context, UpdateActivity::class.java).putExtra(UpdateActivity.EXTRA_UPDATE_NOW, true)
+        val activity = Robolectric.buildActivity(UpdateActivity::class.java, intent).setup().get()
+        waitUntil("최신 버전이라고 알림") { rows(activity).any { it is Row.Note && it.text == "최신 버전이에요" } }
+        assertTrue(server.apkRequests.isEmpty())
+    }
+
+    @Test
     fun aDownloadCutHalfwayResumesFromWhereItStoppedInTheSameTap() {
         server.cutFirstApkAt = 120_000
         val file = UpdateManager.download(context, info())

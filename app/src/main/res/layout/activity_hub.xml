@@ -10,10 +10,10 @@
         android:id="@+id/hub_title"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_marginBottom="10dp"
+        android:layout_marginBottom="4dp"
         android:text="@string/app_name"
         android:textColor="@color/text_secondary"
-        android:textSize="13sp"
+        android:textSize="11sp"
         android:textStyle="bold" />
 
     <LinearLayout
@@ -34,11 +34,11 @@
             android:paddingBottom="6dp">
 
             <ImageView
-                android:layout_width="70dp"
-                android:layout_height="70dp"
+                android:layout_width="62dp"
+                android:layout_height="62dp"
                 android:background="@drawable/bg_hub_map"
                 android:importantForAccessibility="no"
-                android:padding="18dp"
+                android:padding="16dp"
                 android:src="@drawable/ic_place"
                 android:tint="@color/ic_launcher_pin" />
 
@@ -72,11 +72,11 @@
             android:paddingBottom="6dp">
 
             <ImageView
-                android:layout_width="70dp"
-                android:layout_height="70dp"
+                android:layout_width="62dp"
+                android:layout_height="62dp"
                 android:background="@drawable/bg_hub_tube"
                 android:importantForAccessibility="no"
-                android:padding="18dp"
+                android:padding="16dp"
                 android:src="@drawable/ic_music_note"
                 android:tint="@color/ic_tube_note" />
 
@@ -98,15 +98,24 @@
         </LinearLayout>
     </LinearLayout>
 
+    <!-- 업데이트 버튼: 앱을 열면 바로 보이게 (예전 '앱 정보 · 업데이트' 작은 글씨는 큰 글꼴에서 화면 끝에 밀려 안 보였음).
+         새 버전이 있으면 파란 '새 버전 업데이트'. 누르면 확인하고 곧바로 받아 설치 (앱 정보·오류 기록도 그 화면에) -->
     <TextView
-        android:id="@+id/hub_info"
+        android:id="@+id/hub_update"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_marginTop="8dp"
-        android:background="@drawable/bg_hub_item"
-        android:paddingHorizontal="12dp"
-        android:paddingVertical="8dp"
-        android:text="@string/app_info_update"
-        android:textColor="@color/accent_light"
-        android:textSize="12sp" />
+        android:background="@drawable/bg_action"
+        android:drawableStart="@drawable/ic_download"
+        android:drawablePadding="6dp"
+        android:drawableTint="@color/text_primary"
+        android:gravity="center"
+        android:minHeight="40dp"
+        android:paddingStart="12dp"
+        android:paddingEnd="16dp"
+        android:paddingVertical="6dp"
+        android:text="@string/hub_update"
+        android:textColor="@color/text_primary"
+        android:textSize="14sp"
+        android:textStyle="bold" />
 </LinearLayout>

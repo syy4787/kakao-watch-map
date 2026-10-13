@@ -20,25 +20,26 @@ import com.mywatch.kakaomap.update.UpdateWorker
  */
 class HubActivity : ComponentActivity() {
 
-    private lateinit var info: TextView
+    private lateinit var updateButton: TextView
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_hub)
-        info = findViewById(R.id.hub_info)
+        updateButton = findViewById(R.id.hub_update)
         findViewById<View>(R.id.open_map).setOnClickListener { open(MainActivity::class.java) }
         findViewById<View>(R.id.open_tube).setOnClickListener { open(TubeActivity::class.java) }
-        info.setOnClickListener { startActivity(Intent(this, UpdateActivity::class.java)) }
+        // 누르면 확인하고 새 버전이면 곧바로 받아 설치 (버전·오류 기록 같은 앱 정보도 그 화면에)
+        updateButton.setOnClickListener { startActivity(UpdateActivity.updateNowIntent(this)) }
     }
 
-    /** 맡긴 확인이 첫 화면을 보는 사이에 새 버전을 찾으면 아래 글자를 바로 바꾼다 */
+    /** 맡긴 확인이 첫 화면을 보는 사이에 새 버전을 찾으면 버튼을 바로 파랗게 바꾼다 */
     private val updateListener = SharedPreferences.OnSharedPreferenceChangeListener { _, _ -> showUpdateLabel() }
 
     override fun onResume() {
         super.onResume()
         showUpdateLabel()
         UpdateManager.prefsForListening(this).registerOnSharedPreferenceChangeListener(updateListener)
-        // 마지막 확인이 30분 넘었으면 새 버전 확인 (집 밖에서도 — 6시간마다 하는 확인만으론 한참 모름)
+        // 마지막 확인이 5분 넘었으면 새 버전 확인 → 있으면 버튼이 파랗게 (집 밖에서도 — 6시간마다 하는 확인만으론 한참 모름)
         UpdateWorker.onAppOpened(this)
     }
 
@@ -47,10 +48,14 @@ class HubActivity : ComponentActivity() {
         super.onPause()
     }
 
-    /** 새 버전이 있으면 아래 글자로 알린다 (누르면 업데이트 화면) */
+    /**
+     * 새 버전이 있으면 파란 버튼(읽어 주기는 '새 버전 업데이트'), 없으면 회색. 글자는 둘 다 짧게 '업데이트' —
+     * 둥근 화면 아래쪽은 좁아서, 글자를 키운 워치에선 '새 버전 업데이트'가 양 끝이 잘렸다
+     */
     private fun showUpdateLabel() {
         val update = runCatching { UpdateManager.hasUpdate(this) || UpdateManager.isPendingUserAction(this) }.getOrDefault(false)
-        info.setText(if (update) R.string.update_available else R.string.app_info_update)
+        updateButton.setBackgroundResource(if (update) R.drawable.bg_action_accent else R.drawable.bg_action)
+        updateButton.contentDescription = getString(if (update) R.string.hub_update_new else R.string.hub_update)
     }
 
     /**

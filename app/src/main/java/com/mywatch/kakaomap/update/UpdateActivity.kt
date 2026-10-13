@@ -3,6 +3,7 @@ package com.mywatch.kakaomap.update
 import android.app.ActivityManager
 import android.app.RemoteInput
 import android.content.ActivityNotFoundException
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
@@ -35,6 +36,8 @@ class UpdateActivity : ComponentActivity() {
 
     private lateinit var ui: WearList
     private var busy: String? = null
+    /** '업데이트' 버튼으로 열었음 — 열자마자 확인하고 새 버전이면 바로 받아 설치 (한 번만) */
+    private var updateNow = false
 
     private val ownerInput = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { res ->
         val text = res.data?.let { RemoteInput.getResultsFromIntent(it)?.getCharSequence(KEY_OWNER) }?.toString()
@@ -48,6 +51,8 @@ class UpdateActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_list)
         ui = WearList(this, ::onRow)
+        // 화면을 돌려 다시 만들어진 경우엔 또 시작하지 않는다
+        updateNow = savedInstanceState == null && intent.getBooleanExtra(EXTRA_UPDATE_NOW, false)
     }
 
     /** 설치 결과가 오면(실패·취소·확인 대기) '설치 중…' 을 풀고 다시 그린다 */
@@ -62,10 +67,16 @@ class UpdateActivity : ComponentActivity() {
         // 설치에 성공하면 앱이 새로 시작되므로, 이 화면으로 돌아왔다면 설치는 끝났거나(실패·취소) 확인을 기다리는 중
         if (busy?.startsWith(INSTALLING) == true) busy = null
         render()
+        if (busy != null || UpdateManager.repo(this) == null) return
+        if (updateNow) {
+            // '업데이트' 버튼: 지금 바로 확인 → 새 버전이면 그대로 받아 설치
+            updateNow = false
+            check(thenInstall = true)
+            return
+        }
         // 열면 바로 새 버전을 확인한다 — 예전 확인 결과만 보여 주면 새 버전이 나왔어도 '최신 버전이에요'로 보이고
         // '지금 업데이트' 버튼도 안 나온다 (방금 확인했으면 다시 묻지 않음)
-        val stale = System.currentTimeMillis() - UpdateManager.lastCheckAt(this) >= SCREEN_CHECK_EVERY_MS
-        if (busy == null && stale && UpdateManager.repo(this) != null) check()
+        if (System.currentTimeMillis() - UpdateManager.lastCheckAt(this) >= SCREEN_CHECK_EVERY_MS) check()
     }
 
     override fun onPause() {
@@ -174,7 +185,8 @@ class UpdateActivity : ComponentActivity() {
         }
     }
 
-    private fun check() {
+    /** [thenInstall] = '업데이트' 버튼으로 연 경우 — 새 버전이면(확인이 실패해도 이미 알던 새 버전이면) 그대로 받아 설치 */
+    private fun check(thenInstall: Boolean = false) {
         busy = "확인 중…"
         render()
         lifecycleScope.launch {
@@ -184,6 +196,7 @@ class UpdateActivity : ComponentActivity() {
             error?.let { UpdateManager.recordError(this@UpdateActivity, it.message ?: "확인 실패") }
             busy = null
             render()
+            if (thenInstall && UpdateManager.hasUpdate(this@UpdateActivity)) install()
         }
     }
 
@@ -247,14 +260,21 @@ class UpdateActivity : ComponentActivity() {
         }
     }
 
-    private companion object {
-        const val INSTALLING = "설치 중…"
-        const val KEY_OWNER = "owner"
-        const val ACTION_CHECK = "check"
-        const val ACTION_INSTALL = "install"
-        const val ACTION_OWNER = "owner"
-        const val ACTION_PERMISSION = "permission"
-        const val ACTION_CLEAR_ERRORS = "clear_errors"
+    companion object {
+        /** 첫 화면·지도·유튜브의 '업데이트' 버튼으로 열 때: 확인하고 새 버전이면 바로 받아 설치 (버튼을 또 누르지 않게) */
+        const val EXTRA_UPDATE_NOW = "update_now"
+
+        /** '업데이트' 버튼이 여는 화면 — 확인하고 새 버전이면 곧바로 받아 설치 */
+        fun updateNowIntent(context: Context): Intent =
+            Intent(context, UpdateActivity::class.java).putExtra(EXTRA_UPDATE_NOW, true)
+
+        private const val INSTALLING = "설치 중…"
+        private const val KEY_OWNER = "owner"
+        private const val ACTION_CHECK = "check"
+        private const val ACTION_INSTALL = "install"
+        private const val ACTION_OWNER = "owner"
+        private const val ACTION_PERMISSION = "permission"
+        private const val ACTION_CLEAR_ERRORS = "clear_errors"
         private const val SHOWN_ERRORS = 10
         /** 이 화면을 열 때, 마지막 확인이 이보다 오래됐으면 다시 확인 */
         private const val SCREEN_CHECK_EVERY_MS = 60_000L
