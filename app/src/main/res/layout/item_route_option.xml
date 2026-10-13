@@ -35,14 +35,23 @@
             android:layout_marginStart="4dp" />
     </LinearLayout>
 
-    <!-- 큰 글씨 시간 + 작은 글씨 거리·도착 시각을 한 글상자에 — 시간이 길면 나머지가 다음 줄로 흐른다 -->
+    <!-- 시간(큰 글씨)과 거리·도착 시각(작은 글씨)은 줄을 나눠 — 한 줄에 몰면 '도착'이 홀로 다음 줄로 밀린다 -->
     <TextView
-        android:id="@+id/time_meta"
+        android:id="@+id/time"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginTop="1dp"
+        android:maxLines="1"
+        android:textColor="@color/text_primary"
+        android:textSize="18sp"
+        android:textStyle="bold" />
+
+    <TextView
+        android:id="@+id/meta"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
         android:ellipsize="end"
-        android:maxLines="3"
+        android:maxLines="2"
         android:textColor="@color/text_secondary"
         android:textSize="11sp" />
 </LinearLayout>

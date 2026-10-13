@@ -80,6 +80,7 @@ object ErrorLogFormat {
         val time = SimpleDateFormat("M/d HH:mm", Locale.KOREA).format(Date(e.atMs))
         val times = if (e.count > 1) " ×${e.count}" else ""
         val version = if (e.version.isNotBlank()) "\n(v${e.version})" else ""
-        return "$time · ${e.where}$times\n${e.message}$version"
+        // 화살표와 코드 위치가 줄바꿈으로 갈라지지 않게 (붙는 빈칸)
+        return "$time · ${e.where}$times\n${e.message.replace("← ", "←\u00A0")}$version"
     }
 }

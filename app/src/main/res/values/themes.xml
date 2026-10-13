@@ -1,8 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
-<resources>
+<resources xmlns:tools="http://schemas.android.com/tools">
     <!-- Wear OS 기본 테마(검은 배경, 액션바 없음, 스와이프로 닫기 유지) -->
     <style name="Theme.KakaoWatchMap" parent="@android:style/Theme.DeviceDefault">
         <item name="android:windowBackground">@android:color/black</item>
+        <item name="android:textViewStyle">@style/KoreanTextView</item>
+    </style>
+
+    <!-- 한국어는 글자 사이마다 줄이 바뀔 수 있어 '도착'이 '도 / 착'으로 갈라진다 → 띄어쓰기에서만 줄바꿈 (안드로이드 13+) -->
+    <style name="KoreanTextView" parent="@android:style/Widget.DeviceDefault.TextView">
+        <item name="android:lineBreakWordStyle" tools:targetApi="33">phrase</item>
     </style>
 
     <!-- 지도 위 원 테두리를 따라 놓는 흰 둥근 버튼 (카카오맵의 흰 플로팅 버튼처럼) -->

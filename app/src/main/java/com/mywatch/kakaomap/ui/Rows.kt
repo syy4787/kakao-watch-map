@@ -2,11 +2,6 @@ package com.mywatch.kakaomap.ui
 
 import android.content.res.ColorStateList
 import android.graphics.Typeface
-import android.text.SpannableStringBuilder
-import android.text.Spanned
-import android.text.style.ForegroundColorSpan
-import android.text.style.RelativeSizeSpan
-import android.text.style.StyleSpan
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -197,13 +192,8 @@ class RowAdapter(
                     setTypeface(null, if (row.selected) Typeface.BOLD else Typeface.NORMAL)
                 }
                 v.text(R.id.badge).visibility = if (row.fastest) View.VISIBLE else View.GONE
-                v.text(R.id.time_meta).text = SpannableStringBuilder().apply {
-                    // 글상자 기본 11sp 의 18/11 배 = 18sp (시스템 글자 크기를 따라 함께 커진다)
-                    append(time, RelativeSizeSpan(18f / 11f), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-                    setSpan(StyleSpan(Typeface.BOLD), 0, length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-                    setSpan(ForegroundColorSpan(color(v, R.color.text_primary)), 0, length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-                    append("  ").append(meta)
-                }
+                v.text(R.id.time).text = time
+                v.text(R.id.meta).text = meta
                 v.isSelected = row.selected
                 v.contentDescription = listOfNotNull(
                     row.choice.label, time, meta,

@@ -377,8 +377,11 @@ class DirectionsActivity : ComponentActivity() {
         val names = lost.joinToString(" · ") { it.label }
         val retry = when {
             lost.isEmpty() -> emptyList()
-            m in retrying -> listOf(Row.Note("$names 다시 받는 중…"))
-            else -> listOf(Row.Action(ACTION_RETRY_OPTIONS, R.drawable.ic_refresh, "$names 다시 받기"))
+            m in retrying -> listOf(Row.Note("$names 경로 다시 받는 중…"))
+            else -> listOf(
+                Row.Note("$names 경로를 받지 못했어요"),
+                Row.Action(ACTION_RETRY_OPTIONS, R.drawable.ic_refresh, "다시 받기"),
+            )
         }
         return choices.mapIndexed { i, c -> Row.OptionCard(i, c, selected = c == picked, fastest = c == fastest) } + retry +
             Row.Action(ACTION_NAVIGATE, R.drawable.ic_navigation, getString(R.string.start_navigation), accent = true) +

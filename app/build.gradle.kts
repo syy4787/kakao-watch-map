@@ -79,6 +79,11 @@ android {
         buildConfig = true
     }
 
+    testOptions {
+        // 화면 그림 테스트(Robolectric)가 앱의 레이아웃·글꼴·색을 그대로 쓰도록
+        unitTests.isIncludeAndroidResources = true
+    }
+
     packaging {
         // 카카오맵 네이티브 라이브러리와 코드(dex)를 압축해서 APK 다운로드 크기를 줄인다 (워치 업데이트용).
         // 플레이 스토어를 거치지 않고 워치가 APK 를 그대로 받기 때문에 압축하는 쪽이 절반 가까이 작다.
@@ -123,6 +128,7 @@ dependencies {
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303")                            // 단위 테스트용 JSON 구현
+    testImplementation("org.robolectric:robolectric:4.17")                  // 워치 화면을 실제로 그려 보는 테스트
 }
 
 /**
@@ -158,4 +164,9 @@ tasks.register("kakaoKeyHash") {
             println("릴리스 키 해시 : " + (hashOf(File(release), pass, "release") ?: "(릴리스 키를 읽지 못함)"))
         }
     }
+}
+
+// 화면 그림 테스트(render 패키지)는 ./gradlew testDebugUnitTest -Prender 일 때만 — 평소·CI 테스트는 빠르게
+tasks.withType<Test>().configureEach {
+    if (!project.hasProperty("render")) exclude("**/render/**")
 }
