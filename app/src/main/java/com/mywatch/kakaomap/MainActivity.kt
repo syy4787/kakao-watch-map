@@ -62,6 +62,7 @@ import com.kakao.vectormap.route.RouteLineStyle
 import com.mywatch.kakaomap.data.ActiveRoute
 import com.mywatch.kakaomap.data.ErrorLog
 import com.mywatch.kakaomap.data.RouteRepository
+import com.mywatch.kakaomap.location.HeadingMath
 import com.mywatch.kakaomap.location.HeadingSensor
 import com.mywatch.kakaomap.location.Locator
 import com.mywatch.kakaomap.location.PermissionHelp
@@ -150,6 +151,8 @@ class MainActivity : ComponentActivity() {
     private var myLabelHasCone = false
     private var heading: Float? = null
     private var lastHeadingApplied = Float.NaN
+    /** 부채꼴에 마지막으로 준 회전값(라디안, −π~π) */
+    private var lastLabelRad = 0f
     private lateinit var headingSensor: HeadingSensor
     private val fused by lazy { LocationServices.getFusedLocationProviderClient(this) }
     private var updatesRunning = false
@@ -944,7 +947,11 @@ class MainActivity : ComponentActivity() {
         }
         if (!lastHeadingApplied.isNaN() && angleDiff(deg, lastHeadingApplied) < 3f) return
         lastHeadingApplied = deg
-        label.rotateTo(Math.toRadians(deg.toDouble() * AppConfig.HEADING_SIGN).toFloat(), 120)
+        // 카카오 Label 회전은 −180~180°. 뒤쪽(±180°)을 넘을 때는 애니메이션 없이 — 숫자대로 돌리면
+        // 반대쪽으로 한 바퀴 가까이 휘돌아(나침반 모드에선 지도까지) 방향이 '난리'로 보인다
+        val target = HeadingMath.labelRadians(deg * AppConfig.HEADING_SIGN)
+        label.rotateTo(target, HeadingMath.rotationAnimMs(lastLabelRad, target, 120))
+        lastLabelRad = target
     }
 
     private fun angleDiff(a: Float, b: Float): Float {

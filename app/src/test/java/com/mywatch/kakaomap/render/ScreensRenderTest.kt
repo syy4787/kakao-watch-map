@@ -268,7 +268,7 @@ class ScreensRenderTest {
         listOf(
             Row.Header("길찾기"),
             Row.Action("input", R.drawable.ic_search, "도착지 검색", accent = true),
-            Row.FavoriteItem(com.mywatch.kakaomap.data.FavoriteSlot(com.mywatch.kakaomap.data.Favorite.HOME, place("선비마을아파트", "아파트", "대전 대덕구 송촌동", null))),
+            Row.FavoriteItem(com.mywatch.kakaomap.data.FavoriteSlot(com.mywatch.kakaomap.data.Favorite.HOME, place("우리 집", "아파트", "대전", null))),
             Row.FavoriteItem(com.mywatch.kakaomap.data.FavoriteSlot(com.mywatch.kakaomap.data.Favorite.WORK, null)),
             Row.Note("길게 누르면 집·회사로 등록할 수 있어요"),
             Row.Header("최근 목적지"),

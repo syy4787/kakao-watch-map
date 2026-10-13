@@ -80,7 +80,7 @@ class DirectionsActivity : ComponentActivity() {
     private var blocked: List<Row>? = null
     /** 출발지 설명 — 새로 잡은 위치면 '내 위치', 몇 분 지난 위치면 그렇게 알린다 */
     private var originLabel = "내 위치에서 출발"
-    /** 대중교통 거르기(검색마다 전체로 시작)·정렬(기억, 처음엔 최소시간) */
+    /** 대중교통 거르기·정렬 — 검색마다 전체·최소시간으로 시작 (칩으로 바꾸면 그 검색 동안만) */
     private var filter = TransitFilter.ALL
     private var sort = TransitSort.DEFAULT
     /** 도보·자전거에서 고른 경로 옵션 (없으면 가장 빠른 길) */
@@ -115,7 +115,10 @@ class DirectionsActivity : ComponentActivity() {
         dest = d
         val prefs = prefs()
         mode = runCatching { TravelMode.valueOf(prefs.getString(KEY_MODE, null) ?: "") }.getOrDefault(TravelMode.TRANSIT)
-        sort = TransitSort.saved(prefs.getString(KEY_SORT, null))
+        // 정렬은 검색마다 최소시간으로 시작한다 (카카오맵처럼 가장 빠른 길이 맨 위). 예전엔 고른 정렬을 기억해서,
+        // 한 번 '추천순'·'최소도보' 등으로 바뀌면(예전 판은 추천순이 기본) 카카오맵 45분 길이 맨 위에 안 뜨고 1시간짜리가 먼저 보였다
+        sort = TransitSort.DEFAULT
+        if (prefs.contains(KEY_SORT)) prefs.edit { remove(KEY_SORT) }
         for (m in SIMPLE_MODES) {
             val name = prefs.getString(optionKey(m), null)
             remembered[m] = RouteOption.of(m).firstOrNull { it.name == name }
@@ -585,10 +588,8 @@ class DirectionsActivity : ComponentActivity() {
                 when (row.tapped) {
                     Row.TransitChoice.FILTER ->
                         filter = TransitOptions.next(filter, TransitOptions.filters(routes).map { it.first })
-                    Row.TransitChoice.SORT -> {
-                        sort = sort.next()
-                        prefs().edit { putString(KEY_SORT, sort.name) }
-                    }
+                    // 이번 검색 동안만 (다음 검색은 다시 최소시간부터)
+                    Row.TransitChoice.SORT -> sort = sort.next()
                 }
                 render()   // 칩이 손가락 아래 그대로 있게 스크롤은 그대로 둔다
             }
@@ -636,6 +637,7 @@ class DirectionsActivity : ComponentActivity() {
     companion object {
         private const val PREFS = "directions"
         private const val KEY_MODE = "mode"
+        /** 예전 판이 기억해 두던 정렬 — 이제 쓰지 않고 지운다 */
         private const val KEY_SORT = "transit_sort"
         private const val ACTION_RETRY = "retry"
         private const val ACTION_PERMISSION = "permission"

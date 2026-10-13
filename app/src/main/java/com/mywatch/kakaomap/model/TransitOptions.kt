@@ -17,10 +17,8 @@ enum class TransitSort(val label: String) {
     fun next(): TransitSort = entries[(ordinal + 1) % entries.size]
 
     companion object {
-        /** 처음엔 가장 빨리 도착하는 경로부터 (사용자가 정렬 칩으로 바꾸면 그것을 기억) */
+        /** 검색마다 가장 빨리 도착하는 경로부터 (카카오맵처럼). 정렬 칩으로 바꾼 것은 그 검색 동안만 */
         val DEFAULT = FASTEST
-
-        fun saved(name: String?): TransitSort = entries.firstOrNull { it.name == name } ?: DEFAULT
     }
 }
 

@@ -84,11 +84,21 @@ class TransitOptionsTest {
     }
 
     @Test
-    fun theListStartsWithTheFastestUntilTheUserPicksAnotherSort() {
-        assertEquals(TransitSort.FASTEST, TransitSort.saved(null))
-        assertEquals(TransitSort.FASTEST, TransitSort.saved("모르는 값"))
-        assertEquals(TransitSort.RECOMMENDED, TransitSort.saved("RECOMMENDED"))
-        assertEquals(TransitSort.LEAST_WALK, TransitSort.saved("LEAST_WALK"))
+    fun everySearchStartsWithTheFastestRouteOnTop() {
+        // 실제 카카오 응답(코스트코 → 송촌동, 2026-10-13 밤) 의 경로 시간을 카카오가 준 순서대로.
+        // 카카오맵은 가장 빠른 44분(601 → 616)을 맨 위에 보이는데, 예전 앱은 고른 정렬('추천순' 등)을 기억해
+        // 카카오 순서 첫 경로 59.3분이 '1시간'으로 맨 위에 떴다. 이제 검색마다 최소시간으로 시작한다
+        val minutes = listOf(59.3, 52.0, 43.9, 49.3, 46.2, 69.0, 56.6, 56.1, 72.5, 55.9, 58.4, 66.2, 58.1, 58.2, 62.6)
+        val transfers = listOf(0, 0, 1, 1, 1, 0, 1, 1, 0, 1, 0, 0, 1, 1, 1)
+        val routes = minutes.mapIndexed { i, m ->
+            route("BUS", 1, transfers[i], 10, TransitStepType.BUS).copy(totalTimeSec = Math.round(m * 60).toInt())
+        }
+        assertEquals(TransitSort.FASTEST, TransitSort.DEFAULT)
+        val first = TransitOptions.apply(routes, TransitFilter.ALL, TransitSort.DEFAULT).first()
+        assertEquals(2, first.index)
+        assertEquals("44분", com.mywatch.kakaomap.model.Format.duration(first.value.totalTimeSec))
+        // 사용자가 본 것: 카카오 순서(추천순)의 첫 경로
+        assertEquals("1시간", com.mywatch.kakaomap.model.Format.duration(TransitOptions.apply(routes, TransitFilter.ALL, TransitSort.RECOMMENDED).first().value.totalTimeSec))
     }
 
     @Test
