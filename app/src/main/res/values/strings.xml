@@ -1,6 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">카카오 지도</string>
+    <string name="app_name">갤럭시워치 전용앱</string>
+    <!-- 지도 화면 이름 (최근 앱·길안내 알림 제목) -->
+    <string name="map_name">카카오맵</string>
+    <!-- 첫 화면: 카카오맵 / 유튜브 고르기 -->
+    <string name="hub_map">카카오맵</string>
+    <string name="hub_map_sub">길찾기·버스</string>
+    <string name="hub_map_desc">카카오맵 길찾기 열기</string>
+    <string name="hub_tube">유튜브</string>
+    <string name="hub_tube_sub">노래·내 믹스</string>
+    <string name="hub_tube_desc">유튜브 음악 열기</string>
 
     <string name="zoom_in">확대</string>
     <string name="zoom_out">축소</string>
@@ -38,6 +47,7 @@
     <string name="tile_search">검색</string>
 
     <string name="routing">경로 찾는 중…</string>
+    <string name="preparing_route">걷는 길 준비 중…</string>
     <string name="show_on_map">지도에서 보기</string>
     <string name="start_navigation">안내 시작</string>
     <string name="fastest">가장 빠름</string>
@@ -72,4 +82,37 @@
     <string name="err_generic">지도 오류\n%1$s</string>
     <string name="tap_to_retry">👆 톡 하면 다시 시도</string>
     <string name="error_sdk_init">카카오맵 SDK 시작 실패\n(%1$s)\n\nx86 에뮬레이터는 지원 안 돼요.\n실제 워치에서 실행하세요.</string>
+
+    <!-- 유튜브 음악: 워치에서 찾고, 폰의 유튜브 앱(내 계정 = 내 알고리즘)이 '믹스'로 재생 -->
+    <string name="tube_app_name">유튜브 음악</string>
+    <string name="tube_title">유튜브 음악</string>
+    <string name="tube_subtitle">폰 유튜브 앱으로 재생\n내 알고리즘 그대로</string>
+    <string name="tube_search">노래 검색</string>
+    <string name="tube_search_again">다시 검색</string>
+    <string name="tube_prompt">어떤 노래 들을까요?</string>
+    <string name="tube_searching">유튜브에서 찾는 중…</string>
+    <string name="tube_loading_more">더 불러오는 중…</string>
+    <string name="tube_sending">폰 유튜브에서 여는 중…</string>
+    <string name="tube_continue_mix">믹스 이어 듣기 · %1$s</string>
+    <string name="tube_recent_played">최근 들은 곡</string>
+    <string name="tube_recent_searches">최근 검색</string>
+    <string name="tube_clear">기록 지우기</string>
+    <string name="tube_more">더 보기</string>
+    <string name="tube_search_on_phone">폰 유튜브에서 이 검색 열기</string>
+    <string name="tube_home">처음으로</string>
+    <string name="tube_play_mix">믹스로 듣기 (다음 곡 자동)</string>
+    <string name="tube_play_one">이 곡만 듣기</string>
+    <string name="tube_forget">기록에서 지우기</string>
+    <string name="tube_live">LIVE</string>
+    <string name="tube_count">%1$s · %2$d개</string>
+    <string name="tube_how">고른 곡은 폰의 유튜브 앱이 ‘믹스’로 틀어요. 평소 계정의 추천대로 다음 곡이 이어지고, 일시정지·다음 곡은 워치 미디어 컨트롤로 하면 돼요.</string>
+    <string name="tube_opened_on_phone">폰 유튜브에서 재생</string>
+    <string name="tube_opened_search_on_phone">폰 유튜브에서 검색</string>
+    <string name="tube_no_phone">폰과 연결돼 있지 않아요</string>
+    <string name="tube_phone_failed">폰에서 열지 못했어요. 폰이 잠겨 있으면 잠금을 풀고 다시 눌러 주세요</string>
+    <string name="tube_tile_label">유튜브 음악</string>
+    <string name="tube_tile_search_sub">말로 찾기</string>
+    <string name="tube_tile_mix">믹스 이어 듣기</string>
+    <string name="tube_tile_no_recent">먼저 한 곡을 틀어 주세요</string>
+    <string name="tube_tile_open">열기</string>
 </resources>

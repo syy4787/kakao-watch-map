@@ -23,6 +23,12 @@ import com.mywatch.kakaomap.model.Vehicle
 import com.mywatch.kakaomap.ui.Row
 import com.mywatch.kakaomap.ui.RouteRows
 import com.mywatch.kakaomap.ui.WearList
+import com.mywatch.kakaomap.ui.TubeRows
+import com.mywatch.kakaomap.ui.HubActivity
+import com.mywatch.kakaomap.ui.TubeThumbs
+import com.mywatch.kakaomap.tube.Played
+import com.mywatch.kakaomap.tube.TubeSource
+import com.mywatch.kakaomap.tube.TubeVideo
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.Robolectric
@@ -78,6 +84,14 @@ class ScreensRenderTest {
             step(TransitStepType.WALK, 6), step(TransitStepType.SUBWAY, 12, Vehicle("1호선", "대전 1호선"), "대전 1호선 (시청 > 대전역)"),
             step(TransitStepType.BUS, 6, Vehicle("지선", "311")), step(TransitStepType.WALK, 3),
         )),
+        // 아무 버스나 타도 되는 구간 (카카오맵 "105외 5대") + 거리 따라 달라지는 요금
+        TransitRoute("BUS", 7400, 33 * 60, 0, 1500, listOf(
+            step(TransitStepType.WALK, 5),
+            step(TransitStepType.BUS, 24, null, "간선 105 (대전광역시청 > 대전역)").copy(
+                vehicles = listOf("105", "115", "912", "117", "911", "1").map { Vehicle("간선", it) },
+            ),
+            step(TransitStepType.WALK, 4),
+        ), fareMax = 2800),
     )
 
     private fun head(mode: TravelMode, seconds: Map<TravelMode, Int>) = listOf(
@@ -143,6 +157,78 @@ class ScreensRenderTest {
 
     @Test
     fun bikeOptionsLargeFont() = shoot("bike_font115", head(TravelMode.BIKE, times) + simpleRows(bikeChoices), fontScale = 1.15f)
+
+    // ---------- 갤럭시워치 전용앱 첫 화면 (카카오맵 / 유튜브 고르기) ----------
+
+    @Test
+    fun hubScreen() {
+        val controller = Robolectric.buildActivity(HubActivity::class.java)
+        val activity = controller.get()
+        activity.requestWindowFeature(Window.FEATURE_NO_TITLE)
+        controller.setup()
+        shadowOf(Looper.getMainLooper()).idle()
+        val size = activity.resources.displayMetrics.widthPixels
+        val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        val c = Canvas(bmp)
+        c.drawColor(Color.BLACK)
+        activity.window.decorView.draw(c)
+        val mask = Path().apply {
+            addRect(0f, 0f, size.toFloat(), size.toFloat(), Path.Direction.CW)
+            addCircle(size / 2f, size / 2f, size / 2f, Path.Direction.CCW)
+        }
+        c.drawPath(mask, Paint().apply { color = Color.rgb(40, 40, 40) })
+        FileOutputStream(File(out, "hub_0.png")).use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        controller.pause().stop().destroy()
+    }
+
+    // ---------- 유튜브 음악 (워치에서 찾고 폰 유튜브 앱으로 재생) ----------
+
+    private val tubeVideos = listOf(
+        TubeVideo("BzYnNdJhZQw", "[MV] IU(아이유) _ Through the Night(밤편지)", "1theK (원더케이)", 294),
+        TubeVideo("pSUydWEqKwE", "NewJeans (뉴진스) 'Ditto' Official MV (side A)", "HYBE LABELS", 186),
+        TubeVideo("jfKfPfyJRdk", "lofi hip hop radio 📚 beats to relax/study to", "Lofi Girl", null, live = true),
+        TubeVideo("aaaaaaaaaaa", "밤편지 - 아이유 (cover by 아주 긴 채널 이름의 커버 가수) | 피아노 반주 ver.", "커버하는 사람들의 아주 긴 채널 이름", 3723),
+        TubeVideo("bbbbbbbbbbb", "아이유", "", null),
+    )
+
+    private val tubeApp get() = org.robolectric.RuntimeEnvironment.getApplication()
+
+    @Test
+    fun tubeHome() {
+        TubeThumbs.enabled = false
+        val played = tubeVideos.take(3).mapIndexed { i, v -> Played(v, 1_000L - i) }
+        shoot("tube_home", TubeRows.home(tubeApp, played, listOf("아이유 밤편지", "뉴진스 Ditto", "비 오는 날 듣기 좋은 노래 플레이리스트 모음")), pages = 5)
+    }
+
+    @Test
+    fun tubeHomeEmpty() {
+        TubeThumbs.enabled = false
+        shoot("tube_home_empty", TubeRows.home(tubeApp, emptyList(), emptyList()), pages = 1)
+    }
+
+    @Test
+    fun tubeResults() {
+        TubeThumbs.enabled = false
+        shoot("tube_results", TubeRows.results(tubeApp, "아이유 밤편지", TubeSource.KAKAO, tubeVideos, hasMore = true, note = null), pages = 4)
+    }
+
+    @Test
+    fun tubeResultsLargeFontWithNote() {
+        TubeThumbs.enabled = false
+        shoot(
+            "tube_results_font115",
+            TubeRows.results(tubeApp, "비 오는 날 듣기 좋은 노래", TubeSource.KAKAO, tubeVideos.take(2), hasMore = false,
+                note = "오늘 유튜브 검색 한도를 다 써서 카카오 동영상 검색으로 찾았어요"),
+            pages = 3, fontScale = 1.15f,
+        )
+    }
+
+    @Test
+    fun tubeMenuAndError() {
+        TubeThumbs.enabled = false
+        shoot("tube_menu", TubeRows.menu(tubeApp, tubeVideos[3], fromHome = true), pages = 2)
+        shoot("tube_error", TubeRows.error(tubeApp, "아이유", "네트워크 연결을 확인하세요"), pages = 1)
+    }
 
     private fun place(name: String, category: String, address: String, m: Int?) =
         com.mywatch.kakaomap.model.Place("1", name, category, address, address, Coord(36.36, 127.39), m)
@@ -261,8 +347,21 @@ class ScreensRenderTest {
     @Test
     fun transitCards() = shoot(
         "transit",
-        head(TravelMode.TRANSIT, times) + Row.TransitChoice(TransitFilter.ALL, 2, true, TransitSort.FASTEST) +
-            Row.TransitCard(1, transit[1], "1호선 3분 후", fastest = true) +
-            Row.TransitCard(0, transit[0], "707번 12분 후 (7정거장 전)", fastest = false),
+        head(TravelMode.TRANSIT, times) + Row.TransitChoice(TransitFilter.ALL, 3, true, TransitSort.FASTEST) +
+            Row.TransitCard(1, transit[1], "311번 3분 (2번째 전) · 다음 14분", fastest = true) +
+            Row.TransitCard(0, transit[0], "707번 12분 (7번째 전)", fastest = false) +
+            Row.TransitCard(2, transit[2], "105 곧 도착 · 115 7분 · 912 12분", fastest = false),
+    )
+
+    @Test
+    fun transitDetailManyLines() = shoot(
+        "detail_lines",
+        listOf(
+            Row.Header("33분 · 오전 12:04 도착", "1,500~2,800원 · 환승 없음 · 7.4km"),
+            Row.Action("navigate", R.drawable.ic_navigation, "안내 시작", accent = true),
+        ) + RouteRows.transitTimeline(transit[2], "한밭수목원", true).map {
+            if (it is Row.Step && it.live != null) it.copy(live = "105 곧 도착 · 115 7분 · 912 12분") else it
+        },
+        pages = 3,
     )
 }

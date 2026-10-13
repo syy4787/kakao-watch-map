@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <!-- Wear OS 전용 앱 -->
     <uses-feature android:name="android.hardware.type.watch" />
@@ -48,17 +49,29 @@
             android:name="com.google.android.wearable.standalone"
             android:value="true" />
 
-        <!-- 모든 화면은 한 작업(task)으로: 워치 '최근 앱'에 한 번만, 알림·진행 중 아이콘을 눌러도 같은 지도로 돌아옴 -->
+        <!-- 워치 앱 목록의 아이콘은 '갤럭시워치 전용앱' 하나: 들어가면 카카오맵 / 유튜브를 고른다.
+             고른 앱은 저마다의 작업(task)으로 열리고 이 화면은 스스로 닫히므로 최근 앱 목록에는 남기지 않는다.
+             noHistory 는 쓰지 않는다 — '앱 정보'를 열었다 뒤로 오면 이 고르는 화면이 있어야 해서 -->
         <activity
-            android:name=".MainActivity"
+            android:name=".ui.HubActivity"
             android:exported="true"
-            android:launchMode="singleTop"
-            android:taskAffinity="com.mywatch.kakaomap.main">
+            android:excludeFromRecents="true"
+            android:taskAffinity="com.mywatch.kakaomap.hub"
+            tools:ignore="WearRecents">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- 지도의 모든 화면은 한 작업(task)으로: 워치 '최근 앱'에 한 번만, 알림·진행 중 아이콘을 눌러도 같은 지도로 돌아옴 -->
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:icon="@mipmap/ic_map_launcher"
+            android:label="@string/map_name"
+            android:launchMode="singleTop"
+            android:taskAffinity="com.mywatch.kakaomap.main" />
 
         <!-- 타일의 '집으로·회사로·검색' 버튼이 바로 여는 화면이라 exported (받는 값은 집/회사/검색 세 가지뿐).
              singleTop: 위에 지도가 있을 수 있어 아래 화면을 치우지 않는다 (옛 길찾기 화면은 스스로 닫힘) -->
@@ -75,6 +88,15 @@
             android:name=".ui.RouteDetailActivity"
             android:exported="false"
             android:taskAffinity="com.mywatch.kakaomap.main" />
+        <!-- 유튜브 음악: 첫 화면에서 고르거나 타일로 연다(타일이 열므로 exported). 지도와 다른 작업(task)이라 최근 앱에서도 따로 보인다.
+             찾은 곡은 폰의 유튜브 앱이 재생한다 (워치는 검색·고르기만) -->
+        <activity
+            android:name=".ui.TubeActivity"
+            android:exported="true"
+            android:icon="@mipmap/ic_tube"
+            android:label="@string/tube_app_name"
+            android:launchMode="singleTop"
+            android:taskAffinity="com.mywatch.kakaomap.tube" />
         <activity
             android:name=".update.UpdateActivity"
             android:exported="false"
@@ -102,6 +124,20 @@
             <meta-data
                 android:name="androidx.wear.tiles.PREVIEW"
                 android:resource="@drawable/tile_preview" />
+        </service>
+        <!-- 타일 '유튜브 음악': 노래 검색(말로) · 믹스 이어 듣기 · 열기 -->
+        <service
+            android:name=".tile.TubeTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_music_note"
+            android:label="@string/tube_tile_label"
+            android:permission="com.google.android.wearable.permission.BIND_TILE_PROVIDER">
+            <intent-filter>
+                <action android:name="androidx.wear.tiles.action.BIND_TILE_PROVIDER" />
+            </intent-filter>
+            <meta-data
+                android:name="androidx.wear.tiles.PREVIEW"
+                android:resource="@drawable/tile_tube_preview" />
         </service>
     </application>
 </manifest>

@@ -94,11 +94,12 @@ object RoutePresentation {
         place = place,
         summary = transitSummary(r),
         origin = origin,
+        // 걷는 길은 카카오맵처럼 점을 찍은 회색 선 (정류장까지·환승·내려서 도착지까지). 아직 실제 길을 못 받은 직선은 연하게
         segments = r.steps.filter { it.points.size >= 2 }.map {
             when {
-                it.approx -> MapSegment(it.points, APPROX_WALK_COLOR, 3f)   // 직선으로 채운 도보는 연하게
-                it.type == TransitStepType.WALK -> MapSegment(it.points, stepColor(it), 4.5f)
-                else -> MapSegment(it.points, stepColor(it), 7f)
+                it.type != TransitStepType.WALK -> MapSegment(it.points, stepColor(it), 7f)
+                it.approx && !it.pathFound -> MapSegment(it.points, APPROX_WALK_COLOR, 4f, dotted = true)
+                else -> MapSegment(it.points, stepColor(it), 5f, dotted = true)
             }
         },
         steps = TransitGuide.steps(r),

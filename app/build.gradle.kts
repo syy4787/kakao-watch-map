@@ -49,6 +49,8 @@ android {
 
         buildConfigField("String", "KAKAO_REST_API_KEY", "\"${secret("kakao.rest.key", "KAKAO_REST_API_KEY")}\"")
         buildConfigField("String", "TAGO_SERVICE_KEY", "\"${secret("tago.service.key", "TAGO_SERVICE_KEY")}\"")
+        // 유튜브 음악: 유튜브 자체 검색(YouTube Data API v3) 키. 없으면 카카오 동영상 검색으로 찾는다
+        buildConfigField("String", "YOUTUBE_API_KEY", "\"${secret("youtube.api.key", "YOUTUBE_API_KEY")}\"")
         // 자동 업데이트를 받아 올 GitHub 저장소 (아이디/kakao-watch-map). Actions 에선 자동으로 채워짐
         buildConfigField("String", "UPDATE_REPO", "\"${System.getenv("GITHUB_REPOSITORY") ?: localProps.getProperty("update.repo") ?: ""}\"")
     }
@@ -117,6 +119,7 @@ dependencies {
     implementation("androidx.wear:wear:1.4.0")                              // 둥근 화면 목록·스와이프 닫기
     implementation("androidx.wear:wear-input:1.2.0")                        // 음성·키보드 입력
     implementation("androidx.wear:wear-ongoing:1.1.0")                      // 안내 중 워치페이스에 아이콘(진행 중 활동)
+    implementation("androidx.wear:wear-remote-interactions:1.2.0")          // 유튜브 음악: 고른 곡을 폰의 유튜브 앱에서 열기
     implementation("androidx.wear.tiles:tiles:1.6.2")                       // 타일: 집으로·회사로·검색
     implementation("androidx.wear.protolayout:protolayout:1.4.2")
     implementation("androidx.wear.protolayout:protolayout-material3:1.4.2")

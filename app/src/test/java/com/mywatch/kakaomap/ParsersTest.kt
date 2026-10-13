@@ -1,8 +1,12 @@
 package com.mywatch.kakaomap
 
+import com.mywatch.kakaomap.model.Format
 import com.mywatch.kakaomap.model.KakaoParsers
 import com.mywatch.kakaomap.model.RouteStatusException
 import com.mywatch.kakaomap.model.TagoParsers
+import com.mywatch.kakaomap.model.TransitFilter
+import com.mywatch.kakaomap.model.TransitOptions
+import com.mywatch.kakaomap.model.TransitSort
 import com.mywatch.kakaomap.model.TransitStepType
 import com.mywatch.kakaomap.model.TravelMode
 import com.mywatch.kakaomap.update.UpdateInfo
@@ -65,20 +69,28 @@ class ParsersTest {
             {"properties":{"guidance":"신분당선 (정자 > 판교)","type":"SUBWAY","distance":3500,"time":900,
               "stops":[{"name":"정자"},{"name":"판교"}],"vehicles":[{"type":"일반","name":"신분당선"}]},
              "path":{"points":[[127.12,37.42],[127.13,37.43]]}}]},
-          {"properties":{"type":"BUS","totalDistance":8000,"totalTime":1800,"transfers":0},
+          {"properties":{"type":"BUS","totalDistance":8000,"totalTime":1800,"transfers":0,"fare":{"min":1500,"max":3150}},
            "steps":[{"properties":{"guidance":"g","type":"BUS","distance":8000,"time":1800,"stops":[],"vehicles":[{"type":"간선","name":"102"}]},"path":{"points":[[1,2],[3,4]]}}]}
          ]}
     """.trimIndent()
 
     @Test
-    fun transitRoutesParseAndSortByTime() {
+    fun transitRoutesParseInKakaosOrder() {
         val routes = KakaoParsers.transitRoutes(JSONObject(transitJson))
         assertEquals(2, routes.size)
-        // 더 빠른 경로(30분)가 먼저
-        assertEquals(1800, routes[0].totalTimeSec)
-        assertNull(routes[0].fare)
-        val r = routes[1]
+        // 카카오가 준 순서(추천순) 그대로 — 빠른 순(최소시간) 정렬은 목록 화면이 한다
+        assertEquals(2520, routes[0].totalTimeSec)
+        assertEquals(1800, routes[1].totalTimeSec)
+        assertEquals(listOf(0, 1), TransitOptions.apply(routes, TransitFilter.ALL, TransitSort.RECOMMENDED).map { it.index })
+        assertEquals(listOf(1, 0), TransitOptions.apply(routes, TransitFilter.ALL, TransitSort.FASTEST).map { it.index })
+        // 거리 따라 달라지는 요금은 카카오맵처럼 "1,500~3,150원"
+        assertEquals(1500, routes[1].fare)
+        assertEquals(3150, routes[1].fareMax)
+        assertEquals("1,500~3,150원", Format.fare(routes[1]))
+        val r = routes[0]
         assertEquals(1500, r.fare)
+        assertNull("min·max 가 같으면 하나로", r.fareMax)
+        assertEquals("1,500원", Format.fare(r))
         assertEquals(1, r.transfers)
         assertEquals(240, r.walkTimeSec)
         val bus = r.steps[1]
@@ -106,12 +118,14 @@ class ParsersTest {
     @Test
     fun tagoItemsHandleArrayObjectAndEmpty() {
         val arr = JSONObject("""{"response":{"header":{"resultCode":"00","resultMsg":"NORMAL SERVICE."},
-            "body":{"items":{"item":[{"routeno":102,"routetp":"간선버스","arrtime":245,"arrprevstationcnt":3},
+            "body":{"items":{"item":[{"routeno":102,"routetp":"간선버스","arrtime":245,"arrprevstationcnt":3,"routeid":"DJB30300102"},
                                       {"routeno":"급행1","arrtime":60,"arrprevstationcnt":1}]}}}}""")
         val a = TagoParsers.arrivals(arr)
         assertEquals(2, a.size)
         assertEquals("급행1", a[0].routeNo)        // 더 빨리 오는 버스가 먼저
         assertEquals("102", a[1].routeNo)          // 숫자로 와도 문자열로
+        assertEquals("같은 번호의 다른 노선과 구별하는 TAGO 노선 번호", "DJB30300102", a[1].routeId)
+        assertEquals("", a[0].routeId)
         assertNull(TagoParsers.errorMessage(arr))
 
         val single = JSONObject("""{"response":{"header":{"resultCode":"00"},

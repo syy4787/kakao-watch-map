@@ -11,7 +11,9 @@ import android.os.VibratorManager
 import androidx.annotation.MainThread
 import com.mywatch.kakaomap.data.RouteRepository
 import com.mywatch.kakaomap.model.Fix
+import com.mywatch.kakaomap.model.LiveBus
 import com.mywatch.kakaomap.model.TravelMode
+import com.mywatch.kakaomap.net.LiveBusTracker
 import com.mywatch.kakaomap.net.StopLocator
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -35,10 +37,12 @@ object Navigator {
         val version = RouteRepository.activeRouteVersion
         if (active == null) {
             engine = null
+            LiveBusTracker.stop()
             if (_state.value.routeVersion != version || _state.value.guide != null) _state.value = NavState(routeVersion = version)
             return
         }
         if (engine?.routeVersion == version) return
+        LiveBusTracker.stop()
         engine = NavEngine(active.steps, active.destination, version, bike = active.mode == TravelMode.BIKE, destinationName = active.destinationName)
             .also { _state.value = it.state }
         // 버스·지하철 정류장 위치는 네트워크로 받아 와서 나중에 넣는다 ('정류장 n개 남음')
@@ -58,6 +62,18 @@ object Navigator {
         val events = eng.update(fix.coord, fix.accuracyM, fix.elapsedMs)
         _state.value = eng.state
         if (active.startNavigation) events.forEach { vibrate(context, it) }
+        // 안내 중 시내 버스를 타러 가거나 기다리면 실시간 도착을 붙인다 (위치가 올 때 함께 판단 — 따로 깨우지 않음)
+        LiveBusTracker.onState(context.applicationContext, active, eng.routeVersion, eng.state)
+    }
+
+    /** 타려는 버스의 실시간 도착 (다른 경로로 바뀌었으면 무시). 2분 안에 오면 진동 */
+    @MainThread
+    fun setLiveArrival(context: Context, routeVersion: Int, stepIndex: Int, bus: LiveBus?) {
+        val eng = engine ?: return
+        if (eng.routeVersion != routeVersion) return
+        val events = eng.setLiveArrival(stepIndex, bus)
+        _state.value = eng.state
+        if (RouteRepository.activeRoute?.startNavigation == true) events.forEach { vibrate(context, it) }
     }
 
     @MainThread
@@ -92,14 +108,14 @@ object Navigator {
         }
         if (vibrator == null || !vibrator.hasVibrator()) return
         // 화면을 안 봐도 손목만으로 구별되게 (ms: 쉼, 울림, 쉼, 울림 …)
-        //  좌회전 짧게 2번 · 우회전 짧게 3번 · 유턴 4번 · 횡단보도 등 길게 1번 · 승차 중간 2번 · 하차 길게 3번
+        //  좌회전 짧게 2번 · 우회전 짧게 3번 · 유턴 4번 · 횡단보도 등 길게 1번 · 승차(버스 2분 안 도착도) 중간 2번 · 하차 길게 3번
         //  정류장 지남 아주 길게 2번 · 이탈 빠르게 5번 · 도착 길게 1번 · 새 경로 짧게 1번
         val pattern = when (event) {
             NavEvent.TURN_SOON_LEFT -> longArrayOf(0, 90, 130, 90)
             NavEvent.TURN_SOON_RIGHT -> longArrayOf(0, 90, 130, 90, 130, 90)
             NavEvent.UTURN_SOON -> longArrayOf(0, 90, 130, 90, 130, 90, 130, 90)
             NavEvent.ACTION_SOON -> longArrayOf(0, 300)
-            NavEvent.BOARD_SOON -> longArrayOf(0, 200, 150, 200)
+            NavEvent.BOARD_SOON, NavEvent.BUS_ARRIVING -> longArrayOf(0, 200, 150, 200)
             NavEvent.ALIGHT_SOON -> longArrayOf(0, 350, 150, 350, 150, 350)
             NavEvent.PASSED_STOP, NavEvent.MISSED_RIDE -> longArrayOf(0, 600, 200, 600)
             NavEvent.OFF_ROUTE -> longArrayOf(0, 60, 60, 60, 60, 60, 60, 60, 60, 60)

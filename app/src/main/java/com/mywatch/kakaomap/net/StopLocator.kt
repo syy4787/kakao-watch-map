@@ -7,7 +7,6 @@ import com.mywatch.kakaomap.data.ErrorLog
 import com.mywatch.kakaomap.model.Coord
 import com.mywatch.kakaomap.model.Geo
 import com.mywatch.kakaomap.model.StopPlacer
-import com.mywatch.kakaomap.model.TransitMatching
 import com.mywatch.kakaomap.model.TransitStep
 import com.mywatch.kakaomap.model.TransitStepType
 import com.mywatch.kakaomap.nav.Navigator
@@ -73,25 +72,13 @@ object StopLocator {
         }
     }
 
+    /**
+     * 버스 정류장 위치: 실시간 도착과 같은 방법으로 찾은 노선의 승차~하차 정류소 ([BusArrivalService.boarding] —
+     * 노선 정류소 순서로 방향까지 맞추고, 대전 '급행2'처럼 종류가 이름에 붙은 노선도 찾음, 결과는 같이 씀)
+     */
     private fun busCoords(step: TransitStep): List<Coord?>? {
         if (!TagoApi.isConfigured) return null
-        val board = step.boardingStop ?: return null
-        val alight = step.alightingStop ?: return null
-        val start = step.points.firstOrNull() ?: return null
-        // 같은 정류장이 이웃 도시 데이터로도 나오므로 이 도시(가장 많이 나온 도시 코드) 것을 고른다
-        val nearby = TagoApi.nearbyStops(start)
-        val city = TransitMatching.stopCandidates(nearby, board, start).firstOrNull()?.cityCode
-            ?: TransitMatching.dominantCity(nearby) ?: return null
-        val names = step.vehicles.map { it.name }.filter { it.isNotBlank() }
-        for (no in names.take(2)) {
-            for (r in TagoApi.routes(city, no).filter { it.routeNo == no }.take(3)) {
-                // 도는 노선은 같은 이름이 갈 때·올 때 두 번 — 정거장 수·승차 위치가 맞는 쪽 (카카오와 다르면 다른 노선)
-                val slice = StopPlacer.rideSlice(TagoApi.routeStops(city, r.routeId), board, alight, start, step.stops.size)
-                    ?: continue
-                return slice.map { it.coord }
-            }
-        }
-        return null
+        return BusArrivalService.boarding(step)?.slice?.map { it.coord }
     }
 
     private fun pathDistance(c: Coord, path: List<Coord>): Double =

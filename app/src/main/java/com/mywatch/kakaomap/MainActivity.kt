@@ -24,6 +24,7 @@ import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.TextView
 import androidx.activity.ComponentActivity
+import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import androidx.core.content.edit
@@ -55,6 +56,7 @@ import com.kakao.vectormap.label.LabelStyles
 import com.kakao.vectormap.label.TransformMethod
 import com.kakao.vectormap.route.RouteLine
 import com.kakao.vectormap.route.RouteLineOptions
+import com.kakao.vectormap.route.RouteLinePattern
 import com.kakao.vectormap.route.RouteLineSegment
 import com.kakao.vectormap.route.RouteLineStyle
 import com.mywatch.kakaomap.data.ActiveRoute
@@ -75,6 +77,7 @@ import com.mywatch.kakaomap.nav.NavIcon
 import com.mywatch.kakaomap.nav.NavState
 import com.mywatch.kakaomap.nav.NavigationService
 import com.mywatch.kakaomap.nav.Navigator
+import com.mywatch.kakaomap.ui.AmbientCover
 import com.mywatch.kakaomap.ui.AmbientRouteView
 import com.mywatch.kakaomap.ui.MapBitmaps
 import com.mywatch.kakaomap.ui.NavOverlayText
@@ -157,6 +160,10 @@ class MainActivity : ComponentActivity() {
     /** '정확한 위치'를 이미 물어본 경로 (같은 경로로 권한 창을 두 번 띄우지 않게) */
     private var preciseAskedForVersion = -1
     private var routeLine: RouteLine? = null
+    /** 걷는 길의 점 무늬 (점 사이 약 10dp) */
+    private val walkPattern: RouteLinePattern by lazy {
+        RouteLinePattern.from(MapBitmaps.walkDot(this), 10 * resources.displayMetrics.density)
+    }
     private var routeLabels = mutableListOf<Label>()
 
     // 베젤·크라운 줌
@@ -250,13 +257,20 @@ class MainActivity : ComponentActivity() {
 
         headingSensor = HeadingSensor(this) { deg -> runOnUiThread { onHeading(deg) } }
         // 손목을 내리면 꺼지는 대신 저전력 화면으로 (길 안내를 계속 볼 수 있게)
-        lifecycle.addObserver(AmbientLifecycleObserver(this, ambientCallback))
+        if (AmbientCover.available) lifecycle.addObserver(AmbientLifecycleObserver(this, ambientCallback))
 
         // 화면 '왼쪽 가장자리'에서 오른쪽으로 쓸면 앱 종료 (나머지 드래그는 지도 이동)
         swipeRoot.addCallback(object : SwipeDismissFrameLayout.Callback() {
             override fun onDismissed(layout: SwipeDismissFrameLayout) {
                 layout.visibility = View.GONE
                 finish()
+            }
+        })
+        // 옆 버튼(뒤로): 지도가 이 작업의 맨 아래 화면이면 닫지 않고 뒤로 보낸다 — 첫 화면에서 다시 고르면 보던 그대로
+        // (지도 엔진을 다시 띄우지 않음). 앱 목록 아이콘이 '갤럭시워치 전용앱'으로 바뀌어 시스템이 더는 저절로 그렇게 하지 않는다
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                if (isTaskRoot) moveTaskToBack(true) else finish()
             }
         })
 
@@ -357,7 +371,7 @@ class MainActivity : ComponentActivity() {
         if (active == null) {
             ambientRouteVersion = -1
             ambientMap.setRoute(emptyList(), null)
-            ambientMap.update(RouteRepository.lastLocation, -1, getString(R.string.app_name), "")
+            ambientMap.update(RouteRepository.lastLocation, -1, getString(R.string.map_name), "")
             return
         }
         if (ambientRouteVersion != RouteRepository.activeRouteVersion) {
@@ -558,10 +572,10 @@ class MainActivity : ComponentActivity() {
         }
 
         val segments = active.segments.filter { it.points.size >= 2 }.map { seg ->
-            RouteLineSegment.from(
-                seg.points.map { LatLng.from(it.lat, it.lng) },
-                RouteLineStyle.from(seg.widthDp, seg.color, 1.5f, android.graphics.Color.WHITE),
-            )
+            // 걷는 길: 회색 선 위에 흰 점을 일정 간격으로 (점이 안 그려지는 기기여도 회색 선은 남는다)
+            val style = if (seg.dotted) RouteLineStyle.from(seg.widthDp, seg.color, 1.5f, android.graphics.Color.WHITE, walkPattern)
+            else RouteLineStyle.from(seg.widthDp, seg.color, 1.5f, android.graphics.Color.WHITE)
+            RouteLineSegment.from(seg.points.map { LatLng.from(it.lat, it.lng) }, style)
         }
         if (segments.isNotEmpty()) {
             routeLine = map.routeLineManager?.layer?.addRouteLine(RouteLineOptions.from(segments))
@@ -1011,9 +1025,11 @@ class MainActivity : ComponentActivity() {
     private fun setControlsVisible(visible: Boolean) {
         controlsShown = visible
         val shown = visibleControls()
+        // 내 위치 버튼은 카카오맵처럼 늘 보인다 — 지도를 끌어 옮겼다가 바로 내 위치로 돌아올 수 있게 (나머지만 4초 뒤 숨김)
+        val pinned = if (mapStarted && !mapFailed) btnMyLocation else null
         controls.forEach { v ->
             v.animate().cancel()
-            val on = visible && v in shown
+            val on = (visible && v in shown) || v == pinned
             v.isClickable = on
             if (on) {
                 v.visibility = View.VISIBLE

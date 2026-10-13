@@ -43,6 +43,15 @@ object MapBitmaps {
         return bmp
     }
 
+    /** 걷는 길 위에 일정한 간격으로 찍는 흰 점 (카카오맵의 점선 도보처럼). 지도 엔진이 선 굵기에 맞춰 늘린다 */
+    fun walkDot(context: Context): Bitmap {
+        val size = (6 * context.resources.displayMetrics.density).toInt().coerceAtLeast(6)
+        val bmp = createBitmap(size, size)
+        val p = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE }
+        Canvas(bmp).drawCircle(size / 2f, size / 2f, size * 0.32f, p)
+        return bmp
+    }
+
     /** "출발" / "도착" 말풍선 (아래 꼭짓점이 좌표) */
     fun bubble(context: Context, text: String, color: Int): Bitmap {
         val d = context.resources.displayMetrics.density

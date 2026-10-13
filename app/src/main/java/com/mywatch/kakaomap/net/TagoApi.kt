@@ -2,19 +2,25 @@ package com.mywatch.kakaomap.net
 
 import com.mywatch.kakaomap.BuildConfig
 import com.mywatch.kakaomap.data.ErrorLog
+import com.mywatch.kakaomap.model.ArrivalBoard
 import com.mywatch.kakaomap.model.BusArrival
+import com.mywatch.kakaomap.model.BusBoarding
 import com.mywatch.kakaomap.model.BusRoute
 import com.mywatch.kakaomap.model.BusStop
+import com.mywatch.kakaomap.model.BusStopResolver
 import com.mywatch.kakaomap.model.Coord
-import com.mywatch.kakaomap.model.Format
+import com.mywatch.kakaomap.model.LiveBus
+import com.mywatch.kakaomap.model.LiveBusText
 import com.mywatch.kakaomap.model.TagoParsers
 import com.mywatch.kakaomap.model.TransitMatching
 import com.mywatch.kakaomap.model.TransitStep
+import com.mywatch.kakaomap.model.TransitStepType
 import org.json.JSONObject
 import java.io.IOException
 import java.net.SocketTimeoutException
 import java.net.URLEncoder
 import java.util.Locale
+import java.util.concurrent.Semaphore
 
 /**
  * 국토교통부 TAGO(국가대중교통정보센터) 버스 실시간 도착 정보 — 공공데이터포털 인증키 필요.
@@ -45,10 +51,13 @@ object TagoApi {
         ))
     )
 
-    /** 노선 번호로 노선 찾기 (같은 번호의 여러 노선이 나올 수 있음) */
+    /**
+     * 노선 번호로 노선 찾기 (같은 번호의 여러 노선이 나올 수 있음). 번호가 들어간 노선이 모두 나오므로('5' → 5·15·105·…)
+     * 짧은 번호도 그 노선이 빠지지 않게 넉넉히 받는다
+     */
     fun routes(cityCode: Int, routeNo: String): List<BusRoute> = TagoParsers.routes(
         call("/BusRouteInfoInqireService/getRouteNoList", mapOf(
-            "cityCode" to cityCode.toString(), "routeNo" to routeNo, "numOfRows" to "20", "pageNo" to "1",
+            "cityCode" to cityCode.toString(), "routeNo" to routeNo, "numOfRows" to "100", "pageNo" to "1",
         ))
     )
 
@@ -114,52 +123,73 @@ object TagoApi {
     }
 }
 
-/** 버스 구간의 실시간 도착 정보를 찾아서 "102번 3분 후 (2정거장 전)" 형태로 만든다 */
+/**
+ * 버스 구간의 실시간 도착 (카카오맵처럼 "106번 3분 (2번째 전) · 다음 15분", 노선이 여럿이면 "106 2분 · 617 5분").
+ *  · 승차 정류장은 노선 정류소 순서(승차 … 하차)로 찾아 방향까지 맞춘다 — 길 건너 같은 이름의 반대 방향 정류장 도착을 보이지 않게
+ *    ([BusStopResolver], 타는 중 '정류장 n개 남음'([StopLocator])도 같은 결과를 씀)
+ *  · 도착 정보는 정류장마다 한 번만 묻고 30초 동안 같이 쓴다 — 목록의 여러 경로가 같은 정류장이면 한 번 ([ArrivalBoard])
+ *  · 공공데이터 요청은 동시에 3개까지, 연결이 안 되면 20초 동안은 다시 묻지 않는다 (워치 배터리·일일 사용량)
+ */
 object BusArrivalService {
 
-    private class Cached(val text: String, val at: Long)
-    private val cache = HashMap<String, Cached>()
-    private const val TTL_MS = 30_000L
-    /** 승차 정류장 후보 (정류장 정보는 하루 한 번 바뀌므로 앱이 켜져 있는 동안 재사용 — 호출 수 절반) */
-    private val candidatesCache = HashMap<String, List<BusStop>>()
-    /** 이 노선 도착이 실제로 나온 정류장 — 다음 새로 고침부터 그곳을 먼저 물어본다 */
-    private val servingStop = HashMap<String, String>()
+    /** 동시에 보내는 공공데이터 요청 수 */
+    private val gate = Semaphore(3)
 
-    /** 백그라운드 스레드에서 호출. 키가 없거나 못 찾으면 null */
-    fun describe(step: TransitStep): String? {
-        if (!TagoApi.isConfigured) return null
-        val boardCoord = step.points.firstOrNull() ?: return null
-        val names = step.vehicles.map { it.name }.filter { it.isNotBlank() }
-        if (names.isEmpty()) return null
-        val cacheKey = "${step.boardingStop}|${names.joinToString(",")}"
-        synchronized(cache) {
-            cache[cacheKey]?.let { if (System.currentTimeMillis() - it.at < TTL_MS) return it.text }
+    private fun <T> limited(block: () -> T): T {
+        gate.acquire()
+        try {
+            return block()
+        } finally {
+            gate.release()
         }
-        val text = try {
-            val candidates = synchronized(cache) { candidatesCache[cacheKey] } ?: TransitMatching.stopCandidates(
-                TagoApi.nearbyStops(boardCoord), step.boardingStop, boardCoord,
-            ).also { found -> synchronized(cache) { candidatesCache[cacheKey] = found } }
-            if (candidates.isEmpty()) return "실시간 정보 없음"
-            // 지난번에 맞았던 정류장을 먼저 (대전 시청처럼 같은 이름이 이웃 도시 데이터로도 있는 곳)
-            val known = synchronized(cache) { servingStop[cacheKey] }
-            val ordered = candidates.sortedBy { if (it.nodeId == known) 0 else 1 }
-            val hit = TransitMatching.firstServing(ordered, names) { TagoApi.arrivals(it) }
-            if (hit != null) synchronized(cache) { servingStop[cacheKey] = hit.first.nodeId }
-            val mine = hit?.second.orEmpty()
-            when {
-                mine.isEmpty() -> "도착 정보 없음"
-                mine.size == 1 -> "${mine[0].routeNo}번 ${Format.busArrival(mine[0])}"
-                else -> "${mine[0].routeNo}번 ${Format.busArrival(mine[0])} · 다음 ${Format.arrival(mine[1].arrivalSec)}"
+    }
+
+    /** 마지막으로 네트워크 오류가 난 시각과 그 문구 — 잠깐 동안 같은 오류로 요청을 되풀이하지 않게 */
+    @Volatile private var failedAt = 0L
+    @Volatile private var failedText: String? = null
+    private const val BACKOFF_MS = 20_000L
+
+    val resolver = BusStopResolver(
+        nearby = { at -> limited { TagoApi.nearbyStops(at) } },
+        routes = { city, no -> limited { TagoApi.routes(city, no) } },
+        routeStops = { city, id -> limited { TagoApi.routeStops(city, id) } },
+    )
+    private val board = ArrivalBoard(fetch = { stop -> limited { TagoApi.arrivals(stop) } })
+
+    /** 승차 정류장(방향까지 맞춘 것)·노선. 백그라운드 스레드에서. 키가 없으면 null, 네트워크 오류는 던진다 */
+    fun boarding(step: TransitStep): BusBoarding? = if (TagoApi.isConfigured) resolver.resolve(step) else null
+
+    /** 실시간 도착. 백그라운드 스레드에서. 키가 없거나 버스 구간이 아니면 null (오류는 문구로) */
+    fun live(step: TransitStep): LiveBus? {
+        if (!TagoApi.isConfigured || step.type != TransitStepType.BUS) return null
+        if (step.vehicles.none { it.name.isNotBlank() } || step.points.isEmpty()) return null
+        val recentFail = failedText
+        if (recentFail != null && System.currentTimeMillis() - failedAt < BACKOFF_MS) return LiveBus(recentFail)
+        return try {
+            val b = resolver.resolve(step) ?: return LiveBus("실시간 정보 없음")
+            val stop = b.stop
+            val arrivals = if (stop != null) {
+                board.at(stop)
+            } else {
+                // 노선 순서로 못 찾음: 이름·거리로 짐작한 정류장 (같은 도시의 같은 이름으로는 넘어가지 않고, 기억하지도 않음)
+                if (b.candidates.isEmpty()) return LiveBus("실시간 정보 없음")
+                TransitMatching.firstServingLines(b.candidates, b.lines) { board.at(it) }?.second.orEmpty()
             }
+            failedText = null
+            LiveBusText.of(b.lines, arrivals)
         } catch (e: ApiException) {
             ErrorLog.record("실시간 버스", e)
-            e.message ?: "실시간 정보 오류"
+            val text = e.message ?: "실시간 정보 오류"
+            failedAt = System.currentTimeMillis()
+            failedText = text
+            LiveBus(text)
         } catch (e: Exception) {
             // 예상 못 한 응답 등 — 앱이 멈추지 않게 여기서 끝낸다
             ErrorLog.record("실시간 버스", e)
-            "실시간 정보 오류"
+            LiveBus("실시간 정보 오류")
         }
-        synchronized(cache) { cache[cacheKey] = Cached(text, System.currentTimeMillis()) }
-        return text
     }
+
+    /** 목록·상세에 쓰는 문구 ("106번 3분 (2번째 전) · 다음 15분"). 키가 없거나 못 찾으면 null */
+    fun describe(step: TransitStep): String? = live(step)?.text
 }

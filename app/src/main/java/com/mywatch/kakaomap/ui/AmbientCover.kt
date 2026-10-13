@@ -47,7 +47,17 @@ class AmbientCover(
     }
 
     init {
-        activity.lifecycle.addObserver(AmbientLifecycleObserver(activity, callback))
+        if (available) activity.lifecycle.addObserver(AmbientLifecycleObserver(activity, callback))
+    }
+
+    companion object {
+        /**
+         * 저전력 화면에 쓰는 워치 공유 라이브러리(com.google.android.wearable)가 있는지 — androidx 가 확인하는 것과 같은 클래스.
+         * 없는 기기(갤럭시워치엔 늘 있음)에서 붙이면 화면을 여는 도중 멈추므로, 없으면 저전력 화면 없이 그냥 쓴다
+         */
+        val available: Boolean by lazy {
+            runCatching { Class.forName("com.google.android.wearable.compat.WearableActivityController") }.isSuccess
+        }
     }
 
     private fun show() {

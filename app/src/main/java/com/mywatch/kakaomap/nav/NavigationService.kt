@@ -54,6 +54,7 @@ import com.mywatch.kakaomap.net.IntercityPlanner
 import com.mywatch.kakaomap.net.KakaoApi
 import com.mywatch.kakaomap.net.LiveIntercitySource
 import com.mywatch.kakaomap.net.TagoApi
+import com.mywatch.kakaomap.net.WalkPaths
 import com.mywatch.kakaomap.update.UpdateInstallWorker
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -413,9 +414,10 @@ class NavigationService : Service() {
         val now = SystemClock.elapsedRealtime()
         val interval = REROUTE_INTERVAL_MS shl reroutesWithoutMatch.coerceAtMost(3)
         if (rerouteJob?.isActive == true || now - lastRerouteAt < interval || rerouteCount >= MAX_REROUTES) return
-        // 역에서 기차를 놓쳤으면 역 근처면 충분 (역 안이라 GPS 가 거침), 기차가 역을 지나쳤으면 다음 역에 서야 내릴 수 있으니
-        // 멈출 때까지 기다렸다가(시속 11km 아래) 그 자리에서 — 기지국 위치(1.5km)여도 다음 열차·버스를 찾기엔 충분
-        if (s.passedStop && s.onLongRide && (motion.speedMps ?: 0f) > LONG_RIDE_STOPPED_MPS) return
+        // 역에서 기차를 놓쳤으면 역 근처면 충분 (역 안이라 GPS 가 거침). 기차·버스가 내릴 곳을 지나쳤으면 다음 역·정류장에 서야
+        // 내릴 수 있으니 멈출 때까지 기다렸다가(시속 11km 아래) 그 자리에서 — 달리는 버스 안에서 찾으면 내리기도 전에 출발지가
+        // 뒤처진다. 기차는 기지국 위치(1.5km)여도 다음 열차·버스를 찾기엔 충분
+        if (s.passedStop && (motion.speedMps ?: 0f) > STOPPED_MPS) return
         val maxAcc = when {
             s.missedRide -> 400f
             s.onLongRide -> 1_500f
@@ -476,7 +478,10 @@ class NavigationService : Service() {
     private suspend fun rerouteTransit(from: Coord, active: ActiveRoute, s: NavState): ActiveRoute {
         val t = active.transit
         val now = System.currentTimeMillis()
-        fun show(r: TransitRoute) = RoutePresentation.activeFromTransit(r, active.place, from, navigate = true)
+        // 정류장(역)까지 걷는 길도 실제 길로 — 지도에 그려지고 남은 거리도 길 따라 (못 받으면 직선, 3초까지만 기다림)
+        suspend fun show(r: TransitRoute) = RoutePresentation.activeFromTransit(
+            WalkPaths.enrich(r, timeoutMs = 3_000), active.place, from, navigate = true,
+        )
         if (t != null && !s.missedRide) {
             val k = IntercitySplice.nextScheduled(t, s.stepIndex.coerceAtLeast(0), s.onRide)
             if (k != null) {
@@ -490,7 +495,7 @@ class NavigationService : Service() {
         if (s.missedRide || t?.steps?.any { it.type.scheduled } == true) {
             bestWithIntercity(from, active, now)?.let { return show(it) }
         }
-        return transitOrNull(from, active)?.let(::show) ?: RoutePresentation.activeFromSimple(
+        return transitOrNull(from, active)?.let { show(it) } ?: RoutePresentation.activeFromSimple(
             KakaoApi.walk(from, active.destination, active.destinationName), active.place, from, navigate = true,
         )
     }
@@ -587,7 +592,7 @@ class NavigationService : Service() {
         ensureChannel()
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_navigation)
-            .setContentTitle(getString(R.string.app_name))
+            .setContentTitle(getString(R.string.map_name))
             .setContentText(getString(R.string.nav_channel))
             .setOngoing(true)
             .setSilent(true)
@@ -614,7 +619,7 @@ class NavigationService : Service() {
         shownText = text
         val b = NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_navigation)
-            .setContentTitle(active?.let { "→ ${it.destinationName}" } ?: getString(R.string.app_name))
+            .setContentTitle(active?.let { "→ ${it.destinationName}" } ?: getString(R.string.map_name))
             .setContentText(text)
             .setCategory(NotificationCompat.CATEGORY_NAVIGATION)
             .setOngoing(true)
@@ -631,7 +636,7 @@ class NavigationService : Service() {
             .setStaticIcon(R.drawable.ic_navigation)
             .setTouchIntent(open)
             .setCategory(NotificationCompat.CATEGORY_NAVIGATION)
-            .setTitle(getString(R.string.app_name))
+            .setTitle(getString(R.string.map_name))
             .setStatus(statusOf(text))
             .build()
             .also { it.apply(applicationContext) }
@@ -666,7 +671,7 @@ class NavigationService : Service() {
     private fun statusOf(text: String): Status = Status.Builder().addTemplate(text.replace('#', '＃')).build()
 
     private fun statusText(active: ActiveRoute?, s: NavState): String {
-        if (active == null) return getString(R.string.app_name)
+        if (active == null) return getString(R.string.map_name)
         val guide = s.guide?.lineSequence()?.firstOrNull()?.ifBlank { null } ?: active.summary
         val left = s.remainingM?.takeIf { !s.arrived }?.let { " · 남은 ${Format.distance(it)}" } ?: ""
         return guide + left
@@ -718,8 +723,8 @@ class NavigationService : Service() {
         private const val PROBE_TIMEOUT_MS = 30_000L
         /** 다음 기차·버스를 찾을 때 시간표를 이만큼까지 기다린다 */
         private const val INTERCITY_TIMEOUT_MS = 20_000L
-        /** 역을 지나친 기차가 다음 역에 섰다고 볼 속도 */
-        private const val LONG_RIDE_STOPPED_MPS = 3f
+        /** 내릴 곳을 지나친 기차·버스가 다음 역·정류장에 섰다고 볼 속도 */
+        private const val STOPPED_MPS = 3f
 
         /** 서비스가 돌고 있는지 (메인 스레드에서 쓰고, 업데이트 작업이 다른 스레드에서 읽음) */
         @Volatile

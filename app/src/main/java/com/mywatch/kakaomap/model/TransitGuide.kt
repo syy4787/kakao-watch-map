@@ -13,19 +13,35 @@ object TransitGuide {
     /** 시간표 시각 → "09:58" */
     fun clock(ms: Long): String = Instant.ofEpochMilli(ms).atZone(SEOUL).format(CLOCK)
 
-    /** 구간 막대·칩에 쓰는 짧은 이름: 버스 번호 / 지하철 노선 / "KTX 105" / "고속 우등" */
+    /** 구간에서 탈 수 있는 버스 이름들 ("106", "급행2" — 같은 이름은 한 번) */
+    fun busNames(step: TransitStep): List<String> =
+        step.vehicles.map { TransitMatching.displayName(it) }.filter { it.isNotBlank() }.distinct()
+
+    /** 구간 막대·칩에 쓰는 짧은 이름: 버스 번호("106", 여럿이면 카카오처럼 "106외 4대") / 지하철 노선 / "KTX 105" / "고속 우등" */
     fun label(step: TransitStep): String = when (step.type) {
         TransitStepType.WALK -> "도보"
-        TransitStepType.BUS -> step.vehicles.joinToString("/") { it.name }.ifBlank { "버스" }
+        TransitStepType.BUS -> busNames(step).let { n ->
+            when (n.size) {
+                0 -> "버스"
+                1 -> n[0]
+                else -> "${n[0]}외 ${n.size - 1}대"
+            }
+        }
         TransitStepType.SUBWAY -> step.vehicles.firstOrNull()?.name?.ifBlank { null } ?: "지하철"
         TransitStepType.TRAIN -> step.vehicles.firstOrNull()?.let { "${it.type} ${it.name}".trim() }?.ifBlank { null } ?: "기차"
         TransitStepType.COACH -> step.vehicles.firstOrNull()?.let { "${it.type} ${it.name}".trim() }?.ifBlank { null } ?: "고속버스"
         TransitStepType.OTHER -> "기타"
     }
 
-    /** 안내 배너에 쓰는 탈 것 이름: "617번", "대전 1호선", "KTX 105", "고속버스 우등" (탈 것이 아니면 null) */
+    /** 안내 배너에 쓰는 탈 것 이름: "617번", "105번 외 5대", "대전 1호선", "KTX 105", "고속버스 우등" (탈 것이 아니면 null) */
     fun lineName(step: TransitStep): String? = when (step.type) {
-        TransitStepType.BUS -> label(step).let { if (it == "버스") it else "${it}번" }
+        TransitStepType.BUS -> busNames(step).let { n ->
+            when (n.size) {
+                0 -> "버스"
+                1 -> "${n[0]}번"
+                else -> "${n[0]}번 외 ${n.size - 1}대"
+            }
+        }
         TransitStepType.SUBWAY, TransitStepType.TRAIN -> label(step)
         TransitStepType.COACH -> step.vehicles.firstOrNull()
             ?.let { "${it.type.ifBlank { "고속" }}버스 ${it.name}".trim() } ?: "고속버스"
@@ -50,6 +66,16 @@ object TransitGuide {
         return boardText(pick)
     }
 
+    /** 노선이 여럿인 버스 구간의 전체 목록 ("105 · 115 · 912 · 117 · 911 · 1", 하나뿐이면 null) — 경로 상세용 */
+    fun allLines(step: TransitStep): String? = busNames(step).takeIf { it.size > 1 }?.joinToString(" · ")
+
+    /**
+     * 경로 목록 카드에 실시간 도착을 붙일 구간: 첫 탈 것이 시내 버스일 때만 (카카오맵처럼). 지하철을 먼저 타면
+     * 갈아탈 버스의 '지금' 도착 정보는 그 정류장에 닿을 때와 상관없어 붙이지 않는다
+     */
+    fun listLiveIndex(route: TransitRoute): Int? =
+        route.steps.indexOfFirst { it.type.ride }.takeIf { it >= 0 && route.steps[it].type == TransitStepType.BUS }
+
     /** 실시간 도착을 붙일 버스 구간 번호 — 기차·고속버스를 타기 전 버스만 (내려서 탈 버스는 몇 시간 뒤라 지금 도착 정보는 엉뚱함) */
     fun liveBusIndexes(route: TransitRoute): List<Int> {
         val firstScheduled = route.steps.indexOfFirst { it.type.scheduled }.let { if (it < 0) route.steps.size else it }
@@ -62,7 +88,13 @@ object TransitGuide {
         return when (step.type) {
             TransitStepType.WALK -> if (step.approx) step.guidance
             else "도보 ${Format.duration(step.timeSec)} · ${Format.distance(step.distanceM)}"
-            TransitStepType.BUS -> label(step).let { if (it == "버스") "버스 · $stops" else "${it}번 버스 · $stops" }
+            TransitStepType.BUS -> busNames(step).let { n ->
+                when (n.size) {
+                    0 -> "버스 · $stops"
+                    1 -> "${n[0]}번 버스 · $stops"
+                    else -> "${lineName(step)} · $stops"
+                }
+            }
             TransitStepType.SUBWAY -> "${label(step)} · $stops"
             TransitStepType.TRAIN, TransitStepType.COACH -> "${lineName(step)} · $stops"
             TransitStepType.OTHER -> step.guidance

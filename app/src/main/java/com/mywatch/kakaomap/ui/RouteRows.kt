@@ -46,10 +46,12 @@ object RouteRows {
                     Format.distance(s.distanceM),
                     key = "s$i",
                 )
+                // 칩은 짧게("105외 5대"), 탈 수 있는 버스는 모두 아래 줄에 (카카오맵 상세처럼)
                 TransitStepType.BUS -> Row.Step(
                     color, R.drawable.ic_bus, RoutePresentation.stepLabel(s),
                     "${s.boardingStop ?: "정류장"} 승차",
-                    "${s.stopCount}개 정류장 · ${Format.duration(s.timeSec)}\n${s.alightingStop ?: ""} 하차",
+                    "${s.stopCount}개 정류장 · ${Format.duration(s.timeSec)}\n${s.alightingStop ?: ""} 하차" +
+                        (TransitGuide.allLines(s)?.let { "\n$it" } ?: ""),
                     live = if (i in live) "실시간 도착 확인 중…" else null,
                     key = "s$i",
                 )

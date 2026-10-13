@@ -12,6 +12,7 @@ import com.mywatch.kakaomap.model.Vehicle
 import com.mywatch.kakaomap.nav.NavEngine
 import com.mywatch.kakaomap.ui.NavOverlayText
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -133,7 +134,16 @@ class CompactOverlayTest {
             vehicles = names.map { Vehicle("일반", it) }, points = listOf(stop, busEnd),
         )
         assertEquals("617번 · 시청역 승차", TransitGuide.boardText(bus("617")))
-        assertEquals("617/618번 · 시청역 승차", TransitGuide.boardText(bus("617", "618")))
+        // 여러 노선 중 아무거나 타도 되는 구간: 카카오맵처럼 "617번 외 1대" (칩은 "617외 1대", 상세엔 전부)
+        assertEquals("617번 외 1대 · 시청역 승차", TransitGuide.boardText(bus("617", "618")))
+        assertEquals("617외 1대", TransitGuide.label(bus("617", "618")))
+        assertEquals("105번 외 5대", TransitGuide.lineName(bus("105", "115", "912", "117", "911", "1")))
+        assertEquals("105 · 115 · 912 · 117 · 911 · 1", TransitGuide.allLines(bus("105", "115", "912", "117", "911", "1")))
+        assertNull(TransitGuide.allLines(bus("617")))
+        // 같은 번호의 두 노선(일반 607·농어촌 607)은 한 번만
+        assertEquals("607번", TransitGuide.lineName(bus("607").copy(vehicles = listOf(Vehicle("일반", "607"), Vehicle("농어촌", "607")))))
+        // 대전 급행버스는 정류장 표지처럼 '급행2'
+        assertEquals("급행2번", TransitGuide.lineName(bus("2").copy(vehicles = listOf(Vehicle("급행", "2")))))
         // 번호를 모르는 버스는 '버스번'이 아니라 '버스'
         assertEquals("버스 · 시청역 승차", TransitGuide.boardText(bus()))
         val subway = TransitStep(

@@ -89,6 +89,7 @@ jobs:
           SECRETS_FILE: ${{ runner.temp }}/secrets.properties
           KAKAO_REST_API_KEY: ${{ secrets.KAKAO_REST_API_KEY }}
           TAGO_SERVICE_KEY: ${{ secrets.TAGO_SERVICE_KEY }}
+          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
         run: |
           RELEASE_KEY_PASSWORD=$(bash .github/scripts/signing-password.sh)
           export RELEASE_KEY_PASSWORD

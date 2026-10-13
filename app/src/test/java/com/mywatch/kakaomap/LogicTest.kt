@@ -9,6 +9,7 @@ import com.mywatch.kakaomap.model.GuideStep
 import com.mywatch.kakaomap.model.RouteProgress
 import com.mywatch.kakaomap.model.TransitMatching
 import com.mywatch.kakaomap.model.TransitStep
+import com.mywatch.kakaomap.model.TransitStepType
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -31,7 +32,12 @@ class LogicTest {
         assertEquals("1,500원", Format.fare(1500))
         assertEquals("환승 없음", Format.transfers(0))
         assertEquals("곧 도착", Format.arrival(30))
-        assertEquals("3분 후 (2정거장 전)", Format.busArrival(BusArrival("102", "", 200, 2)))
+        // 실시간 버스: 카카오맵 표기 "3분 (2번째 전)", 1분 안이면 "곧 도착"
+        assertEquals("3분 (2번째 전)", Format.busArrival(BusArrival("102", "", 200, 2)))
+        assertEquals("곧 도착", Format.busArrival(BusArrival("102", "", 45, 1)))
+        assertEquals("7분", Format.busArrival(BusArrival("102", "", 430, 0)))
+        assertEquals("1,500~3,150원", Format.fare(1500, 3150))
+        assertEquals("1,500원", Format.fare(1500, null))
     }
 
     @Test
@@ -104,5 +110,22 @@ class LogicTest {
     fun parsesStopPairFromGuidance() {
         assertEquals("판교역동편" to "성남시청전면", TransitStep.parseStopPair("마을 76 (판교역동편 > 성남시청전면)"))
         assertNull(TransitStep.parseStopPair("도보 이동"))
+        // 이름 안의 괄호 (실제 대전 응답의 '유성온천(충남대.목원대)') — 예전엔 승차 정류장이 "충남대.목원대)"
+        assertEquals("유성온천(충남대.목원대)" to "대전역", TransitStep.parseStopPair("1호선 (유성온천(충남대.목원대) > 대전역)"))
+        assertEquals("대전역" to "유성온천(충남대.목원대)", TransitStep.parseStopPair("1호선 (대전역 > 유성온천(충남대.목원대))"))
+        assertEquals("갤러리아백화점(타임월드)" to "카이스트", TransitStep.parseStopPair("일반 604 (갤러리아백화점(타임월드) > 카이스트)"))
+        assertNull(TransitStep.parseStopPair("유성온천역7번출구정류장까지 도보로 이동 (7번 출구)"))
+    }
+
+    @Test
+    fun boardingAndAlightingStopsComeFromTheStopList() {
+        // 정류장 목록이 있으면 그 처음·끝 (안내문을 읽지 않아도 됨), 없으면 안내문에서
+        val s = TransitStep(
+            TransitStepType.SUBWAY, "1호선 (유성온천(충남대.목원대) > 대전역)", 11400, 1380,
+            stops = listOf("유성온천(충남대.목원대)", "구암", "대전역"), vehicles = emptyList(), points = emptyList(),
+        )
+        assertEquals("유성온천(충남대.목원대)", s.boardingStop)
+        assertEquals("대전역", s.alightingStop)
+        assertEquals("유성온천(충남대.목원대)", s.copy(stops = emptyList()).boardingStop)
     }
 }

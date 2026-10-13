@@ -5,6 +5,7 @@ import com.mywatch.kakaomap.model.Coord
 import com.mywatch.kakaomap.model.Format
 import com.mywatch.kakaomap.model.Geo
 import com.mywatch.kakaomap.model.GuideStep
+import com.mywatch.kakaomap.model.LiveBus
 import com.mywatch.kakaomap.model.LongRide
 import com.mywatch.kakaomap.model.Maneuver
 import com.mywatch.kakaomap.model.Maneuvers
@@ -28,6 +29,8 @@ enum class NavEvent {
     ACTION_SOON,
     /** 탈 정류장·역이 30m 앞 */
     BOARD_SOON,
+    /** 타려는 시내 버스가 2분 안에 옴 (실시간 도착 — 정류장에 있거나 150m 안일 때 한 번) */
+    BUS_ARRIVING,
     /** 내릴 곳이 가까움 */
     ALIGHT_SOON,
     /** 내릴 정류장을 지나침 */
@@ -84,6 +87,10 @@ data class NavState(
     val bannerSub: String? = null,
     /** 지도 배너: 왼쪽 아이콘 아래 거리 (없으면 숨김) */
     val bannerDistM: Int? = null,
+    /** 타러 가거나 기다리는 탈 것 구간 (실시간 버스 도착을 물을 곳). 타는 중·도착 뒤엔 null */
+    val boardingStep: Int? = null,
+    /** 시내 버스 정류장에서 기다리는 중 (위치는 5초 간격이면 충분 — 탔는지는 노선을 따라 60m 넘게 가야 안다) */
+    val waitingBus: Boolean = false,
 )
 
 /**
@@ -93,7 +100,11 @@ data class NavState(
  * GPS 는 서 있어도 몇 m 씩 흔들리고, 빌딩 사이에선 수십 m 튀므로 판단마다 '되돌림 방지'를 둔다:
  *  · 경로를 따라 갑자기 너무 멀리 앞서면(걷는 속도로 못 갈 거리) 두 번 연속일 때만 인정 — 튄 위치로 구간을 건너뛰지 않게
  *  · 구간은 앞으로만 넘어가며, 뒤로 가는 것은 경로를 따라 20m 넘게 되돌아간 게 두 번 연속일 때만 인정
- *  · 버스·지하철은 정류장에서 노선을 따라 60m 넘게 간 위치가 두 번 연속일 때 '탔다'고 본다 (기다리는 동안 흔들림 무시)
+ *  · 버스·지하철은 정류장에서 노선을 따라 60m 넘게 간 위치가 두 번 연속일 때 '탔다'고 본다 (기다리는 동안 흔들림 무시).
+ *    시내 버스는 차 속도(8초 넘는 구간의 평균 3m/s 넘게)일 때만 — 버스 길을 따라 걸어서 정류장을 지나쳐도 탄 것이 아니다
+ *  · 시내 버스에서 내린 것은 내릴 곳에서 40초 넘게 머물거나 버스가 온 길을 걸어서 되돌아갈 때 — 차 속도로 계속 가면
+ *    내려서 걸을 길(같은 길)을 따라가도 버스 구간에 붙여 두어 '정류장 지남'을 알리고 '도착'으로 오인하지 않는다.
+ *    내렸다고 본 뒤 정류장 300m 안에서 다시 차 속도로 멀어지면 되돌린다 (정류장에 오래 선 버스에서 안 내림)
  *  · 이탈·도착·하차 알림은 연속 두 번(경로에 오르기 전 이탈은 세 번) 확인, 갈림길을 지나쳐 계속 가면 30m 쯤에서 이탈
  *  · 정확도가 나쁜 위치(50m 초과, 지하철 안은 400m 초과)는 버리고, 도착 판단은 30m 이내 정확도에서만
  * 도보·자전거는 카카오 안내 문구와 경로 모양으로 '다음에 할 일'(좌회전·횡단보도 …)을 정해 미리(도보 35m·자전거 70m 전) 알리고,
@@ -163,6 +174,24 @@ class NavEngine(
     private var lastRawAt: Long? = null
     private var speedMps: Double? = null
 
+    // 시내 버스 타고 내리기 — 위치만으로는 버스 길과 걸을 길이 겹칠 때 헷갈려서 속도·머문 시간도 본다
+    /** 최근 위치 자취 (부팅 후 ms, 좌표) — 8초 넘는 구간의 평균 속도로 차/걷기를 가른다 (1초 GPS 잡음에 덜 흔들림) */
+    private val trail = ArrayDeque<Pair<Long, Coord>>()
+    /** 이미 내린 시내 버스 구간 — 그 구간과 그 앞으로는 다시 찾지 않는다 */
+    private var rideDone = -1
+    /** '내렸다'고 본 버스 구간과 그 전의 [rideDone] (정류장 근처에서 차 속도로 다시 멀어지면 되돌린다) */
+    private var gotOff = -1
+    private var gotOffPrev = -1
+    private var undoCount = 0
+    /** 탄 버스의 내릴 곳 30m 안에 온 뒤 가장 가까웠던 남은 거리 / 거기서 거의 멈춰 있기 시작한 시각 */
+    private var endClosest = Int.MAX_VALUE
+    private var endSlowSince: Long? = null
+    /** 실시간 버스 도착 (탈 것 구간 → 문구)과 2분 안 도착 진동을 한 구간 */
+    private val live = HashMap<Int, LiveBus>()
+    private val liveAlerted = HashSet<Int>()
+    /** 마지막으로 보인 승차 안내 (탈 것 구간, 정류장까지 m) — 실시간 도착이 오면 그 문구만 다시 만든다 */
+    private var lastBoard: Pair<Int, Int>? = null
+
     private var arrivedAt: Long? = null
     private var farAwayCount = 0
     /** 탈 것 둘 이상 앞 구간으로 건너뛴 위치가 이어지는지 (튄 위치 거르기) */
@@ -170,7 +199,10 @@ class NavEngine(
     private var farJumpCount = 0
 
     var state = initialSay().let {
-        NavState(routeVersion = routeVersion, guide = it?.guide, icon = initialIcon(), bannerTitle = it?.title, bannerSub = it?.sub, bannerDistM = it?.distM)
+        NavState(
+            routeVersion = routeVersion, guide = it?.guide, icon = initialIcon(), bannerTitle = it?.title, bannerSub = it?.sub,
+            bannerDistM = it?.distM, boardingStep = initialBoarding(),
+        )
     }
         private set
 
@@ -202,6 +234,8 @@ class NavEngine(
         if (state.missedRide) return emptyList()
 
         val coarse = acc > MAX_USABLE_ACCURACY_M
+        /** 8초 넘는 구간의 평균 속도 (모르면 null — 시각 없는 위치) */
+        val v = steadySpeed()
         var p: RouteProgress
         if (state.onLongRide) {
             // ── 기차·고속버스 타는 중: 그 구간에 붙여 둔다. 선로가 역과 역을 이은 직선에서 수 km 벗어나 걸어온 길·내려서 갈 길 쪽이
@@ -213,7 +247,11 @@ class NavEngine(
                 RouteProgress.locate(c, steps, fromSeg = segStart[ri])?.let { p = it }
             }
         } else {
-            val searchFrom = if (state.offRoute) 0 else (lastSeg - BACK_SEGS).coerceAtLeast(0)
+            // 버스는 거꾸로 가지 않는다: 이미 내린 버스 구간과 그 앞, 지금 탄 버스 구간 앞(걸어온 길)으로는 다시 찾지 않는다
+            val floor = max(if (rideDone >= 0) segStart[rideDone + 1] else 0, cityRide()?.let { segStart[it] } ?: 0)
+            var searchFrom = if (state.offRoute) floor else max((lastSeg - BACK_SEGS).coerceAtLeast(0), floor)
+            // 정류장에서 기다리다 차 속도로 움직임 → 버스가 떠남: 걸어온 길(버스가 되짚어 가는 길 옆)이 아니라 그 버스 구간으로
+            waitingCityRide()?.let { k -> if (v != null && v > VEHICLE_MPS) searchFrom = max(searchFrom, segStart[k]) }
             p = RouteProgress.locate(c, steps, fromSeg = searchFrom) ?: return emptyList()
             // 지하철·기차 안과 승강장의 거친 위치(기지국)로는 지금 구간(또는 기다리는 탈 것) 밖으로 옮겨 가지 않는다
             if ((onSubway || longIdx != null) && coarse && p.stepIndex != state.stepIndex &&
@@ -225,6 +263,34 @@ class NavEngine(
                 Geo.distanceM(c, steps[longIdx].points.first()) >= boardProgress(steps[longIdx]) + (if (coarse) acc else 0f)
             ) {
                 p = rideProgress(c, longIdx)
+            }
+            // ── 시내 버스를 타고 가다 내릴 곳 너머 '도보' 구간 위로 잡혀도 아직 차 속도면 내리지 않은 것 — 버스 구간에 붙여 둔다
+            //    (그래야 정류장 지남을 알고, 내려서 걸을 길을 따라 버스가 계속 가도 '도착'으로 오인하지 않는다)
+            //    같은 정류장에서 갈아탈 버스 길의 첫머리(60m 안)에 잡혀도 아직 이 버스 — 내렸다고 볼 때까지(머묾·되돌아감) 여기에 둔다
+            //    (정류장에서 흔들리는 위치로 '514번 환승'과 '514번 승차'가 번갈아 바뀌지 않게)
+            cityRide()?.let { r ->
+                val q = p
+                val fastOnWalk = q.stepIndex > r && !steps[q.stepIndex].ride && v != null && v > VEHICLE_MPS
+                val nextBusStart = q.stepIndex == r + 1 && steps[q.stepIndex].ride && stepLen[q.stepIndex] - q.toStepEndM < BOARD_PROGRESS_M
+                if (fastOnWalk || nextBusStart) cityRideProgress(c, r)?.let { p = it }
+            }
+            // ── '내렸다'고 본 뒤 정류장 300m 안에서 차 속도로 멀어짐(다음 버스 길 위가 아니면) → 안 내린 것: 그 버스 구간으로 되돌린다
+            val off = gotOff
+            if (off >= 0 && rideDone == off && v != null && v > VEHICLE_MPS && known && !coarse &&
+                Geo.distanceM(c, steps[off].points.last()) <= UNDO_M &&
+                (!steps[p.stepIndex].ride || p.offRouteM > UNDO_OFF_M)
+            ) {
+                if (++undoCount >= CONFIRM_FIXES) {
+                    rideDone = gotOffPrev
+                    gotOff = -1
+                    undoCount = 0
+                    cityRideProgress(c, off)?.let { p = it }
+                    maxStep = off
+                    bestRemaining = p.remainingM
+                    lastSeg = p.segIndex
+                }
+            } else {
+                undoCount = 0
             }
         }
 
@@ -239,7 +305,27 @@ class NavEngine(
             p.toStepEndM <= PASSED_END_M && p.offRouteM in (ALIGHTED_OFF_M + 1)..ALIGHTED_MAX_OFF_M &&
             (speedMps ?: 0.0) < WALKING_MAX_MPS
         ) {
+            if (isCityBus(p.stepIndex)) markGotOff(p.stepIndex)
             RouteProgress.locate(c, steps, fromSeg = segStart[p.stepIndex + 1])?.let { p = it }
+        }
+        // ── 시내 버스에서 내림: 내릴 곳 30m 안에 왔다가 (가) 40초 넘게 거의 멈춰 있거나 (나) 버스가 온 길을 걸어서 되돌아감
+        //    → 그 버스 구간은 끝. 같은 정류장에서 갈아탈 버스면 그 버스 '승차' 안내로, 도보면 도보 구간으로
+        cityRide()?.let { r ->
+            if (p.stepIndex == r && r < steps.lastIndex && known && !coarse) {
+                if (p.toStepEndM <= PASSED_END_M) endClosest = min(endClosest, p.toStepEndM)
+                val reached = endClosest <= PASSED_END_M
+                endSlowSince = if (reached && v != null && v < STAND_MPS && p.toStepEndM <= PASSED_END_M) endSlowSince ?: elapsedMs else null
+                val dwell = elapsedMs != null && endSlowSince?.let { elapsedMs - it >= ALIGHT_DWELL_MS } == true
+                val back = reached && v != null && v < WALKING_MAX_MPS && p.toStepEndM >= endClosest + BACK_ALIGHT_M
+                if (dwell || back) {
+                    markGotOff(r)
+                    lastSeg = segStart[r + 1]
+                    RouteProgress.locate(c, steps, fromSeg = segStart[r + 1])?.let { p = it }
+                }
+            }
+            // 내릴 곳 근처에서 위치가 다음 구간으로 넘어갔으면(내려서 걷기 시작 등) 그 버스 구간은 끝 —
+            // 차 속도로 다시 멀어지면 되돌릴 수 있게 기억 (멀리서 튄 위치 하나로는 끝내지 않음)
+            if (p.stepIndex > r && Geo.distanceM(c, steps[r].points.last()) <= GOT_OFF_NEAR_M) markGotOff(r)
         }
         val step = steps[p.stepIndex]
 
@@ -247,13 +333,17 @@ class NavEngine(
         val nearDestination = Geo.distanceM(c, destination) <= ARRIVE_M + min(acc, 15f) &&
             (p.stepIndex == steps.lastIndex || p.remainingM <= ARRIVE_REMAINING_M)
         val atRouteEnd = p.remainingM <= ARRIVE_M && p.offRouteM <= ARRIVE_END_OFF_M
-        if (precise && (nearDestination || atRouteEnd)) {
+        // 버스를 타고 차 속도로 지나가는 중엔 '도착'이 아니다 (내릴 곳을 지나쳐 목적지 앞을 지나는 버스)
+        val ridingFast = v != null && v > VEHICLE_MPS &&
+            (cityRide() != null || (gotOff >= 0 && Geo.distanceM(c, steps[gotOff].points.last()) <= UNDO_M))
+        if (precise && (nearDestination || atRouteEnd) && !ridingFast) {
             if (++arriveCount >= CONFIRM_FIXES) {
                 arrivedAt = elapsedMs
                 state = state.copy(
                     stepIndex = p.stepIndex, remainingM = 0, arrived = true, offRoute = false, rerouting = false,
                     toStepEndM = 0, toActionM = 0, onRide = false, onSubway = false, onLongRide = false, action = null,
                     icon = NavIcon.FLAG, passedStop = false, waitingLongRide = false, longRideAtMs = null,
+                    boardingStep = null, waitingBus = false,
                 ).with(Say(ARRIVED_TEXT, "도착했어요", destinationName, null))
                 return listOf(NavEvent.ARRIVED)
             }
@@ -352,7 +442,9 @@ class NavEngine(
                 }
             } else {
                 val progress = stepLen[p.stepIndex] - p.toStepEndM
-                if (progress < BOARD_PROGRESS_M + (if (coarse) acc else 0f)) {
+                // 걷는 속도로 버스 길을 따라 정류장을 지나쳐 가는 것은 탄 것이 아니다 (400m 넘게 갔으면 그냥 인정)
+                val walkingPast = isCityBus(p.stepIndex) && v != null && v < BOARD_MIN_MPS && progress < BOARD_WALK_LIMIT_M
+                if (progress < BOARD_PROGRESS_M + (if (coarse) acc else 0f) || walkingPast) {
                     boardCount = 0
                     return holdAtStop(p)
                 }
@@ -416,7 +508,8 @@ class NavEngine(
             // 기차·고속버스 역에서 기다리는 중: 출발 3분 전까지는 저전력 위치로
             waitingLongRide = ride.longRide != null, longRideAtMs = if (ride.longRide != null) ride.departAtMs else null,
             action = null, icon = vehicleIcon(ride), passedStop = false,
-        ).with(boardSay(ride, 0))
+            boardingStep = rideIdx, waitingBus = isCityBus(rideIdx),
+        ).with(boardSay(rideIdx, 0))
         return events
     }
 
@@ -462,15 +555,18 @@ class NavEngine(
             val left = stopAlong[p.stepIndex]?.count { it > progress + STOP_AHEAD_M }
             val soon = p.stepIndex in alightArmed && (if (left != null) left <= 1 else p.toStepEndM <= limit)
             if (soon) {
-                val title = when (left) {
-                    null -> "곧 하차"
-                    1 -> "다음 정류장 하차"
+                // 같은 정류장에서 갈아탈 버스가 있으면 내릴 곳에서 카카오맵처럼 "514번 환승"
+                val transfer = steps.getOrNull(p.stepIndex + 1)?.takeIf { it.ride }?.line
+                val atStopNow = if (left != null) left == 0 else p.toStepEndM <= PASSED_END_M
+                val title = when {
+                    transfer != null && atStopNow -> "$transfer 환승"
+                    left == null -> "곧 하차"
+                    left == 1 -> "다음 정류장 하차"
                     else -> "이번 정류장 하차"
                 }
-                say = Say(
-                    (cur.alight?.let { "곧 하차 · $it" } ?: "곧 하차") + "\n${Format.distance(p.toStepEndM)} 남음",
-                    title, cur.alight, p.toStepEndM,
-                )
+                val first = if (transfer != null && atStopNow) "$transfer 환승" + (cur.alight?.let { " · $it" } ?: "")
+                else cur.alight?.let { "곧 하차 · $it" } ?: "곧 하차"
+                say = Say(first + "\n${Format.distance(p.toStepEndM)} 남음", title, cur.alight, p.toStepEndM)
                 val alightAcc = if (cur.subway) SUBWAY_DECISION_ACCURACY_M else DECISION_ACCURACY_M
                 if (acc <= alightAcc && ++alightCount >= CONFIRM_FIXES && alightAlerted.add(p.stepIndex)) {
                     events += NavEvent.ALIGHT_SOON
@@ -490,7 +586,7 @@ class NavEngine(
                 // 정류장·역에 닿은 뒤엔 흔들리는 위치(지하 기지국 위치 포함)로 '120m 후 승차'처럼 바뀌지 않게
                 val coarse = acc > MAX_USABLE_ACCURACY_M
                 val d = if (p.stepIndex + 1 in atStop && (p.toStepEndM <= BOARD_SOON_M || coarse)) 0 else p.toStepEndM
-                say = if (next.line != null) boardSay(next, d) else legacySay(p)
+                say = if (next.line != null) boardSay(p.stepIndex + 1, d) else legacySay(p)
                 icon = vehicleIcon(next)
             } else if (turnByTurn) {
                 // ── 도보·자전거: 직진 구간은 건너뛰고 다음에 할 일
@@ -535,6 +631,8 @@ class NavEngine(
             action = action,
             icon = if (state.rerouting) NavIcon.WARNING else icon,
             passedStop = false,
+            boardingStep = if (!cur.ride && steps.getOrNull(p.stepIndex + 1)?.ride == true) p.stepIndex + 1 else null,
+            waitingBus = false,
         ).with(say)
         return events
     }
@@ -587,7 +685,9 @@ class NavEngine(
         return Say(if (sub.isEmpty()) main else "$main\n$sub", if (near) "지금 $phrase" else phrase, bannerSub, if (near) null else dK)
     }
 
-    private fun boardSay(ride: GuideStep, d: Int): Say {
+    private fun boardSay(idx: Int, d: Int): Say {
+        val ride = steps[idx]
+        lastBoard = idx to d
         val name = ride.line ?: (if (ride.subway) "지하철" else "버스")
         val near = d <= nowM
         val departs = ride.departAtMs
@@ -601,8 +701,28 @@ class NavEngine(
             else "${Format.distance(d)} 후 $name 승차\n" + listOfNotNull(ride.board, time + wait).joinToString(" ")
             return Say(main, "$name 승차", if (near) time else ride.board ?: time, if (near) null else d)
         }
-        val main = if (near) "$name 승차" else "${Format.distance(d)} 후 $name 승차"
-        return Say(main + (ride.board?.let { "\n$it" } ?: ""), "$name 승차", ride.board, if (near) null else d)
+        // 시내 버스: 실시간 도착을 붙인다 (카카오맵 길안내처럼) — 정류장에선 둘째 줄에 도착만, 가는 중엔 정류장 이름과 함께
+        val bus = live[idx]?.short
+        val main = (if (near) "$name 승차" else "${Format.distance(d)} 후 $name 승차") + (bus?.let { " · $it" } ?: "")
+        val sub = if (near) bus ?: ride.board else listOfNotNull(ride.board, bus).joinToString(" · ").ifEmpty { null }
+        return Say(main + (ride.board?.let { "\n$it" } ?: ""), "$name 승차", sub, if (near) null else d)
+    }
+
+    /**
+     * 타려는 시내 버스 구간 [stepIndex] 의 실시간 도착 (안내 중 45초마다 받아 넣는다, 못 받았으면 null).
+     * 지금 그 버스 승차 안내 중이면 문구를 바로 고치고, 2분 안에 오는데 정류장에 있거나 150m 안이면 한 번 진동
+     */
+    fun setLiveArrival(stepIndex: Int, bus: LiveBus?): List<NavEvent> {
+        if (!isCityBus(stepIndex)) return emptyList()
+        if (bus?.short == null) live.remove(stepIndex) else live[stepIndex] = bus
+        val shown = lastBoard
+        val showing = shown != null && shown.first == stepIndex && state.boardingStep == stepIndex && !state.onRide &&
+            !state.arrived && !state.offRoute && !state.rerouting && !state.passedStop && !state.missedRide
+        if (!showing) return emptyList()
+        state = state.with(boardSay(stepIndex, shown!!.second))
+        val sec = bus?.takeIf { it.short != null }?.soonestSec ?: return emptyList()
+        val close = stepIndex in atStop || shown.second <= BUS_SOON_NEAR_M
+        return if (sec in 0..BUS_SOON_SEC && close && liveAlerted.add(stepIndex)) listOf(NavEvent.BUS_ARRIVING) else emptyList()
     }
 
     /**
@@ -654,10 +774,17 @@ class NavEngine(
             val sub = p.to?.let { "$it 방향" } ?: p.road
             return Say(if (sub == null) "출발" else "출발\n$sub", "출발", sub, null)
         }
-        if (s0.ride) return if (s0.line != null) boardSay(s0, 0) else s0.text.ifBlank { null }?.let { Say(it, it, null, null) }
+        if (s0.ride) return if (s0.line != null) boardSay(0, 0) else s0.text.ifBlank { null }?.let { Say(it, it, null, null) }
         val next = steps.getOrNull(1)
-        if (next != null && next.ride && next.line != null) return boardSay(next, stepLen[0].toInt())
+        if (next != null && next.ride && next.line != null) return boardSay(1, stepLen[0].toInt())
         return s0.text.ifBlank { null }?.let { Say(it, it, null, null) }
+    }
+
+    /** 처음 타러 갈 탈 것 구간 (첫 구간이 탈 것이거나, 첫 도보 다음이 탈 것일 때) */
+    private fun initialBoarding(): Int? {
+        val s0 = steps.firstOrNull() ?: return null
+        if (s0.ride) return 0
+        return if (steps.getOrNull(1)?.ride == true) 1 else null
     }
 
     private fun initialIcon(): NavIcon {
@@ -729,6 +856,43 @@ class NavEngine(
         }
         lastRaw = c
         lastRawAt = elapsedMs
+        trail.addLast(elapsedMs to c)
+        while (trail.size > 1 && elapsedMs - trail.first().first > TRAIL_MS) trail.removeFirst()
+    }
+
+    /** 8초 넘게 떨어진 두 위치로 잰 평균 속도 m/s (모르면 null) */
+    private fun steadySpeed(): Double? {
+        val last = trail.lastOrNull() ?: return null
+        val ref = trail.lastOrNull { last.first - it.first >= STEADY_WINDOW_MS } ?: return null
+        return Geo.distanceM(ref.second, last.second) / ((last.first - ref.first) / 1000.0)
+    }
+
+    /** 시내 버스 구간인지 (지하철·기차·고속버스 제외) */
+    private fun isCityBus(i: Int): Boolean = i in steps.indices && steps[i].ride && steps[i].longRide == null && !steps[i].subway
+
+    /** 지금 타고 있는 시내 버스 구간 */
+    private fun cityRide(): Int? = state.stepIndex.takeIf { state.onRide && isCityBus(it) }
+
+    /** 정류장에 닿아 기다리던(아직 안 탄) 시내 버스 구간 */
+    private fun waitingCityRide(): Int? =
+        ((maxStep + 1).coerceAtLeast(0) until steps.size).firstOrNull { steps[it].ride }?.takeIf { it in atStop && isCityBus(it) }
+
+    /** 버스 구간 [r] 위로만 본 진행 (그 뒤 구간은 남은 거리에만 더함) */
+    private fun cityRideProgress(c: Coord, r: Int): RouteProgress? {
+        val p = RouteProgress.locate(c, steps.take(r + 1), fromSeg = segStart[r]) ?: return null
+        val rest = ((r + 1) until steps.size).sumOf { stepLen[it] }.toInt()
+        return p.copy(remainingM = p.remainingM + rest)
+    }
+
+    /** 버스 구간 [r] 에서 내렸다 — 그 구간으로는 다시 찾지 않는다 (차 속도로 다시 멀어지면 되돌림) */
+    private fun markGotOff(r: Int) {
+        if (rideDone == r) return
+        gotOffPrev = rideDone
+        rideDone = r
+        gotOff = r
+        undoCount = 0
+        endClosest = Int.MAX_VALUE
+        endSlowSince = null
     }
 
     // ───────── 기차·고속버스 ─────────
@@ -830,8 +994,8 @@ class NavEngine(
         state = state.copy(
             stepIndex = (k - 1).coerceAtLeast(0), offRoute = false, matched = true, toStepEndM = d, toActionM = d,
             onRide = false, onSubway = false, onLongRide = false, waitingLongRide = false, longRideAtMs = null,
-            action = null, icon = vehicleIcon(ride), passedStop = false,
-        ).with(boardSay(ride, d))
+            action = null, icon = vehicleIcon(ride), passedStop = false, boardingStep = k, waitingBus = false,
+        ).with(boardSay(k, d))
         return emptyList()
     }
 
@@ -891,6 +1055,25 @@ class NavEngine(
         /** 이만큼 앞에 있는 정류장부터 '남은 정류장'으로 센다 (정류장에 서 있을 땐 그 정류장은 뺌) */
         private const val STOP_AHEAD_M = 15.0
         private const val FAR_JUMP_CONFIRM = 3
+        /** 속도는 이만큼 넘게 떨어진 두 위치로 잰다 (1초 간격 GPS 잡음 σ 4m 면 바로 잰 속도는 ±5m/s 흔들림) */
+        private const val STEADY_WINDOW_MS = 8_000L
+        private const val TRAIL_MS = 40_000L
+        /** 내릴 곳에서 이보다 느리게 이만큼 머물면 내린 것 (버스는 정류장에 보통 10~30초 선다) */
+        private const val STAND_MPS = 2.0
+        private const val ALIGHT_DWELL_MS = 40_000L
+        /** 내릴 곳에서 버스가 온 길로 이만큼 걸어서 되돌아가면 내린 것 */
+        private const val BACK_ALIGHT_M = 20
+        /** 시내 버스는 이 속도(8초 평균, 시속 11km)를 넘어야 '탔다' — 버스 길을 따라 걷는 것과 구별 */
+        private const val BOARD_MIN_MPS = 3.0
+        private const val BOARD_WALK_LIMIT_M = 400.0
+        /** '내렸다'고 본 뒤 정류장에서 이만큼 안에서 차 속도로 멀어지면 되돌린다 (다음 버스 길에서 이만큼 넘게 떨어져 있을 때) */
+        private const val UNDO_M = 300.0
+        /** 내릴 곳에서 이 안에서만 '다음 구간으로 넘어감 = 내림'으로 본다 */
+        private const val GOT_OFF_NEAR_M = 150.0
+        private const val UNDO_OFF_M = 40
+        /** 실시간 도착: 이 안(초)에 오면 한 번 진동 — 정류장에 있거나 이만큼(m) 안일 때 */
+        const val BUS_SOON_SEC = 120
+        private const val BUS_SOON_NEAR_M = 150
         private const val VEHICLE_MPS = 3.0
         private const val WALKING_MAX_MPS = 2.5
         private const val WALK_MAX_MPS = 4.0

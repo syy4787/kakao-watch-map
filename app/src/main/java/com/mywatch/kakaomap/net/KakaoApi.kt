@@ -9,13 +9,15 @@ import com.mywatch.kakaomap.model.SimpleRoute
 import com.mywatch.kakaomap.model.TransitAccess
 import com.mywatch.kakaomap.model.TransitRoute
 import com.mywatch.kakaomap.model.TravelMode
+import com.mywatch.kakaomap.tube.TubeParsers
+import com.mywatch.kakaomap.tube.TubeSearcher
 import org.json.JSONException
 import org.json.JSONObject
 import java.io.IOException
 import java.util.Locale
 
 /** 화면에 그대로 보여 줄 수 있는 오류 */
-class ApiException(message: String) : Exception(message)
+open class ApiException(message: String) : Exception(message)
 
 /**
  * 카카오 REST API (장소 검색 · 대중교통/도보/자전거 경로).
@@ -38,6 +40,14 @@ object KakaoApi {
         call("/v2/local/search/keyword.json", linkedMapOf(
             "query" to query, "x" to near.lng.fmt(), "y" to near.lat.fmt(),
             "radius" to radiusM.coerceIn(0, 20_000).toString(), "sort" to "distance", "size" to "15",
+        ))
+    )
+
+    /** 다음 동영상 검색 (유튜브 등) — 유튜브 영상만 골라 [TubeParsers] 로. [page] 1~15 */
+    fun videos(query: String, page: Int): TubeParsers.KakaoPage = TubeParsers.kakaoVclip(
+        call("/v2/search/vclip", linkedMapOf(
+            "query" to query, "sort" to "accuracy", "size" to "30",
+            "page" to page.coerceIn(1, TubeSearcher.KAKAO_LAST_PAGE).toString(),
         ))
     )
 

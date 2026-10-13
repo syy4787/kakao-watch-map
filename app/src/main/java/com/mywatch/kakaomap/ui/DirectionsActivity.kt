@@ -131,12 +131,23 @@ class DirectionsActivity : ComponentActivity() {
             }
         }
         load()
-        // 기차·버스 시간표 경로의 남은 시간을 1분마다 새로 (손목을 내린 동안은 쉼)
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.RESUMED) {
-                while (true) {
-                    delay(MINUTE_MS)
-                    if (ambient?.inAmbient != true) refreshTimetableRoutes()
+                // 기차·버스 시간표 경로의 남은 시간을 1분마다 새로 (손목을 내린 동안은 쉼)
+                launch {
+                    while (true) {
+                        delay(MINUTE_MS)
+                        if (ambient?.inAmbient != true) refreshTimetableRoutes()
+                    }
+                }
+                // 실시간 버스 도착도 보고 있는 동안 45초마다 (카카오맵처럼 — 손목을 내린 동안은 쉼, 정류장마다 한 번만 물음)
+                launch {
+                    while (true) {
+                        delay(LIVE_REFRESH_MS)
+                        if (ambient?.inAmbient != true && mode == TravelMode.TRANSIT && RouteRepository.transitRoutes != null) {
+                            fetchLiveArrivals()
+                        }
+                    }
                 }
             }
         }
@@ -437,16 +448,18 @@ class DirectionsActivity : ComponentActivity() {
         }
     }
 
-    /** 각 경로 카드의 첫 버스에 대해 실시간 도착 정보를 붙인다 */
+    /**
+     * 경로 카드마다 첫 탈 것이 시내 버스면 그 버스의 실시간 도착을 붙인다 (카카오맵처럼 — 지하철을 먼저 타면 붙이지 않음).
+     * 같은 정류장에서 타는 경로끼리는 도착 정보를 한 번만 묻고, 공공데이터 요청은 동시에 3개까지 ([BusArrivalService])
+     */
     private fun fetchLiveArrivals() {
         if (!TagoApi.isConfigured) return
         val routes = RouteRepository.transitRoutes ?: return
         routes.forEachIndexed { i, r ->
-            // 기차·고속버스 경로는 타러 가는 버스만 (내려서 탈 버스는 몇 시간 뒤라 지금 도착 정보는 엉뚱함)
-            val bus = TransitGuide.liveBusIndexes(r).firstOrNull()?.let { r.steps[it] } ?: return@forEachIndexed
+            val bus = TransitGuide.listLiveIndex(r)?.let { r.steps[it] } ?: return@forEachIndexed
             lifecycleScope.launch {
                 val text = withContext(Dispatchers.IO) { BusArrivalService.describe(bus) } ?: return@launch
-                if (RouteRepository.transitRoutes !== routes) return@launch
+                if (RouteRepository.transitRoutes !== routes || liveTexts[i] == text) return@launch
                 liveTexts[i] = text
                 val rows = ui.adapter.rows
                 val pos = rows.indexOfFirst { it is Row.TransitCard && it.index == i }
@@ -631,6 +644,8 @@ class DirectionsActivity : ComponentActivity() {
         private const val ACTION_RETRY_OPTIONS = "retry_options"
         private const val RETRY_DELAY_MS = 400L
         private const val MINUTE_MS = 60_000L
+        /** 목록을 보는 동안 실시간 버스 도착을 새로 받는 간격 */
+        private const val LIVE_REFRESH_MS = 45_000L
         private const val REFETCH_GAP_MS = 5 * 60_000L
         /** 기차·버스 시간표를 이만큼 기다려도 안 오면 시내 대중교통 결과만 */
         private const val INTERCITY_TIMEOUT_MS = 20_000L

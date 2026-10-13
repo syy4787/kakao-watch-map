@@ -26,6 +26,9 @@ import com.mywatch.kakaomap.model.TransitGuide
 import com.mywatch.kakaomap.model.TransitRoute
 import com.mywatch.kakaomap.model.TransitSort
 import com.mywatch.kakaomap.model.TravelMode
+import com.mywatch.kakaomap.tube.TubeLinks
+import com.mywatch.kakaomap.tube.TubeText
+import com.mywatch.kakaomap.tube.TubeVideo
 
 /** 목록 화면에 들어가는 줄 종류 */
 sealed class Row {
@@ -69,6 +72,8 @@ sealed class Row {
         val key: String = "",
     ) : Row()
     data class Note(val text: String) : Row()
+    /** 유튜브 영상 (미리보기 + 제목 + 채널). 누르면 폰 유튜브 앱에서 믹스로, 길게 누르면 메뉴 */
+    data class VideoItem(val video: TubeVideo) : Row()
 }
 
 /** 여러 줄 종류를 한 목록에 그리는 어댑터. [onLongClick] 이 있으면 장소·집·회사 줄을 길게 눌러 메뉴를 연다 */
@@ -101,6 +106,7 @@ class RowAdapter(
         is Row.OptionCard -> R.layout.item_route_option
         is Row.Step -> R.layout.item_step
         is Row.Note -> R.layout.item_note
+        is Row.VideoItem -> R.layout.item_video
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): RecyclerView.ViewHolder =
@@ -229,14 +235,47 @@ class RowAdapter(
             is Row.Note -> {
                 (v as TextView).text = row.text
             }
+            is Row.VideoItem -> bindVideo(v, row)
         }
+    }
+
+    private fun bindVideo(v: View, row: Row.VideoItem) {
+        val video = row.video
+        v.findViewById<ImageView>(R.id.thumb).apply {
+            clipToOutline = true   // 둥근 모서리 (배경 모양대로 자르기)
+            TubeThumbs.into(this, TubeLinks.thumbnail(video.id))
+        }
+        val time = video.durationSec?.let { TubeText.clock(it) }
+        v.text(R.id.badge).apply {
+            when {
+                video.live -> {
+                    visibility = View.VISIBLE
+                    text = v.context.getString(R.string.tube_live)
+                    setBackgroundResource(R.drawable.bg_live)
+                }
+                time != null -> {
+                    visibility = View.VISIBLE
+                    text = time
+                    setBackgroundResource(R.drawable.bg_duration)
+                }
+                else -> visibility = View.GONE
+            }
+        }
+        v.text(R.id.title).text = video.title
+        v.text(R.id.meta).show(video.channel.ifBlank { null })
+        v.contentDescription = listOfNotNull(
+            video.title, video.channel.ifBlank { null }, time,
+            if (video.live) v.context.getString(R.string.tube_live) else null,
+        ).joinToString(", ")
+        v.setOnClickListener { onClick(row) }
+        v.longClick(row)
     }
 
     private fun bindTransit(v: View, row: Row.TransitCard) {
         val r = row.route
         v.text(R.id.time).text = timeAndArrival(v, r.totalTimeSec)
         v.text(R.id.meta).text = listOfNotNull(
-            r.fare?.let { Format.fare(it) },
+            Format.fare(r),
             Format.transfers(r.transfers),
             "도보 ${Format.duration(r.walkTimeSec)}",
         ).joinToString(" · ")

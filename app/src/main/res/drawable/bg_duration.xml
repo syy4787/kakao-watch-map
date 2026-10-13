@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 미리보기 위 재생 시간 (4:54) -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <solid android:color="#CC000000" />
+    <corners android:radius="3dp" />
+</shape>

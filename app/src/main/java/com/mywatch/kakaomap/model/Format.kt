@@ -46,16 +46,27 @@ object Format {
     /** 1,500원 */
     fun fare(won: Int): String = NumberFormat.getNumberInstance(Locale.KOREA).format(won) + "원"
 
+    /** 거리 따라 달라지는 요금: "1,500~3,150원" (같거나 모르면 "1,500원") */
+    fun fare(min: Int, max: Int?): String =
+        if (max != null && max > min) NumberFormat.getNumberInstance(Locale.KOREA).format(min) + "~" + fare(max) else fare(min)
+
+    /** 경로 요금 (모르면 null) */
+    fun fare(route: TransitRoute): String? = route.fare?.let { fare(it, route.fareMax) }
+
     fun transfers(count: Int): String = if (count <= 0) "환승 없음" else "환승 ${count}회"
 
-    /** 버스 도착 예정 → "3분 후", "곧 도착" */
+    /** 버스 도착 예정 → "3분", "곧 도착" (카카오맵 표기) */
     fun arrival(seconds: Int): String = when {
         seconds < 0 -> "정보 없음"
         seconds < 60 -> "곧 도착"
-        else -> "${seconds / 60}분 후"
+        else -> "${seconds / 60}분"
     }
 
-    /** "3분 후 (2정거장 전)" */
-    fun busArrival(a: BusArrival): String =
-        if (a.stopsAway > 0) "${arrival(a.arrivalSec)} (${a.stopsAway}정거장 전)" else arrival(a.arrivalSec)
+    /** "3분 (2번째 전)", 1분 안이면 "곧 도착" (카카오맵 표기) */
+    fun busArrival(a: BusArrival): String = when {
+        a.arrivalSec in 0 until 60 -> "곧 도착"
+        a.arrivalSec < 0 -> if (a.stopsAway > 0) "${a.stopsAway}번째 전" else arrival(a.arrivalSec)
+        a.stopsAway > 0 -> "${arrival(a.arrivalSec)} (${a.stopsAway}번째 전)"
+        else -> arrival(a.arrivalSec)
+    }
 }

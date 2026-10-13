@@ -13,9 +13,10 @@ import com.mywatch.kakaomap.model.SimpleRoute
 import com.mywatch.kakaomap.model.TransitRoute
 import com.mywatch.kakaomap.model.TravelMode
 import org.json.JSONArray
+import java.util.IdentityHashMap
 
-/** 지도에 그릴 선 한 토막 */
-data class MapSegment(val points: List<Coord>, val color: Int, val widthDp: Float)
+/** 지도에 그릴 선 한 토막. [dotted] = 카카오맵의 걷는 길처럼 점을 찍은 선 */
+data class MapSegment(val points: List<Coord>, val color: Int, val widthDp: Float, val dotted: Boolean = false)
 
 /**
  * 지도에 띄워 둔(안내 중인) 경로.
@@ -57,6 +58,31 @@ object RouteRepository {
 
     var destination: Place? = null
     var transitRoutes: List<TransitRoute>? = null
+        set(value) {
+            // 새 목록에 없는 경로의 '실제 걷는 길'은 잊는다 (같은 경로가 남은 목록이면 그대로 — 기차·버스 결과를 붙일 때 등)
+            if (value !== field) synchronized(walkedRoutes) {
+                walkedRoutes.keys.retainAll { old -> value?.any { it === old } == true }
+            }
+            field = value
+        }
+
+    /**
+     * 경로 상세에서 받아 둔, 정류장까지 걷는 길을 실제 길로 바꾼 경로 (원래 경로 객체 → 바꾼 경로).
+     * 목록([transitRoutes])은 바꾸지 않는다 — 길찾기 화면이 '같은 검색 결과인지'를 목록 객체로 가려내고(실시간 도착·
+     * 기차 시간표 찾기), 목록의 시간·거리도 카카오맵과 같은 숫자로 두기 위해. 같은 경로를 다시 열면 또 묻지 않는다
+     */
+    private val walkedRoutes = IdentityHashMap<TransitRoute, TransitRoute>()
+
+    /** [route] 의 걷는 길을 실제 길로 바꿔 둔 것이 있으면 그것, 없으면 그대로 */
+    fun walked(route: TransitRoute): TransitRoute = synchronized(walkedRoutes) { walkedRoutes[route] } ?: route
+
+    /** 지금 목록에 있는 경로만 (지난 검색의 늦은 응답은 버림) */
+    fun rememberWalked(original: TransitRoute, walked: TransitRoute) {
+        synchronized(walkedRoutes) {
+            if (transitRoutes?.any { it === original } == true) walkedRoutes[original] = walked
+        }
+    }
+
     /** 대중교통 목록 아래에 붙일 말 (기차·버스 시간표를 받지 못함 · 지난 시간표로 채움 등) */
     var transitNote: String? = null
     /** 도보·자전거 경로 카드 (카카오맵의 경로 옵션별 결과, 같은 길은 한 카드) */

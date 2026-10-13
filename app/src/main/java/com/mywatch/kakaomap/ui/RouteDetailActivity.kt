@@ -17,14 +17,20 @@ import com.mywatch.kakaomap.model.Place
 import com.mywatch.kakaomap.model.SimpleRoute
 import com.mywatch.kakaomap.model.TransitGuide
 import com.mywatch.kakaomap.model.TransitRoute
+import com.mywatch.kakaomap.model.TransitWalks
 import com.mywatch.kakaomap.nav.NavigationService
 import com.mywatch.kakaomap.nav.Navigator
 import com.mywatch.kakaomap.net.BusArrivalService
 import com.mywatch.kakaomap.net.TagoApi
+import com.mywatch.kakaomap.net.WalkPaths
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * 경로 상세.
@@ -40,6 +46,12 @@ class RouteDetailActivity : ComponentActivity() {
     private var simple: SimpleRoute? = null
     private var fromActive = false
     private var ambient: AmbientCover? = null
+    /** 정류장까지·도착지까지 걷는 길(실제 길)을 받는 중 — 끝나면 시간·거리가 바뀌고 지도엔 그 길이 그려진다 */
+    private var walks: Deferred<TransitRoute>? = null
+    /** 받아 둔 실시간 도착 (구간 key → 글) — 상세를 다시 그려도 '실시간 도착 확인 중…'으로 돌아가지 않게 */
+    private val liveTexts = HashMap<String, String>()
+    /** 길찾기 목록에 있는 그 경로 객체 — 받아 둔 걷는 길을 이 경로 이름으로 기억한다 (반만 받아 둔 것을 다시 열어 마저 받아도) */
+    private var listRoute: TransitRoute? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -63,7 +75,9 @@ class RouteDetailActivity : ComponentActivity() {
             }
             place = d
             origin = RouteRepository.routeOrigin
-            transit = r
+            // 전에 이 경로를 열어 걷는 길을 받아 뒀으면 그것 (다시 묻지 않음)
+            listRoute = r
+            transit = RouteRepository.walked(r)
         }
         if (transit == null && simple == null) {
             finish()
@@ -72,6 +86,7 @@ class RouteDetailActivity : ComponentActivity() {
         setContentView(R.layout.activity_list)
         ui = WearList(this, ::onRow)
         ui.rows = buildRows()
+        if (!fromActive) startWalks()
         // 손목을 내리면 검은 화면에 요약만 (Wear OS 6+ 는 이 화면을 켜 둔 채 둔다), 그동안 새로 고침은 쉰다
         ambient = AmbientCover(this, ::ambientSummary) { inAmbient ->
             if (!inAmbient && transit != null && TagoApi.isConfigured &&
@@ -87,6 +102,26 @@ class RouteDetailActivity : ComponentActivity() {
                     delay(30_000)
                 }
             }
+        }
+    }
+
+    /**
+     * 카카오맵처럼 정류장까지 걷는 길을 실제 길로 받아 둔다(화면을 보는 몇 초 동안) — 받으면 걷는 시간·거리를 고쳐 보여 주고,
+     * 받은 것을 기억해 둬([RouteRepository.walked]) 다시 열거나 지도에 띄울 때 또 묻지 않는다.
+     * 길을 받자마자 끝난다 — '안내 시작'은 이것만 기다린다 (실시간 도착은 따로 새로 고침, 받아 둔 글은 그대로 둠)
+     */
+    private fun startWalks() {
+        val original = transit ?: return
+        if (TransitWalks.pending(original).isEmpty()) return
+        walks = lifecycleScope.async {
+            val r = WalkPaths.enrich(original, timeoutMs = WALKS_TIMEOUT_MS)
+            if (r !== original && transit === original) {
+                transit = r
+                RouteRepository.rememberWalked(listRoute ?: original, r)
+                // '경로 준비 중…'을 띄운 사이엔 다시 그리지 않는다 (기다림이 끝나면 그쪽에서 그림)
+                if (!opening) ui.rows = buildRows()
+            }
+            r
         }
     }
 
@@ -111,7 +146,7 @@ class RouteDetailActivity : ComponentActivity() {
             val sec = t.secondsFrom(System.currentTimeMillis())
             rows += Row.Header(
                 "${Format.duration(sec)} · ${Format.clockAfter(sec)} 도착",
-                listOfNotNull(t.fare?.let { Format.fare(it) }, Format.transfers(t.transfers), Format.distance(t.totalDistanceM))
+                listOfNotNull(Format.fare(t), Format.transfers(t.transfers), Format.distance(t.totalDistanceM))
                     .joinToString(" · "),
             )
         } else if (s != null) {
@@ -119,7 +154,10 @@ class RouteDetailActivity : ComponentActivity() {
         }
         rows += actions()
         if (t != null) {
-            rows += RouteRows.transitTimeline(t, place.name, TagoApi.isConfigured)
+            rows += RouteRows.transitTimeline(t, place.name, TagoApi.isConfigured).map { row ->
+                val live = (row as? Row.Step)?.key?.let(liveTexts::get)
+                if (live != null) (row as Row.Step).copy(live = live) else row
+            }
             if (!TagoApi.isConfigured) rows += Row.Note(getString(R.string.tago_missing))
         } else if (s != null) {
             rows += RouteRows.simpleSteps(s, place.name)
@@ -151,6 +189,7 @@ class RouteDetailActivity : ComponentActivity() {
         TransitGuide.liveBusIndexes(t).forEach { i ->
             val s = t.steps[i]
             val text = withContext(Dispatchers.IO) { BusArrivalService.describe(s) } ?: return@forEach
+            liveTexts["s$i"] = text
             val rows = ui.adapter.rows
             val pos = rows.indexOfFirst { it is Row.Step && it.key == "s$i" }
             if (pos >= 0) ui.adapter.replace(pos, (rows[pos] as Row.Step).copy(live = text))
@@ -176,13 +215,40 @@ class RouteDetailActivity : ComponentActivity() {
         val active = RouteRepository.activeRoute
         if (fromActive && active != null) {
             RouteRepository.activeRoute = active.copy(startNavigation = navigate || active.startNavigation)
-        } else {
-            val t = transit ?: return
-            val o = origin ?: return
-            RouteRepository.activeRoute = RoutePresentation.activeFromTransit(t, place, o, navigate)
+            MainActivity.open(this)
+            return
         }
-        MainActivity.open(this)
+        val o = origin ?: return
+        val pending = walks
+        if (pending == null || pending.isCompleted) {
+            val t = transit ?: return
+            RouteRepository.activeRoute = RoutePresentation.activeFromTransit(t, place, o, navigate)
+            MainActivity.open(this)
+            return
+        }
+        // 걷는 길을 아직 받는 중이면 잠깐만 기다린다 (못 받으면 직선으로 바로 시작)
+        if (opening) return
+        opening = true
+        ui.showStatus(getString(R.string.preparing_route))
+        lifecycleScope.launch {
+            val got = try {
+                withTimeoutOrNull(WALKS_WAIT_MS) { pending.await() }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                null
+            }
+            opening = false
+            // '경로 준비 중…'을 걷어 둔다 — 지도가 이 화면을 닫지 않고 위에 열려도(타일로 연 검색에서 온 경우) 돌아오면 상세가 보이게
+            ui.rows = buildRows()
+            val t = got ?: transit ?: return@launch
+            RouteRepository.activeRoute = RoutePresentation.activeFromTransit(t, place, o, navigate)
+            MainActivity.open(this@RouteDetailActivity)
+        }
     }
+
+    /** 안내 시작을 두 번 눌러 두 번 띄우지 않게 */
+    private var opening = false
 
     companion object {
         private const val EXTRA_INDEX = "index"
@@ -191,6 +257,13 @@ class RouteDetailActivity : ComponentActivity() {
         private const val ACTION_NAVIGATE = "navigate"
         private const val ACTION_BACK = "back"
         private const val ACTION_END = "end"
+        /** 걷는 길을 받는 데 쓰는 최대 시간 (상세를 연 때부터) */
+        private const val WALKS_TIMEOUT_MS = 3_000L
+        /**
+         * '안내 시작'을 누른 뒤 걷는 길을 기다리는 최대 시간 — 받는 시간보다 조금 길게 잡아, 받은 길이 안내에 늘 들어가게
+         * (누른 뒤 늦게 와서 지도엔 직선으로 남는 일이 없게). 보통은 상세를 보는 동안 이미 받아 있어 기다리지 않는다
+         */
+        private const val WALKS_WAIT_MS = WALKS_TIMEOUT_MS + 500L
 
         /** 길찾기 목록의 n번째 대중교통 경로 */
         fun intent(context: Context, index: Int) =

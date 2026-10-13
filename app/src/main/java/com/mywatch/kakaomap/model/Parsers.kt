@@ -68,7 +68,16 @@ object KakaoParsers {
         return (0 until routes.length()).mapNotNull { i ->
             val r = routes.optJSONObject(i) ?: return@mapNotNull null
             val p = r.optJSONObject("properties") ?: JSONObject()
-            val fare = p.optJSONObject("fare")?.let { f -> if (f.has("value")) f.optInt("value") else null }
+            // 요금: 하나로 정해져 있으면 value, 거리 따라 달라지면 min~max (카카오맵 "1,500~3,150원")
+            val fareObj = p.optJSONObject("fare")
+            val fare = fareObj?.let { f ->
+                when {
+                    f.has("value") -> f.optInt("value")
+                    f.has("min") -> f.optInt("min")
+                    else -> null
+                }
+            }
+            val fareMax = fareObj?.takeIf { !it.has("value") && it.has("max") }?.optInt("max")?.takeIf { fare != null && it > fare }
             val stepArr = r.optJSONArray("steps") ?: JSONArray()
             val steps = (0 until stepArr.length()).mapNotNull { s ->
                 val step = stepArr.optJSONObject(s) ?: return@mapNotNull null
@@ -95,8 +104,9 @@ object KakaoParsers {
                 transfers = p.optInt("transfers"),
                 fare = fare,
                 steps = steps,
+                fareMax = fareMax,
             )
-        }.sortedBy { it.totalTimeSec }
+        }   // 카카오가 준 순서(추천순) 그대로 — 빠른 순 등은 TransitOptions 가 정렬
     }
 
     /** [[x, y], ...] → Coord 목록 */
@@ -203,6 +213,7 @@ object TagoParsers {
             routeType = o.optString("routetp"),
             arrivalSec = o.optInt("arrtime", -1),
             stopsAway = o.optInt("arrprevstationcnt", -1),
+            routeId = o.optString("routeid"),
         )
     }.sortedBy { if (it.arrivalSec < 0) Int.MAX_VALUE else it.arrivalSec }
 }

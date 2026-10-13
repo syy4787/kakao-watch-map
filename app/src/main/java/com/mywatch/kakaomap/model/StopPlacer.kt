@@ -58,9 +58,9 @@ object StopPlacer {
         return seq.subList(best.first, best.second + 1)
     }
 
-    /** 정류장 이름 비교 (괄호·띄어쓰기·'정류장' 낱말 무시) */
-    fun sameStop(a: String, b: String): Boolean {
-        fun norm(s: String) = s.substringBefore('(').replace(" ", "").removeSuffix("정류장").removeSuffix("정류소")
-        return norm(a) == norm(b)
-    }
+    /**
+     * 정류장 이름 비교 (괄호·띄어쓰기·'.'·'정류장' 낱말 무시). 카카오가 두 이름을 '/'로 붙인 정류장
+     * ("삼성동행정복지센터/중부소방서")은 TAGO 이름이 그중 하나여도 같은 곳
+     */
+    fun sameStop(a: String, b: String): Boolean = TransitMatching.sameStopName(a, b)
 }
