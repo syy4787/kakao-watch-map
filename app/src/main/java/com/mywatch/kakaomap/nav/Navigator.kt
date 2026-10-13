@@ -1,8 +1,10 @@
 package com.mywatch.kakaomap.nav
 
 import android.content.Context
+import android.media.AudioAttributes
 import android.os.Build
 import android.os.SystemClock
+import android.os.VibrationAttributes
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
@@ -104,7 +106,23 @@ object Navigator {
             NavEvent.ARRIVED -> longArrayOf(0, 600)
             NavEvent.REROUTED -> longArrayOf(0, 150)
         }
-        runCatching { vibrator.vibrate(VibrationEffect.createWaveform(pattern, -1)) }
+        // 용도를 '알람'으로 밝힌다. 용도 없이 울리면 짧은 패턴(횡단보도·도착·새 경로)은 시스템이 '터치 반응'으로 분류해
+        // 워치의 터치 진동 설정을 끄면 사라지고, 절전 모드에서도 막힌다. 알람 진동은 무음·방해 금지·절전 중에도 울린다
+        runCatching {
+            val effect = VibrationEffect.createWaveform(pattern, -1)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                vibrator.vibrate(effect, VibrationAttributes.createForUsage(VibrationAttributes.USAGE_ALARM))
+            } else {
+                @Suppress("DEPRECATION")
+                vibrator.vibrate(
+                    effect,
+                    AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_ALARM)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                        .build(),
+                )
+            }
+        }
     }
 
     /** 이보다 오래된 위치는 안내 판단에 쓰지 않는다 */

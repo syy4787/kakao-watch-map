@@ -1,6 +1,7 @@
 package com.mywatch.kakaomap.net
 
 import com.mywatch.kakaomap.BuildConfig
+import com.mywatch.kakaomap.data.ErrorLog
 import com.mywatch.kakaomap.model.BusArrival
 import com.mywatch.kakaomap.model.BusRoute
 import com.mywatch.kakaomap.model.BusStop
@@ -11,6 +12,7 @@ import com.mywatch.kakaomap.model.TransitMatching
 import com.mywatch.kakaomap.model.TransitStep
 import org.json.JSONObject
 import java.io.IOException
+import java.net.SocketTimeoutException
 import java.net.URLEncoder
 import java.util.Locale
 
@@ -65,7 +67,14 @@ object TagoApi {
         val res = try {
             Http.get(url, timeoutMs = 8000)
         } catch (e: IOException) {
-            throw ApiException("네트워크 오류")
+            // apis.data.go.kr 은 연결이 가끔 끊긴다(연결 재설정) — 시간 초과가 아니면 한 번만 다시
+            if (e is SocketTimeoutException) throw ApiException("네트워크 오류 (시간 초과)")
+            try {
+                Thread.sleep(400)
+                Http.get(url, timeoutMs = 8000)
+            } catch (e2: IOException) {
+                throw ApiException("네트워크 오류")
+            }
         }
         val json = try {
             JSONObject(res.body)
@@ -115,7 +124,12 @@ object BusArrivalService {
                 else -> "${mine[0].routeNo}번 ${Format.busArrival(mine[0])} · 다음 ${Format.arrival(mine[1].arrivalSec)}"
             }
         } catch (e: ApiException) {
+            ErrorLog.record("실시간 버스", e)
             e.message ?: "실시간 정보 오류"
+        } catch (e: Exception) {
+            // 예상 못 한 응답 등 — 앱이 멈추지 않게 여기서 끝낸다
+            ErrorLog.record("실시간 버스", e)
+            "실시간 정보 오류"
         }
         synchronized(cache) { cache[cacheKey] = Cached(text, System.currentTimeMillis()) }
         return text

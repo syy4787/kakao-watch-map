@@ -14,6 +14,13 @@ enum class TransitSort(val label: String) {
     LEAST_WALK("최소도보");
 
     fun next(): TransitSort = entries[(ordinal + 1) % entries.size]
+
+    companion object {
+        /** 처음엔 가장 빨리 도착하는 경로부터 (사용자가 정렬 칩으로 바꾸면 그것을 기억) */
+        val DEFAULT = FASTEST
+
+        fun saved(name: String?): TransitSort = entries.firstOrNull { it.name == name } ?: DEFAULT
+    }
 }
 
 /** 경로 목록 거르기·정렬 (순수 계산 — 단위 테스트로 검증) */
@@ -55,6 +62,10 @@ object TransitOptions {
             TransitSort.LEAST_WALK -> kept.sortedWith(compareBy<IndexedValue<TransitRoute>> { it.value.walkTimeSec }.then(byTime))
         }
     }
+
+    /** 가장 빨리 도착하는 경로의 번호 ('가장 빠름' 표시) — 최소시간 정렬의 첫 카드와 같다 */
+    fun fastestIndex(routes: List<TransitRoute>): Int? =
+        apply(routes, TransitFilter.ALL, TransitSort.FASTEST).firstOrNull()?.index
 
     /** 칩을 누르면 다음 종류로 (한 바퀴 돌면 전체) */
     fun next(current: TransitFilter, choices: List<TransitFilter>): TransitFilter {

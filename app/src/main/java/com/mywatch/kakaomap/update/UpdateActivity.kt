@@ -15,7 +15,10 @@ import androidx.lifecycle.lifecycleScope
 import androidx.wear.input.RemoteInputIntentHelper
 import com.kakao.vectormap.KakaoMapSdk
 import com.mywatch.kakaomap.R
+import com.mywatch.kakaomap.data.ErrorLog
+import com.mywatch.kakaomap.data.ErrorLogFormat
 import com.mywatch.kakaomap.nav.NavigationService
+import com.mywatch.kakaomap.net.TagoApi
 import com.mywatch.kakaomap.ui.Row
 import com.mywatch.kakaomap.ui.WearList
 import kotlinx.coroutines.Dispatchers
@@ -108,6 +111,17 @@ class UpdateActivity : ComponentActivity() {
         }
         val hash = runCatching { KakaoMapSdk.INSTANCE.hashKey }.getOrNull()
         if (hash != null) rows += Row.Note("카카오 키 해시\n$hash")
+        // 무엇이 안 됐는지(검색·길찾기·실시간 버스·위치·지도·앱 멈춤) — 최근 것부터
+        rows += Row.Header("최근 오류 기록")
+        val errors = ErrorLog.entries()
+        if (errors.isEmpty()) {
+            rows += Row.Note("오류 기록 없음")
+        } else {
+            errors.take(SHOWN_ERRORS).forEach { rows += Row.Note(ErrorLogFormat.line(it)) }
+            if (errors.size > SHOWN_ERRORS) rows += Row.Note("… 그 전 ${errors.size - SHOWN_ERRORS}개")
+            rows += Row.Action(ACTION_CLEAR_ERRORS, R.drawable.ic_delete, "오류 기록 지우기")
+        }
+        rows += Row.Note("실시간 버스(공공데이터) 키: ${if (TagoApi.isConfigured) "들어 있음" else "없음"}")
         rows += Row.Header("이 워치에서의 성능")
         rows += Row.Note(deviceReport())
         ui.rows = rows
@@ -136,6 +150,10 @@ class UpdateActivity : ComponentActivity() {
             ACTION_CHECK -> check()
             ACTION_INSTALL -> install()
             ACTION_OWNER -> askOwner()
+            ACTION_CLEAR_ERRORS -> {
+                ErrorLog.clear()
+                render()
+            }
             ACTION_PERMISSION -> try {
                 startActivity(
                     Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName"))
@@ -226,5 +244,7 @@ class UpdateActivity : ComponentActivity() {
         const val ACTION_INSTALL = "install"
         const val ACTION_OWNER = "owner"
         const val ACTION_PERMISSION = "permission"
+        const val ACTION_CLEAR_ERRORS = "clear_errors"
+        private const val SHOWN_ERRORS = 10
     }
 }

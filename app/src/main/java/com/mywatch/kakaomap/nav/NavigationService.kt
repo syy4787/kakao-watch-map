@@ -35,12 +35,16 @@ import com.mywatch.kakaomap.MainActivity
 import com.mywatch.kakaomap.MapApp
 import com.mywatch.kakaomap.R
 import com.mywatch.kakaomap.data.ActiveRoute
+import com.mywatch.kakaomap.data.ErrorLog
 import com.mywatch.kakaomap.data.RoutePresentation
 import com.mywatch.kakaomap.data.RouteRepository
 import com.mywatch.kakaomap.location.Locator
 import com.mywatch.kakaomap.location.toFix
 import com.mywatch.kakaomap.model.Coord
 import com.mywatch.kakaomap.model.Format
+import com.mywatch.kakaomap.model.RouteStatusException
+import com.mywatch.kakaomap.model.TransitOptions
+import com.mywatch.kakaomap.model.TransitRoute
 import com.mywatch.kakaomap.model.TravelMode
 import com.mywatch.kakaomap.net.KakaoApi
 import com.mywatch.kakaomap.update.UpdateInstallWorker
@@ -406,15 +410,14 @@ class NavigationService : Service() {
             val result = withContext(Dispatchers.IO) {
                 runCatching {
                     when (active.mode) {
-                        TravelMode.BIKE -> RoutePresentation.activeFromSimple(
-                            KakaoApi.bike(from, active.destination, active.destinationName), active.place, from, navigate = true,
+                        // 고른 옵션(자전거도로 우선·최단 거리 …) 그대로 다시 찾는다
+                        TravelMode.BIKE, TravelMode.WALK -> RoutePresentation.activeFromSimple(
+                            KakaoApi.simple(active.mode, from, active.destination, active.destinationName, active.simple?.option),
+                            active.place, from, navigate = true,
                         )
-                        TravelMode.WALK -> RoutePresentation.activeFromSimple(
-                            KakaoApi.walk(from, active.destination, active.destinationName), active.place, from, navigate = true,
-                        )
-                        // 가장 빨리 도착하는 대중교통 경로 (목록은 소요 시간 순). 없으면(남은 거리가 짧음 등) 걸어서
-                        TravelMode.TRANSIT -> runCatching { KakaoApi.transit(from, active.destination, active.destinationName) }
-                            .getOrNull()?.firstOrNull()
+                        // 가장 빨리 도착하는 대중교통 경로. 대중교통 길이 없다는 답(남은 거리가 짧음 등)일 때만 걸어서 —
+                        // 끊김·서버 오류는 실패로 두어 간격을 두고 다시 대중교통으로 찾는다 (잠깐 끊겼다고 몇 km 를 걷게 하지 않게)
+                        TravelMode.TRANSIT -> transitOrNull(from, active)
                             ?.let { RoutePresentation.activeFromTransit(it, active.place, from, navigate = true) }
                             ?: RoutePresentation.activeFromSimple(
                                 KakaoApi.walk(from, active.destination, active.destinationName), active.place, from, navigate = true,
@@ -433,6 +436,7 @@ class NavigationService : Service() {
                 Navigator.vibrate(this@NavigationService, NavEvent.REROUTED)
             }.onFailure {
                 Log.w(MapApp.TAG, "재탐색 실패", it)
+                ErrorLog.record("재탐색", it)
                 Navigator.setRerouting(false)
                 // 네트워크 끊김 등 — 아직 벗어나 있으면 간격(30초·1분·2분…)을 두고 다시 시도
                 retryJob?.cancel()
@@ -443,6 +447,16 @@ class NavigationService : Service() {
                 }
             }
         }
+    }
+
+    /** 재탐색용 대중교통 경로: 가장 빨리 도착하는 것. 길이 없다는 답이면 null, 네트워크·서버 오류는 그대로 던진다 */
+    private fun transitOrNull(from: Coord, active: ActiveRoute): TransitRoute? {
+        val routes = try {
+            KakaoApi.transit(from, active.destination, active.destinationName)
+        } catch (e: RouteStatusException) {
+            return null
+        }
+        return TransitOptions.fastestIndex(routes)?.let(routes::get)
     }
 
     private fun planFor(active: ActiveRoute, s: NavState): LocPlan {
@@ -523,6 +537,9 @@ class NavigationService : Service() {
             .setContentIntent(open)
             .addAction(R.drawable.ic_close, getString(R.string.end_route), end)
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
+            // Wear OS 7·안드로이드 16+ 의 '실시간 업데이트'(Live Update)로도 — 진행 중 활동 대신 이것을 보여 주는 기기용
+            .setRequestPromotedOngoing(true)
+        shortText(s)?.let { b.setShortCriticalText(it) }
         builder = b
         ongoing = OngoingActivity.Builder(applicationContext, NOTIFICATION_ID, b)
             .setStaticIcon(R.drawable.ic_navigation)
@@ -549,7 +566,14 @@ class NavigationService : Service() {
         shownText = text
         val b = builder ?: return
         b.setContentTitle("→ ${active.destinationName}").setContentText(text)
+        shortText(s)?.let { b.setShortCriticalText(it) }
         runCatching { ongoing?.update(applicationContext, statusOf(text)) }
+    }
+
+    /** 실시간 업데이트 칩에 넣을 아주 짧은 글 (7자 안쪽): 남은 거리 또는 '도착' */
+    private fun shortText(s: NavState): String? = when {
+        s.arrived -> "도착"
+        else -> s.remainingM?.let { Format.distance(it) }
     }
 
     /** 진행 중 활동의 상태 문구. '#' 은 템플릿 기호라 전각 문자로 바꿔 넣는다 */

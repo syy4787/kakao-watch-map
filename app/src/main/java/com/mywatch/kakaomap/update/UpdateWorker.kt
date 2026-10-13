@@ -6,6 +6,7 @@ import android.content.IntentFilter
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.os.BatteryManager
+import android.os.SystemClock
 import android.util.Log
 import androidx.work.BackoffPolicy
 import androidx.work.Constraints
@@ -94,10 +95,12 @@ class UpdateInstallWorker(context: Context, params: WorkerParameters) : Coroutin
     }
 
     /**
-     * 지금 설치하면 사용자가 쓰던 것이 끊기는지: 안내 중이거나 화면을 보고 있을 때.
-     * (앱을 닫은 뒤 메모리에 남은 '지도에서 보기' 경로는 기다리지 않는다 — 그러면 업데이트가 한없이 밀림)
+     * 지금 설치하면 사용자가 쓰던 것이 끊기는지: 안내 중이거나, 화면을 보고 있거나, 화면이 가려진 지 얼마 안 됐을 때
+     * (음성 입력·권한 창이 잠깐 덮은 것일 수 있다 — 그 사이 설치하면 돌아왔을 때 앱이 꺼져 있다).
+     * 앱을 닫은 뒤 메모리에 남은 '지도에서 보기' 경로는 기다리지 않는다 — 그러면 업데이트가 한없이 밀림.
      */
-    private fun busy(): Boolean = NavigationService.running || MapApp.inUse
+    private fun busy(): Boolean = NavigationService.running || MapApp.inUse ||
+        (MapApp.lastUiStoppedAt > 0 && SystemClock.elapsedRealtime() - MapApp.lastUiStoppedAt < QUIET_AFTER_UI_MS)
 
     private fun onWifi(c: Context): Boolean {
         val cm = c.getSystemService(ConnectivityManager::class.java) ?: return false
@@ -124,11 +127,15 @@ class UpdateInstallWorker(context: Context, params: WorkerParameters) : Coroutin
          */
         fun enqueueSoon(context: Context) {
             if (UpdateManager.repo(context) == null || !UpdateManager.hasUpdate(context)) return
-            enqueue(context, ExistingWorkPolicy.REPLACE)
+            enqueue(context, ExistingWorkPolicy.REPLACE, delayMs = QUIET_AFTER_UI_MS)
         }
 
-        private fun enqueue(context: Context, policy: ExistingWorkPolicy) {
+        /** 화면이 다 가려진 뒤 이만큼은 설치하지 않는다 (잠깐 다른 화면에 갔다 돌아오는 경우) */
+        private const val QUIET_AFTER_UI_MS = 10 * 60_000L
+
+        private fun enqueue(context: Context, policy: ExistingWorkPolicy, delayMs: Long = 0L) {
             val request = OneTimeWorkRequestBuilder<UpdateInstallWorker>()
+                .setInitialDelay(delayMs, TimeUnit.MILLISECONDS)
                 .setConstraints(
                     Constraints.Builder()
                         .setRequiredNetworkType(NetworkType.CONNECTED)

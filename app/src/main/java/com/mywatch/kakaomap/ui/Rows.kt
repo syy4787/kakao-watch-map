@@ -1,6 +1,12 @@
 package com.mywatch.kakaomap.ui
 
 import android.content.res.ColorStateList
+import android.graphics.Typeface
+import android.text.SpannableStringBuilder
+import android.text.Spanned
+import android.text.style.ForegroundColorSpan
+import android.text.style.RelativeSizeSpan
+import android.text.style.StyleSpan
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -14,7 +20,7 @@ import com.mywatch.kakaomap.data.Favorite
 import com.mywatch.kakaomap.data.FavoriteSlot
 import com.mywatch.kakaomap.model.Format
 import com.mywatch.kakaomap.model.Place
-import com.mywatch.kakaomap.model.SimpleRoute
+import com.mywatch.kakaomap.model.RouteChoice
 import com.mywatch.kakaomap.model.TransitFilter
 import com.mywatch.kakaomap.model.TransitGuide
 import com.mywatch.kakaomap.model.TransitRoute
@@ -27,8 +33,19 @@ sealed class Row {
     data class Action(val id: String, @param:DrawableRes val icon: Int, val text: String, val accent: Boolean = false) : Row()
     data class PlaceItem(val place: Place, val recent: Boolean = false) : Row()
     data class FavoriteItem(val slot: FavoriteSlot) : Row()
-    data class ModeTabs(val selected: TravelMode) : Row()
-    data class TransitCard(val index: Int, val route: TransitRoute, val live: String? = null) : Row()
+    /**
+     * 이동수단 탭. [seconds] = 탭마다 그 탭을 누르면 고르게 될 길의 시간(아직 모르면 없음),
+     * [fastest] = 가장 빨리 도착하는 수단 (둘 이상 결과가 있을 때만). [tapped] = 누른 탭
+     */
+    data class ModeTabs(
+        val selected: TravelMode,
+        val seconds: Map<TravelMode, Int> = emptyMap(),
+        val fastest: TravelMode? = null,
+        val tapped: TravelMode = selected,
+    ) : Row()
+    data class TransitCard(val index: Int, val route: TransitRoute, val live: String? = null, val fastest: Boolean = false) : Row()
+    /** 도보·자전거 경로 옵션 카드 (자전거도로 우선 · 최단 거리 · 편안한 길 …). [index] = 카드 순서 */
+    data class OptionCard(val index: Int, val choice: RouteChoice, val selected: Boolean, val fastest: Boolean) : Row()
     /** 대중교통 거르기·정렬 칩. [tapped] = 누른 칩 (FILTER / SORT) */
     data class TransitChoice(
         val filter: TransitFilter,
@@ -42,7 +59,6 @@ sealed class Row {
             const val SORT = 2
         }
     }
-    data class SimpleCard(val route: SimpleRoute) : Row()
     data class Step(
         val color: Int,
         @param:DrawableRes val icon: Int,
@@ -82,7 +98,7 @@ class RowAdapter(
         is Row.ModeTabs -> R.layout.item_mode_tabs
         is Row.TransitCard -> R.layout.item_transit_card
         is Row.TransitChoice -> R.layout.item_transit_options
-        is Row.SimpleCard -> R.layout.item_simple_card
+        is Row.OptionCard -> R.layout.item_route_option
         is Row.Step -> R.layout.item_step
         is Row.Note -> R.layout.item_note
     }
@@ -133,15 +149,25 @@ class RowAdapter(
                 if (slot.place != null) v.longClick(row) else v.longClick(null)
             }
             is Row.ModeTabs -> {
-                val tabs = mapOf(
-                    R.id.tab_transit to TravelMode.TRANSIT,
-                    R.id.tab_walk to TravelMode.WALK,
-                    R.id.tab_bike to TravelMode.BIKE,
+                val tabs = listOf(
+                    Triple(R.id.tab_transit, R.id.tab_transit_label, TravelMode.TRANSIT),
+                    Triple(R.id.tab_walk, R.id.tab_walk_label, TravelMode.WALK),
+                    Triple(R.id.tab_bike, R.id.tab_bike_label, TravelMode.BIKE),
                 )
-                tabs.forEach { (id, mode) ->
+                tabs.forEach { (id, labelId, mode) ->
                     val tab = v.findViewById<View>(id)
+                    val name = modeName(v, mode)
+                    val time = row.seconds[mode]?.let { Format.duration(it) }
+                    val fastest = mode == row.fastest
+                    // 카카오맵처럼 아이콘 아래에 걸리는 시간 (모를 땐 수단 이름), 가장 빠른 수단은 초록
+                    v.text(labelId).apply {
+                        text = time ?: name
+                        setTextColor(color(v, if (fastest) R.color.fastest else R.color.text_secondary))
+                        setTypeface(null, if (fastest) Typeface.BOLD else Typeface.NORMAL)
+                    }
+                    tab.contentDescription = listOfNotNull(name, time, if (fastest) "가장 빠름" else null).joinToString(", ")
                     tab.isSelected = mode == row.selected
-                    tab.setOnClickListener { onClick(Row.ModeTabs(mode)) }
+                    tab.setOnClickListener { onClick(row.copy(tapped = mode)) }
                 }
             }
             is Row.TransitCard -> bindTransit(v, row)
@@ -155,19 +181,36 @@ class RowAdapter(
                 }
                 v.text(R.id.sort).apply {
                     text = row.sort.label
-                    isActivated = row.sort != TransitSort.RECOMMENDED
+                    isActivated = row.sort != TransitSort.DEFAULT
                     contentDescription = "정렬 ${row.sort.label}, 눌러서 바꾸기"
                     setOnClickListener { onClick(row.copy(tapped = Row.TransitChoice.SORT)) }
                 }
                 v.setOnClickListener(null)
                 v.isClickable = false
             }
-            is Row.SimpleCard -> {
-                val r = row.route
-                v.text(R.id.time).text = Format.duration(r.totalTimeSec)
-                v.text(R.id.meta).text = "${Format.distance(r.totalDistanceM)} · ${Format.clockAfter(r.totalTimeSec)} 도착"
-                v.setOnClickListener(null)
-                v.isClickable = false
+            is Row.OptionCard -> {
+                val r = row.choice.route
+                val time = Format.duration(r.totalTimeSec)
+                val meta = "${Format.distance(r.totalDistanceM)} · ${Format.clockAfter(r.totalTimeSec)} 도착"
+                v.text(R.id.label).apply {
+                    text = row.choice.label
+                    setTypeface(null, if (row.selected) Typeface.BOLD else Typeface.NORMAL)
+                }
+                v.text(R.id.badge).visibility = if (row.fastest) View.VISIBLE else View.GONE
+                v.text(R.id.time_meta).text = SpannableStringBuilder().apply {
+                    // 글상자 기본 11sp 의 18/11 배 = 18sp (시스템 글자 크기를 따라 함께 커진다)
+                    append(time, RelativeSizeSpan(18f / 11f), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                    setSpan(StyleSpan(Typeface.BOLD), 0, length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                    setSpan(ForegroundColorSpan(color(v, R.color.text_primary)), 0, length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                    append("  ").append(meta)
+                }
+                v.isSelected = row.selected
+                v.contentDescription = listOfNotNull(
+                    row.choice.label, time, meta,
+                    if (row.fastest) "가장 빠름" else null,
+                    if (row.selected) "선택됨" else "눌러서 이 길로",
+                ).joinToString(", ")
+                v.setOnClickListener { onClick(row) }
             }
             is Row.Step -> {
                 v.findViewById<View>(R.id.line).setBackgroundColor(row.color)
@@ -207,8 +250,17 @@ class RowAdapter(
         val first = r.firstRide
         v.text(R.id.first).text = if (first == null) "도보로 이동" else TransitGuide.boardText(first)
         v.text(R.id.live).show(row.live)
+        v.text(R.id.badge).visibility = if (row.fastest) View.VISIBLE else View.GONE
         v.setOnClickListener { onClick(row) }
     }
+
+    private fun modeName(v: View, mode: TravelMode): String = v.context.getString(
+        when (mode) {
+            TravelMode.TRANSIT -> R.string.mode_transit
+            TravelMode.WALK -> R.string.mode_walk
+            TravelMode.BIKE -> R.string.mode_bike
+        }
+    )
 
     private fun View.text(id: Int): TextView = findViewById(id)
 

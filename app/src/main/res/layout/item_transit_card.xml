@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 대중교통 경로 한 개: 총 시간 · 도착 시각 · 요금 · 환승 · 구간 막대 · 첫 승차 + 실시간 도착 -->
+<!-- 대중교통 경로 한 개: (가장 빠름) 총 시간 · 도착 시각 · 요금 · 환승 · 구간 막대 · 첫 승차 + 실시간 도착 -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
@@ -9,6 +9,11 @@
     android:orientation="vertical"
     android:paddingHorizontal="14dp"
     android:paddingVertical="11dp">
+
+    <TextView
+        android:id="@+id/badge"
+        style="@style/FastestBadge"
+        android:layout_marginBottom="2dp" />
 
     <LinearLayout
         android:layout_width="match_parent"

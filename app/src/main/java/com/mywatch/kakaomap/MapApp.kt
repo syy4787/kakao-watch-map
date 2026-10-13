@@ -3,8 +3,10 @@ package com.mywatch.kakaomap
 import android.app.Activity
 import android.app.Application
 import android.os.Bundle
+import android.os.SystemClock
 import android.util.Log
 import com.kakao.vectormap.KakaoMapSdk
+import com.mywatch.kakaomap.data.ErrorLog
 import com.mywatch.kakaomap.update.UpdateInstallWorker
 import com.mywatch.kakaomap.update.UpdateManager
 import com.mywatch.kakaomap.update.UpdateWorker
@@ -13,6 +15,10 @@ class MapApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        // 오류 기록 (앱 정보 화면의 '최근 오류 기록') — 앱이 멈춘 원인도 남긴다
+        ErrorLog.init(this)
+        ErrorLog.installCrashHandler()
+        Thread { ErrorLog.recordExitReasons(this) }.start()
         try {
             // 카카오 권장: Application 에서 한 번만 초기화
             KakaoMapSdk.init(this, AppConfig.KAKAO_NATIVE_APP_KEY)
@@ -22,6 +28,7 @@ class MapApp : Application() {
             // 카카오맵 SDK는 ARM 전용이라 x86 에뮬레이터에선 여기서 실패한다
             initError = t
             Log.e(TAG, "KakaoMapSdk.init 실패", t)
+            ErrorLog.record("지도 엔진", t)
         }
         // 업데이트 저장소가 정해져 있으면 주기적으로 새 버전 확인
         if (UpdateManager.repo(this) != null) UpdateWorker.schedule(this)
@@ -34,7 +41,10 @@ class MapApp : Application() {
 
             override fun onActivityStopped(activity: Activity) {
                 startedActivities = (startedActivities - 1).coerceAtLeast(0)
-                if (startedActivities == 0 && !activity.isChangingConfigurations) UpdateInstallWorker.enqueueSoon(this@MapApp)
+                if (startedActivities == 0 && !activity.isChangingConfigurations) {
+                    lastUiStoppedAt = SystemClock.elapsedRealtime()
+                    UpdateInstallWorker.enqueueSoon(this@MapApp)
+                }
             }
 
             override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) = Unit
@@ -51,6 +61,14 @@ class MapApp : Application() {
         /** 지금 떠 있는(시작된) 화면 수 — 0 이면 앱을 안 보고 있음 (메인 스레드에서 쓰고 업데이트 작업이 읽음) */
         @Volatile
         var startedActivities = 0
+            private set
+
+        /**
+         * 마지막으로 화면이 모두 가려진 시각 (부팅 후 경과 ms, 없으면 0).
+         * 음성 입력·권한 창처럼 다른 앱 화면이 잠깐 덮어도 '화면 0개'가 되므로, 업데이트 설치는 이때부터 한동안 미룬다
+         */
+        @Volatile
+        var lastUiStoppedAt = 0L
             private set
 
         val inUse: Boolean get() = startedActivities > 0

@@ -12,6 +12,9 @@
     <color name="text_dark">#202124</color>
     <color name="text_dark_secondary">#5F6368</color>
     <color name="live">#FF8A3D</color>
+    <!-- '가장 빠름' (경로 카드·이동수단 탭) -->
+    <color name="fastest">#5AD17A</color>
+    <color name="fastest_bg">#1C3A26</color>
     <!-- 안내 종료 버튼 -->
     <color name="end_red">#E2382F</color>
 </resources>

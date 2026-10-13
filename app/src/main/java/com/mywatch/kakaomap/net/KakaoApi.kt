@@ -4,6 +4,7 @@ import com.mywatch.kakaomap.BuildConfig
 import com.mywatch.kakaomap.model.Coord
 import com.mywatch.kakaomap.model.KakaoParsers
 import com.mywatch.kakaomap.model.Place
+import com.mywatch.kakaomap.model.RouteOption
 import com.mywatch.kakaomap.model.SimpleRoute
 import com.mywatch.kakaomap.model.TransitAccess
 import com.mywatch.kakaomap.model.TransitRoute
@@ -44,20 +45,27 @@ object KakaoApi {
         KakaoParsers.transitRoutes(call("/v2/routing/publictraffic", routeParams(from, to, toName)))
             .map { TransitAccess.withAccessWalks(it, from, to, toName) }
 
-    fun walk(from: Coord, to: Coord, toName: String): SimpleRoute =
-        KakaoParsers.simpleRoute(call("/v2/routing/walk", routeParams(from, to, toName)), TravelMode.WALK)
+    /** 도보 경로. [option] = 큰길 우선(기본)·최단 거리·편안한 길 */
+    fun walk(from: Coord, to: Coord, toName: String, option: RouteOption? = null): SimpleRoute =
+        KakaoParsers.simpleRoute(call("/v2/routing/walk", routeParams(from, to, toName, option)), TravelMode.WALK)
+            .copy(option = option)
 
-    fun bike(from: Coord, to: Coord, toName: String): SimpleRoute =
-        KakaoParsers.simpleRoute(call("/v2/routing/bicycle", routeParams(from, to, toName)), TravelMode.BIKE)
+    /** 자전거 경로. [option] = 자전거도로 우선(기본)·최단 거리·편안한 길 */
+    fun bike(from: Coord, to: Coord, toName: String, option: RouteOption? = null): SimpleRoute =
+        KakaoParsers.simpleRoute(call("/v2/routing/bicycle", routeParams(from, to, toName, option)), TravelMode.BIKE)
+            .copy(option = option)
 
-    private fun routeParams(from: Coord, to: Coord, toName: String) = linkedMapOf(
+    fun simple(mode: TravelMode, from: Coord, to: Coord, toName: String, option: RouteOption?): SimpleRoute =
+        if (mode == TravelMode.BIKE) bike(from, to, toName, option) else walk(from, to, toName, option)
+
+    fun routeParams(from: Coord, to: Coord, toName: String, option: RouteOption? = null): Map<String, String> = linkedMapOf(
         "start_x" to from.lng.fmt(),
         "start_y" to from.lat.fmt(),
         "end_x" to to.lng.fmt(),
         "end_y" to to.lat.fmt(),
         "s_name" to "내 위치",
         "e_name" to toName.take(30).ifBlank { "도착" },
-    )
+    ).apply { if (option != null) put("route_mode", option.api) }
 
     private fun call(path: String, params: Map<String, String>): JSONObject {
         val key = BuildConfig.KAKAO_REST_API_KEY

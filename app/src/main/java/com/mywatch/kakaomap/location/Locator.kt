@@ -34,6 +34,9 @@ object Locator {
     /** 새 위치를 못 잡을 때 대신 쓸 수 있는 '마지막 위치'의 최대 나이 (실내 등) */
     private const val FALLBACK_MAX_AGE_MS = 10 * 60_000L
 
+    /** 저전력 위치만 있을 때 GPS 를 기다리는 시간 (실내에서 오래 기다리지 않게) */
+    private const val COARSE_WAIT_MS = 8_000L
+
     fun hasPermission(context: Context): Boolean =
         ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) ==
             PackageManager.PERMISSION_GRANTED ||
@@ -49,22 +52,26 @@ object Locator {
     fun ageMinutes(fix: Fix): Long = (SystemClock.elapsedRealtime() - fix.elapsedMs) / 60_000L
 
     /**
-     * 최근(2분 이내) 위치가 있으면 그것을, 없으면 새로 잡는다.
-     * 새로 못 잡으면 10분 이내의 마지막 위치까지만 허용 — 몇 시간 전 위치로 길을 찾는 일이 없게.
+     * 최근(2분 이내)의 정확한 위치가 있으면 그것을, 없으면 새로 잡는다.
+     * 최근 위치가 Wi-Fi·기지국 위치(안내 서비스가 도착 뒤·지하철에서 쓰는 저전력 위치)뿐이면 GPS 를 잠깐(8초) 기다려 보고,
+     * 못 잡으면(실내) 그 위치라도 쓴다. 새로 못 잡으면 10분 이내의 마지막 위치까지만 허용 — 몇 시간 전 위치로 길을 찾지 않게.
      * 권한이 없거나 아무것도 없으면 null.
      */
     @SuppressLint("MissingPermission")
     suspend fun current(context: Context, timeoutMs: Long = 20_000): Fix? {
-        RouteRepository.freshFix(FRESH_MS)?.let { return it }
-        if (!hasPermission(context)) return null
+        val cached = RouteRepository.freshFix(FRESH_MS)
+        if (cached != null && cached.goodForStart) return cached
+        if (!hasPermission(context)) return cached
         val client = LocationServices.getFusedLocationProviderClient(context)
         val cts = CancellationTokenSource()
+        val wait = if (cached != null) minOf(timeoutMs, COARSE_WAIT_MS) else timeoutMs
         val request = CurrentLocationRequest.Builder()
             .setPriority(Priority.PRIORITY_HIGH_ACCURACY)
-            .setMaxUpdateAgeMillis(30_000)       // 30초 넘은 캐시 위치는 받지 않음
-            .setDurationMillis(timeoutMs)
+            // 30초 넘은 캐시 위치는 받지 않음. 저전력 위치만 있으면 캐시를 아예 받지 않음(같은 저전력 위치가 되돌아오지 않게)
+            .setMaxUpdateAgeMillis(if (cached != null) 0 else 30_000)
+            .setDurationMillis(wait)
             .build()
-        val fresh: Location? = withTimeoutOrNull(timeoutMs + 1_000) {
+        val fresh: Location? = withTimeoutOrNull(wait + 1_000) {
             suspendCancellableCoroutine { cont ->
                 client.getCurrentLocation(request, cts.token)
                     .addOnSuccessListener { if (cont.isActive) cont.resume(it) }
@@ -73,7 +80,12 @@ object Locator {
             }
         }
         cts.cancel()
-        val loc = fresh ?: withTimeoutOrNull(3_000) {
+        fresh?.toFix()?.let { fix ->
+            RouteRepository.updateFix(fix)
+            return fix
+        }
+        if (cached != null) return cached
+        val loc = withTimeoutOrNull(3_000) {
             suspendCancellableCoroutine { cont ->
                 client.lastLocation
                     .addOnSuccessListener { if (cont.isActive) cont.resume(it) }

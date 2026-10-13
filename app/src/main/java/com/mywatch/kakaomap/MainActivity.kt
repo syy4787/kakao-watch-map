@@ -58,9 +58,11 @@ import com.kakao.vectormap.route.RouteLineOptions
 import com.kakao.vectormap.route.RouteLineSegment
 import com.kakao.vectormap.route.RouteLineStyle
 import com.mywatch.kakaomap.data.ActiveRoute
+import com.mywatch.kakaomap.data.ErrorLog
 import com.mywatch.kakaomap.data.RouteRepository
 import com.mywatch.kakaomap.location.HeadingSensor
 import com.mywatch.kakaomap.location.Locator
+import com.mywatch.kakaomap.location.PermissionHelp
 import com.mywatch.kakaomap.location.toFix
 import com.mywatch.kakaomap.model.Coord
 import com.mywatch.kakaomap.model.Action
@@ -152,6 +154,8 @@ class MainActivity : ComponentActivity() {
 
     // 경로
     private var drawnRouteVersion = -1
+    /** '정확한 위치'를 이미 물어본 경로 (같은 경로로 권한 창을 두 번 띄우지 않게) */
+    private var preciseAskedForVersion = -1
     private var routeLine: RouteLine? = null
     private var routeLabels = mutableListOf<Label>()
 
@@ -170,9 +174,16 @@ class MainActivity : ComponentActivity() {
     private val hideControlsRunnable = Runnable { setControlsVisible(false) }
     private val hideStatusRunnable = Runnable { statusText.visibility = View.GONE }
 
+    /** 위치 권한 창을 띄운 시각과 까닭 — 곧바로 거절이 오면 시스템이 창을 안 띄운 것(두 번 거절해 막힘) */
+    private var permissionAskedAt = 0L
+    private var permissionByUser = false
+
     private val permissionRequest = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { result ->
+        val blocked = PermissionHelp.deniedWithoutDialog(permissionAskedAt, SystemClock.elapsedRealtime())
+        val byUser = permissionByUser
+        permissionByUser = false
         if (result.values.any { it }) {
             setLocMode(LocMode.FOLLOW)
             // '안내 시작'을 정확한 위치 권한 때문에 미뤄 뒀다면 이제 시작 (알림 권한 요청도 그 뒤에 — 한 번에 하나만 뜰 수 있음)
@@ -180,10 +191,26 @@ class MainActivity : ComponentActivity() {
             if (active != null && active.startNavigation && Locator.hasPrecise(this)) {
                 maybeAskNotificationPermission()
                 NavigationService.start(this)
+            } else if (active != null && active.startNavigation && blocked && byUser) {
+                // '정확한 위치'를 두 번 거절해 창이 안 뜸 → 설정에서 바꾸도록
+                showStatus(getString(R.string.precise_location_needed), autoHideMs = 4_000)
+                PermissionHelp.openAppSettings(this)
             }
+        } else if (blocked && byUser) {
+            // 두 번 거절해 권한 창이 더는 안 뜸 → 앱 설정(권한) 화면으로
+            showStatus(getString(R.string.location_blocked), autoHideMs = 4_000)
+            PermissionHelp.openAppSettings(this)
         } else {
             showStatus(getString(R.string.location_permission_denied), autoHideMs = 2500)
         }
+    }
+
+    /** 위치 권한 창 띄우기. [byUser] = 사용자가 버튼·안내 시작으로 직접 원한 것 (막혀 있으면 설정 화면을 열어도 됨) */
+    private fun requestLocationPermission(byUser: Boolean) {
+        permissionAskedAt = SystemClock.elapsedRealtime()
+        permissionByUser = byUser
+        markAskedPermission()
+        permissionRequest.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
     }
 
     /** 안내 알림(워치페이스의 진행 중 아이콘) 표시 권한 — 거부해도 안내는 된다 */
@@ -259,6 +286,7 @@ class MainActivity : ComponentActivity() {
         val initError = MapApp.initError
         if (initError != null) {
             showStatus(getString(R.string.error_sdk_init, initError.javaClass.simpleName), isError = true)
+            ensureNavigation()   // 지도를 못 그려도 진동 안내는
             return
         }
 
@@ -266,6 +294,8 @@ class MainActivity : ComponentActivity() {
         mapStarted = true
         mapView.start(lifeCycleCallback, readyCallback)
         bumpControls()
+        // 지도 인증·로딩을 기다리지 않고 안내부터 (블루투스로 느리거나 지도 인증이 실패해도 진동 안내는 되게)
+        ensureNavigation()
 
         // 안내 상태(현재 구간·남은 거리·도착·재탐색)를 지도 배너와 저전력 화면에 반영
         lifecycleScope.launch {
@@ -279,6 +309,7 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         // 길찾기 화면에서 '지도에서 보기/안내 시작'으로 돌아온 경우
+        ensureNavigation()
         kakaoMap?.let { syncRoute() }
     }
 
@@ -354,6 +385,7 @@ class MainActivity : ComponentActivity() {
 
         override fun onMapError(error: Exception) {
             Log.e(MapApp.TAG, "지도 오류", error)
+            ErrorLog.record("지도", error)
             runOnUiThread { onMapFailed(error) }
         }
     }
@@ -388,8 +420,7 @@ class MainActivity : ComponentActivity() {
         if (Locator.hasPermission(this)) {
             if (RouteRepository.activeRoute == null) setLocMode(LocMode.FOLLOW) else refreshLocationPlan()
         } else if (!askedPermissionBefore()) {
-            markAskedPermission()
-            permissionRequest.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
+            requestLocationPermission(byUser = false)   // 처음 한 번만 저절로
         }
     }
 
@@ -414,6 +445,7 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         screenResumed = true
         if (mapStarted && !inAmbient) mapView.resume()   // 카카오 필수
+        ensureNavigation()
         if (kakaoMap != null) {
             syncRoute()
             refreshLocationPlan()
@@ -544,11 +576,7 @@ class MainActivity : ComponentActivity() {
         setControlsVisible(controlsShown)    // 경로가 생기면 버튼 구성이 바뀜 (✕ 추가)
 
         val needPrecise = active.startNavigation && Locator.hasPermission(this) && !Locator.hasPrecise(this)
-        if (needPrecise) {
-            // '대략적 위치'만으로는 갈림길·정류장을 가릴 수 없어 안내가 시작되지 않는다 → 정확한 위치를 다시 요청
-            showStatus(getString(R.string.precise_location_needed), autoHideMs = 4_000)
-            permissionRequest.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
-        }
+        if (needPrecise) askPreciseOnce()
         if (active.startNavigation && Locator.hasPermission(this)) {
             // 나침반 모드로 보고 있었다면(재탐색 등) 그대로 유지
             setLocMode(if (locMode == LocMode.COMPASS) LocMode.COMPASS else LocMode.FOLLOW)
@@ -670,6 +698,29 @@ class MainActivity : ComponentActivity() {
         renderNav(Navigator.state.value)
     }
 
+    /**
+     * '안내 시작'한 경로면 지도 준비와 상관없이 안내 서비스를 켠다 — 지도 인증이 늦거나(폰 블루투스로 연결) 실패해도
+     * 진동 안내·진행 중 아이콘은 되게. 지도에 경로를 그리는 건 지도가 준비된 뒤 syncRoute 가 한다.
+     */
+    private fun ensureNavigation() {
+        val active = RouteRepository.activeRoute ?: return
+        if (!active.startNavigation || NavigationService.running || !Locator.hasPermission(this)) return
+        if (!Locator.hasPrecise(this)) {
+            askPreciseOnce()
+            return
+        }
+        maybeAskNotificationPermission()
+        NavigationService.start(this)
+    }
+
+    /** '대략적 위치'만으로는 갈림길·정류장을 가릴 수 없어 안내가 시작되지 않는다 → 정확한 위치를 (경로마다 한 번) 다시 요청 */
+    private fun askPreciseOnce() {
+        if (preciseAskedForVersion == RouteRepository.activeRouteVersion) return
+        preciseAskedForVersion = RouteRepository.activeRouteVersion
+        showStatus(getString(R.string.precise_location_needed), autoHideMs = 4_000)
+        requestLocationPermission(byUser = true)   // '안내 시작'을 누른 결과
+    }
+
     private fun maybeAskNotificationPermission() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) ==
@@ -734,7 +785,8 @@ class MainActivity : ComponentActivity() {
         followLostByTouch = false
         mainHandler.removeCallbacks(refollowRunnable)
         if (!Locator.hasPermission(this)) {
-            permissionRequest.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
+            // 두 번 거절해 권한 창이 더는 안 뜨면 결과를 받는 곳에서 앱 설정(권한) 화면을 연다
+            requestLocationPermission(byUser = true)
             return
         }
         setLocMode(
@@ -1051,15 +1103,12 @@ class MainActivity : ComponentActivity() {
         return getString(R.string.err_with_hash, reason, packageName, hashKey) + "\n\n" + retry
     }
 
-    private fun askedPermissionBefore() =
-        getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_ASKED, false)
+    private fun askedPermissionBefore() = PermissionHelp.askedLocation(this)
 
-    private fun markAskedPermission() =
-        getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit { putBoolean(KEY_ASKED, true) }
+    private fun markAskedPermission() = PermissionHelp.markAskedLocation(this)
 
     companion object {
         private const val PREFS = "main"
-        private const val KEY_ASKED = "asked_location"
         private const val KEY_ASKED_NOTIFICATIONS = "asked_notifications"
         private const val KEY_GUIDE_COMPACT = "guide_compact"
         private const val REFOLLOW_AFTER_MS = 8_000L

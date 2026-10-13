@@ -7,7 +7,10 @@ data class Coord(val lat: Double, val lng: Double)
  * GPS 위치 한 번 (좌표 + 정확도 + 측정 시각).
  * elapsedMs 는 부팅 후 경과 시간(SystemClock.elapsedRealtime 기준) — 위치가 '언제' 잡혔는지로 신선도를 판단한다.
  */
-data class Fix(val coord: Coord, val accuracyM: Float, val elapsedMs: Long)
+data class Fix(val coord: Coord, val accuracyM: Float, val elapsedMs: Long) {
+    /** 길찾기 출발지로 그대로 써도 될 만큼 정확한지 (Wi-Fi·기지국 위치는 수백 m 틀릴 수 있다) */
+    val goodForStart: Boolean get() = !accuracyM.isNaN() && accuracyM <= 50f
+}
 
 /** 키워드 검색 결과 장소 */
 data class Place(
@@ -44,6 +47,8 @@ data class SimpleRoute(
     val totalDistanceM: Int,
     val totalTimeSec: Int,
     val steps: List<PathStep>,
+    /** 이 경로를 낸 옵션 (자전거도로 우선 등) — 경로 이탈 재탐색도 같은 옵션으로 */
+    val option: RouteOption? = null,
 )
 
 enum class TransitStepType { WALK, BUS, SUBWAY, OTHER }

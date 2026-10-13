@@ -19,8 +19,10 @@
     </style>
 
     <!-- 이동수단 탭 -->
+    <!-- 세 탭이 목록 폭(약 177dp)을 똑같이 나눠 쓴다 — 고정 폭이면 둥근 화면 가장자리에서 잘림 -->
     <style name="ModeTab">
-        <item name="android:layout_width">62dp</item>
+        <item name="android:layout_width">0dp</item>
+        <item name="android:layout_weight">1</item>
         <item name="android:layout_height">wrap_content</item>
         <item name="android:orientation">vertical</item>
         <item name="android:gravity">center_horizontal</item>
@@ -38,11 +40,33 @@
         <item name="android:duplicateParentState">true</item>
     </style>
 
+    <!-- 탭 폭(62dp)에 맞춰 '1시간 25분'처럼 긴 시간은 글자를 줄여 한 줄로 -->
     <style name="ModeTabLabel">
-        <item name="android:layout_width">wrap_content</item>
-        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">16dp</item>
         <item name="android:layout_marginTop">2dp</item>
+        <item name="android:gravity">center</item>
+        <item name="android:maxLines">1</item>
         <item name="android:textColor">@color/text_secondary</item>
         <item name="android:textSize">11sp</item>
+        <item name="android:autoSizeTextType">uniform</item>
+        <item name="android:autoSizeMinTextSize">8sp</item>
+        <item name="android:autoSizeMaxTextSize">11sp</item>
+        <item name="android:importantForAccessibility">no</item>
+    </style>
+
+    <!-- '가장 빠름' 작은 표시 (경로 옵션 카드·대중교통 카드) -->
+    <style name="FastestBadge">
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:background">@drawable/bg_badge_fastest</item>
+        <item name="android:paddingHorizontal">6dp</item>
+        <item name="android:paddingVertical">1dp</item>
+        <item name="android:maxLines">1</item>
+        <item name="android:text">@string/fastest</item>
+        <item name="android:textColor">@color/fastest</item>
+        <item name="android:textSize">10sp</item>
+        <item name="android:textStyle">bold</item>
+        <item name="android:visibility">gone</item>
     </style>
 </resources>

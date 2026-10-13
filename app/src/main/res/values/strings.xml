@@ -15,6 +15,7 @@
     <string name="location_unavailable">현재 위치를\n가져오지 못했어요</string>
     <string name="location_permission_denied">위치 권한이 없어\n내 위치를 표시할 수 없어요</string>
     <string name="location_needed">길찾기는 현재 위치가 필요해요.\n위치 권한을 허용해 주세요</string>
+    <string name="location_blocked">위치 권한이 꺼져 있어요.\n설정 > 권한 > 위치를 허용해 주세요</string>
 
     <string name="search_title">어디로 갈까요?</string>
     <string name="search_hint">도착지 검색</string>
@@ -39,6 +40,7 @@
     <string name="routing">경로 찾는 중…</string>
     <string name="show_on_map">지도에서 보기</string>
     <string name="start_navigation">안내 시작</string>
+    <string name="fastest">가장 빠름</string>
     <string name="end_route">안내 종료</string>
     <string name="precise_location_needed">길안내는 \'정확한 위치\'를 허용해야 해요</string>
     <string name="gps_weak">GPS 신호 약함 · 위치 추정 중</string>

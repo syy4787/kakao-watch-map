@@ -27,6 +27,8 @@
     <uses-permission android:name="android.permission.VIBRATE" />
     <!-- 안내 알림 / 워치페이스의 '진행 중' 아이콘 -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- 안내 알림을 '실시간 업데이트'(Live Update)로 올리기 — Wear OS 7 에서 진행 중 활동 대신 쓰임 (설치 시 자동 허용) -->
+    <uses-permission android:name="android.permission.POST_PROMOTED_NOTIFICATIONS" />
 
     <application
         android:name=".MapApp"

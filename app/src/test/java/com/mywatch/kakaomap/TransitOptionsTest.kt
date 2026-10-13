@@ -73,6 +73,25 @@ class TransitOptionsTest {
     }
 
     @Test
+    fun theFastestRouteIsKnownWhateverTheSort() {
+        // 카카오 순서(추천순)에선 셋째지만 가장 빨리 도착하는 경로 — '가장 빠름' 표시
+        assertEquals(2, TransitOptions.fastestIndex(routes))
+        assertEquals(null, TransitOptions.fastestIndex(emptyList()))
+        // 시간이 같으면 환승이 적은 쪽 (최소시간 정렬의 첫 카드와 같게)
+        val tie = listOf(route("BUS", 50, 2, 3, TransitStepType.BUS), route("BUS", 50, 1, 9, TransitStepType.BUS))
+        assertEquals(1, TransitOptions.fastestIndex(tie))
+        assertEquals(TransitOptions.apply(tie, TransitFilter.ALL, TransitSort.FASTEST).first().index, TransitOptions.fastestIndex(tie))
+    }
+
+    @Test
+    fun theListStartsWithTheFastestUntilTheUserPicksAnotherSort() {
+        assertEquals(TransitSort.FASTEST, TransitSort.saved(null))
+        assertEquals(TransitSort.FASTEST, TransitSort.saved("모르는 값"))
+        assertEquals(TransitSort.RECOMMENDED, TransitSort.saved("RECOMMENDED"))
+        assertEquals(TransitSort.LEAST_WALK, TransitSort.saved("LEAST_WALK"))
+    }
+
+    @Test
     fun tappingAChipMovesToTheNextChoice() {
         val choices = TransitOptions.filters(routes).map { it.first }
         assertEquals(TransitFilter.BUS, TransitOptions.next(TransitFilter.ALL, choices))

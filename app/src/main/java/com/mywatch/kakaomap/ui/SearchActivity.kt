@@ -14,6 +14,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.lifecycle.lifecycleScope
 import androidx.wear.input.RemoteInputIntentHelper
 import com.mywatch.kakaomap.R
+import com.mywatch.kakaomap.data.ErrorLog
 import com.mywatch.kakaomap.data.Favorite
 import com.mywatch.kakaomap.data.Favorites
 import com.mywatch.kakaomap.data.RouteRepository
@@ -241,6 +242,7 @@ class SearchActivity : ComponentActivity() {
                 ui.rows = rows
                 resultsShown = true
             }.onFailure { e ->
+                ErrorLog.record("검색", e)
                 resultsShown = true
                 ui.rows = listOfNotNull(
                     Row.Header(title),

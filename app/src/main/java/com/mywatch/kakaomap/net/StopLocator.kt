@@ -3,6 +3,7 @@ package com.mywatch.kakaomap.net
 import android.util.Log
 import com.mywatch.kakaomap.MapApp
 import com.mywatch.kakaomap.data.ActiveRoute
+import com.mywatch.kakaomap.data.ErrorLog
 import com.mywatch.kakaomap.model.Coord
 import com.mywatch.kakaomap.model.Geo
 import com.mywatch.kakaomap.model.StopPlacer
@@ -36,7 +37,10 @@ object StopLocator {
             transit.steps.forEachIndexed { i, step ->
                 if (step.type != TransitStepType.BUS && step.type != TransitStepType.SUBWAY) return@forEachIndexed
                 val along = runCatching { alongFor(step) }
-                    .onFailure { Log.i(MapApp.TAG, "정류장 위치를 못 찾음: ${it.message}") }
+                    .onFailure {
+                        Log.i(MapApp.TAG, "정류장 위치를 못 찾음: ${it.message}")
+                        ErrorLog.record("정류장 위치", it)
+                    }
                     .getOrNull() ?: return@forEachIndexed
                 withContext(Dispatchers.Main) { Navigator.setStops(routeVersion, i, along) }
             }

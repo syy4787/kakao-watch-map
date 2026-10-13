@@ -8,6 +8,7 @@ import com.mywatch.kakaomap.model.Fix
 import com.mywatch.kakaomap.model.GuideStep
 import com.mywatch.kakaomap.model.Place
 import com.mywatch.kakaomap.model.PlaceJson
+import com.mywatch.kakaomap.model.RouteChoice
 import com.mywatch.kakaomap.model.SimpleRoute
 import com.mywatch.kakaomap.model.TransitRoute
 import com.mywatch.kakaomap.model.TravelMode
@@ -56,10 +57,32 @@ object RouteRepository {
 
     var destination: Place? = null
     var transitRoutes: List<TransitRoute>? = null
-    var walkRoute: SimpleRoute? = null
-    var bikeRoute: SimpleRoute? = null
+    /** 도보·자전거 경로 카드 (카카오맵의 경로 옵션별 결과, 같은 길은 한 카드) */
+    var walkChoices: List<RouteChoice>? = null
+    var bikeChoices: List<RouteChoice>? = null
     /** 경로를 계산한 출발 좌표 */
     var routeOrigin: Coord? = null
+
+    fun choices(mode: TravelMode): List<RouteChoice>? = when (mode) {
+        TravelMode.WALK -> walkChoices
+        TravelMode.BIKE -> bikeChoices
+        TravelMode.TRANSIT -> null
+    }
+
+    fun setChoices(mode: TravelMode, choices: List<RouteChoice>?) {
+        when (mode) {
+            TravelMode.WALK -> walkChoices = choices
+            TravelMode.BIKE -> bikeChoices = choices
+            TravelMode.TRANSIT -> Unit
+        }
+    }
+
+    /** 이 목적지로 받아 둔 경로를 모두 버린다 (출발지가 바뀌었을 때 등) */
+    fun clearRoutes() {
+        transitRoutes = null
+        walkChoices = null
+        bikeChoices = null
+    }
 
     var activeRoute: ActiveRoute? = null
         set(value) {
@@ -71,9 +94,7 @@ object RouteRepository {
 
     fun selectDestination(place: Place) {
         destination = place
-        transitRoutes = null
-        walkRoute = null
-        bikeRoute = null
+        clearRoutes()
         routeOrigin = null
     }
 

@@ -39,6 +39,7 @@ class RouteDetailActivity : ComponentActivity() {
     private var transit: TransitRoute? = null
     private var simple: SimpleRoute? = null
     private var fromActive = false
+    private var ambient: AmbientCover? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -71,15 +72,31 @@ class RouteDetailActivity : ComponentActivity() {
         setContentView(R.layout.activity_list)
         ui = WearList(this, ::onRow)
         ui.rows = buildRows()
+        // 손목을 내리면 검은 화면에 요약만 (Wear OS 6+ 는 이 화면을 켜 둔 채 둔다), 그동안 새로 고침은 쉰다
+        ambient = AmbientCover(this, ::ambientSummary) { inAmbient ->
+            if (!inAmbient && transit != null && TagoApi.isConfigured &&
+                lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)
+            ) lifecycleScope.launch { refreshLive() }
+        }
 
-        // 화면을 보는 동안 30초마다 실시간 버스 도착 정보를 새로 고침
+        // 화면을 보는 동안 30초마다 실시간 버스 도착 정보를 새로 고침 (손목을 내린 동안은 쉼)
         if (transit != null && TagoApi.isConfigured) lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.RESUMED) {
                 while (true) {
-                    refreshLive()
+                    if (ambient?.inAmbient != true) refreshLive()
                     delay(30_000)
                 }
             }
+        }
+    }
+
+    private fun ambientSummary(): String {
+        val t = transit
+        val s = simple
+        return when {
+            t != null -> "→ ${place.name}\n${Format.duration(t.totalTimeSec)} · ${Format.clockAfter(t.totalTimeSec)} 도착"
+            s != null -> "→ ${place.name}\n${RoutePresentation.simpleSummary(s)}"
+            else -> "→ ${place.name}"
         }
     }
 
