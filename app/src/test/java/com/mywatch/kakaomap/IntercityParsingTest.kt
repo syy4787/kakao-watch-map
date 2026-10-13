@@ -9,6 +9,7 @@ import com.mywatch.kakaomap.model.TagoParsers
 import com.mywatch.kakaomap.net.TagoCatalog
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -145,6 +146,44 @@ class IntercityParsingTest {
         assertEquals(32, Regions.trainCityCode("강원"))
         assertEquals(38, Regions.trainCityCode("경남"))
         assertNull(Regions.trainCityCode("제주"))
+    }
+
+    @Test
+    fun mergedProvincesFromKakaoAddresses() {
+        // 2026 카카오 주소: 광주·전남이 '전남광주통합특별시' 하나로 — TAGO 목록은 아직 '광주광역시'·'전라남도'
+        val merged = Regions.ofAddress("전남광주통합특별시 서구 광천동 49-1")!!
+        assertTrue(Regions.matches(merged, "광주광역시"))
+        assertTrue(Regions.matches(merged, "전라남도"))
+        assertFalse(Regions.matches(merged, "대전광역시"))
+        assertTrue(Regions.matches("대전", "대전광역시"))
+        assertFalse(Regions.matches("대전", "전라남도"))
+        assertTrue("시도를 모르는 TAGO 터미널은 통과", Regions.matches("대전", ""))
+        // 기차역은 광주(24)·전남(36) 목록을 둘 다 본다
+        assertEquals(listOf(24, 36), Regions.trainCityCodes(merged))
+        assertEquals(listOf(25), Regions.trainCityCodes("대전"))
+        assertTrue(Regions.trainCityCodes("제주").isEmpty())
+        // 광주 터미널이 전남 '대전'·다른 도시와 섞이지 않고 맞춰짐
+        val gwangju = listOf(TagoNode("NAI6193701", "광주(유·스퀘어)", "광주광역시"), TagoNode("NAI5732602", "대전", "전라남도"))
+        assertEquals("NAI6193701", TagoMatching.terminals("유스퀘어광주종합버스터미널", merged, gwangju).firstOrNull()?.id)
+    }
+
+    @Test
+    fun moreCitiesTerminalNames() {
+        // 2026-10-13 카카오 '고속,시외버스터미널' 결과 이름 ↔ TAGO 고속버스 이름
+        val exp = listOf(
+            "NAEK500" to "광주(유·스퀘어)", "NAEK800" to "동대구", "NAEK600" to "전주", "NAEK230" to "강릉", "NAEK310" to "천안",
+            "NAEK110" to "수원", "NAEK715" to "울산", "NAEK100" to "인천", "NAEK400" to "청주(고속)",
+        ).map { TagoNode(it.first, it.second) }
+        fun id(k: String) = TagoMatching.terminals(k, null, exp).firstOrNull()?.id
+        assertEquals("NAEK500", id("유스퀘어광주종합버스터미널"))
+        assertEquals("NAEK800", id("동대구터미널"))
+        assertEquals("NAEK600", id("전주고속버스터미널"))
+        assertEquals("NAEK600", id("전주시외버스공용터미널"))
+        assertEquals("NAEK230", id("강릉고속버스터미널"))
+        assertEquals("NAEK310", id("천안고속버스터미널"))
+        assertEquals("NAEK110", id("수원버스터미널"))
+        assertEquals("NAEK715", id("울산고속버스터미널"))
+        assertEquals("NAEK100", id("인천종합터미널"))
     }
 
     @Test

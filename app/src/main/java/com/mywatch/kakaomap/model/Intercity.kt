@@ -130,10 +130,15 @@ object Regions {
         "경기" to 31, "강원" to 32, "충북" to 33, "충남" to 34, "전북" to 35, "전남" to 36, "경북" to 37, "경남" to 38,
     )
 
+    /**
+     * 이름에 든 시도. 합쳐진 시도(2026 카카오 주소의 '전남광주통합특별시')는 둘 다 → "광주+전남".
+     * 없으면 null
+     */
     private fun canonical(s: String): String? {
         val t = s.trim()
         if (t.isEmpty()) return null
-        return PREFIXES.firstOrNull { (prefixes, _) -> prefixes.any { t.startsWith(it) } }?.second
+        val found = PREFIXES.filter { (names, _) -> names.any { t.contains(it) } }.map { it.second }.distinct()
+        return if (found.isEmpty()) null else found.sorted().joinToString("+")
     }
 
     fun ofAddress(address: String): String? = canonical(address.trim().split(' ').first())
@@ -142,6 +147,16 @@ object Regions {
 
     /** TAGO 열차정보의 도시 코드 (제주 등 기차가 없는 곳은 null) */
     fun trainCityCode(region: String): Int? = TRAIN_CITY[region]
+
+    /** 카카오 주소의 시도와 TAGO 터미널의 시도가 같은지 (TAGO 쪽 시도를 모르면 같다고 본다, 합쳐진 시도는 어느 한쪽이면) */
+    fun matches(region: String, tagoCityName: String): Boolean {
+        val other = ofTagoCity(tagoCityName) ?: return true
+        val mine = region.split('+').toSet()
+        return other.split('+').any { it in mine }
+    }
+
+    /** 이 시도의 TAGO 열차정보 도시 코드들 (합쳐진 시도는 둘 다 — 광주 24 · 전남 36) */
+    fun trainCityCodes(region: String): List<Int> = region.split('+').mapNotNull { TRAIN_CITY[it] }.sorted()
 }
 
 /** 카카오 장소 이름 ↔ TAGO 역·터미널 이름 */
@@ -153,7 +168,7 @@ object TagoMatching {
     /** 무거운 키: 이 말들을 끝에서 되풀이해 뗀다 ("세종고속시외버스터미널" → "세종") */
     private val HEAVY_TAILS = listOf("터미널", "정류소", "정류장", "매표소", "환승센터", "버스", "고속", "시외", "종합", "복합", "공용", "여객")
     /** 카카오와 TAGO 고속버스 목록의 이름이 다른 큰 터미널 (무거운 키 기준) */
-    private val ALIASES = mapOf("부산서부" to "부산사상", "서울" to "서울경부")
+    private val ALIASES = mapOf("부산서부" to "부산사상", "서울" to "서울경부", "유스퀘어광주" to "광주")
 
     /** "대전역" → "대전", "울산역(통도사)" → "울산", "광명역 KTX" → "광명" */
     fun stationKey(name: String): String =
@@ -183,7 +198,7 @@ object TagoMatching {
      * [region] 이 있으면 시도가 다른 TAGO 터미널(전남 '대전' 등)은 뺀다.
      */
     fun terminals(kakaoName: String, region: String?, nodes: List<TagoNode>): List<TagoNode> {
-        val usable = nodes.filter { n -> region == null || Regions.ofTagoCity(n.cityName)?.let { it == region } ?: true }
+        val usable = nodes.filter { n -> region == null || Regions.matches(region, n.cityName) }
         val light = terminalKeys(kakaoName, heavy = false).toSet()
         usable.filter { n -> terminalKeys(n.name, heavy = false).any { it in light } }
             .sortedBy { it.id }

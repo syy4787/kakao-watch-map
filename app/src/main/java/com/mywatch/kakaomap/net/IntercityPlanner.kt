@@ -142,9 +142,11 @@ class IntercityPlanner(private val source: IntercitySource) {
     private fun stations(places: List<Place>, problems: MutableList<String>): List<Stop> {
         val byCity = HashMap<Int, List<TagoNode>>()
         return places.mapNotNull { pl ->
-            val code = Regions.ofAddress(pl.address)?.let(Regions::trainCityCode) ?: return@mapNotNull null
-            val list = byCity.getOrPut(code) {
-                attempt(problems, IntercityKind.TRAIN.label) { source.trainStations(code) }.orEmpty()
+            // 합쳐진 시도(전남광주통합특별시)는 두 도시의 역 목록을 함께 본다
+            val codes = Regions.ofAddress(pl.address)?.let(Regions::trainCityCodes).orEmpty()
+            if (codes.isEmpty()) return@mapNotNull null
+            val list = codes.flatMap { code ->
+                byCity.getOrPut(code) { attempt(problems, IntercityKind.TRAIN.label) { source.trainStations(code) }.orEmpty() }
             }
             TagoMatching.station(pl.name, list)?.let { Stop(pl, it) }
         }.distinctBy { it.node.id }.take(MAX_STATIONS)
