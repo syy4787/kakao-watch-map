@@ -103,6 +103,7 @@ class UpdateOutsideTest {
         list.measure(480, 480)
         list.layout(0, 0, 480, 480)
         list.scrollToPosition(pos)
+        list.measure(480, 480)   // 스크롤은 다시 재고 놓아야 적용된다
         list.layout(0, 0, 480, 480)
         val holder = list.findViewHolderForAdapterPosition(pos) ?: throw AssertionError("'$text' 줄이 그려지지 않음")
         holder.itemView.performClick()

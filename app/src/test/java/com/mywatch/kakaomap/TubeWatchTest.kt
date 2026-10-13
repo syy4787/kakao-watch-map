@@ -1,16 +1,24 @@
 package com.mywatch.kakaomap
 
+import android.app.Activity
 import android.app.Application
+import android.app.RemoteInput
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.net.Uri
+import android.os.Bundle
 import android.os.Looper
 import android.provider.Browser
 import android.view.View
 import androidx.recyclerview.widget.RecyclerView
+import com.mywatch.kakaomap.tube.PhoneOpener
+import com.mywatch.kakaomap.tube.TubeApi
 import com.mywatch.kakaomap.tube.TubeLinks
+import com.mywatch.kakaomap.tube.TubePage
+import com.mywatch.kakaomap.tube.TubeResult
+import com.mywatch.kakaomap.tube.TubeSource
 import com.mywatch.kakaomap.tube.TubeState
 import com.mywatch.kakaomap.tube.TubeVideo
 import com.mywatch.kakaomap.tube.WatchPlayer
@@ -19,6 +27,7 @@ import com.mywatch.kakaomap.ui.RowAdapter
 import com.mywatch.kakaomap.ui.TubeActivity
 import com.mywatch.kakaomap.ui.TubeRows
 import com.mywatch.kakaomap.ui.TubeThumbs
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -64,6 +73,8 @@ class TubeWatchTest {
     fun tearDown() {
         TubeThumbs.enabled = true
         WatchPlayer.reset()
+        PhoneOpener.override = null
+        TubeApi.override = null
     }
 
     /** 워치에 인터넷 앱(https 링크를 여는 앱)을 깐다 */
@@ -98,6 +109,8 @@ class TubeWatchTest {
         rv.measure(spec, spec)
         rv.layout(0, 0, 480, 480)
         rv.scrollToPosition(i)
+        // 스크롤은 다음 배치 때 적용된다 — 다시 재고(measure) 놓아야(layout) 그 줄이 그려진다
+        rv.measure(spec, spec)
         rv.layout(0, 0, 480, 480)
         val v = rv.findViewHolderForAdapterPosition(i)!!.itemView
         if (long) v.performLongClick() else v.performClick()
@@ -105,6 +118,16 @@ class TubeWatchTest {
     }
 
     private fun startedLink(a: TubeActivity): Intent? = shadowOf(a).nextStartedActivity
+
+    /** IO 스레드의 검색이 끝나 화면에 돌아올 때까지 (실제 시간으로, 최대 5초 — 바쁜 컴퓨터에서도 같은 결과) */
+    private fun waitForSearch(a: TubeActivity) {
+        val deadline = System.currentTimeMillis() + 5_000
+        idle()
+        while (System.currentTimeMillis() < deadline && a.findViewById<View>(R.id.status).visibility == View.VISIBLE) {
+            Thread.sleep(5)
+            idle()
+        }
+    }
 
     /** 재생 화면 주소에서 매번 달라지는 &n=(같은 곡도 다시 틀게)를 뺀 것 */
     private fun Intent.page(): String? = dataString?.replace(Regex("&n=\\d+$"), "")
@@ -127,6 +150,20 @@ class TubeWatchTest {
         // 같은 앱이 연 링크는 같은 탭에 — 곡을 고를 때마다 탭이 쌓이지 않게
         assertEquals(context.packageName, started.getStringExtra(Browser.EXTRA_APPLICATION_ID))
         assertEquals(song.id, TubeState(context).lastPlayed()?.id)
+        assertEquals(1, probed)
+    }
+
+    @Test
+    fun openingTheScreenChecksThePlayerPageAheadSoATapDoesNotWait() {
+        installBrowser()
+        open()
+        // 곡을 누르기 전에 미리 한 번 확인해 둔다
+        assertEquals(1, probed)
+        // 인터넷 앱이 없으면 확인하지 않는다
+        WatchPlayer.okUntil = 0L
+        val pm = shadowOf(context.packageManager)
+        pm.removeActivity(browser)
+        open()
         assertEquals(1, probed)
     }
 
@@ -164,6 +201,36 @@ class TubeWatchTest {
         assertTrue(started == null || started.dataString?.startsWith(base) != true)
         // 알리고 폰으로 보낸다 (폰 쪽 결과 알림이 뒤에 또 뜰 수 있어 '보였는지'로 확인)
         assertTrue(ShadowToast.showedToast(context.getString(R.string.tube_watch_unreachable)))
+    }
+
+    @Test
+    fun aFailedCheckWhileOpeningTheScreenDoesNotSendTheNextTapToThePhone() {
+        // 워치가 막 깨어 인터넷이 다시 잡히는 중이면 화면을 열 때 미리 한 확인은 실패할 수 있다 —
+        // 그 실패를 2분 동안 믿고 곧바로 누른 곡을 폰으로 보내지 않는다 (누를 때 다시 확인)
+        installBrowser()
+        TubeState(context).addPlayed(song)
+        WatchPlayer.probe = { probed++; probed > 1 }   // 미리 한 첫 확인만 실패
+        val a = open()
+        assertEquals(1, probed)
+        tap(a) { it is Row.VideoItem }
+        assertEquals(TubeLinks.playerUrl(base, song, mix = true), startedLink(a)?.page())
+        assertEquals(2, probed)
+        assertFalse(ShadowToast.showedToast(context.getString(R.string.tube_watch_unreachable)))
+    }
+
+    @Test
+    fun aTapDuringTheOpeningCheckUsesItsFreshFailureInsteadOfWaitingTwice() {
+        // 화면을 열며 시작한 확인이 끝나기 전에 곡을 누르면 그 결과를 기다린다 — 그게 방금 실패했으면
+        // (같은 순간의 인터넷 상태) 또 확인하느라 두 배로 기다리게 하지 않고 바로 폰으로
+        installBrowser()
+        TubeState(context).addPlayed(song)
+        fakePhone()
+        WatchPlayer.probe = { probed++; delay(2_000); false }
+        val a = open()
+        tap(a) { it is Row.VideoItem }
+        shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofSeconds(5))
+        assertEquals(1, probed)
+        assertEquals(listOf(TubeLinks.watchUrl(song.id, mix = true)), phoneOpened)
     }
 
     @Test
@@ -245,7 +312,154 @@ class TubeWatchTest {
         assertNull(startedLink(a))
         assertNull(shadowOf(a).nextStartedActivityForResult)
         assertFalse(a.isFinishing)
-        assertEquals(0, probed)
+    }
+
+    /** 폰에서 연 주소 (가짜 폰 — 실제 워치에선 폰의 유튜브 앱이 연다) */
+    private val phoneOpened = mutableListOf<String>()
+
+    private fun fakePhone(result: PhoneOpener.Result = PhoneOpener.Result.OPENED) {
+        PhoneOpener.override = { url -> phoneOpened += url; result }
+    }
+
+    private fun handoffLink(query: String) = Intent(Intent.ACTION_VIEW, Uri.parse("kakaowatch://tube/phone?$query")).addCategory(Intent.CATEGORY_BROWSABLE)
+
+    @Test
+    fun handOffFromThePlayerPageAsksOnceThenOpensOnThePhoneAtThatTime() {
+        fakePhone()
+        val a = Robolectric.buildActivity(TubeActivity::class.java, handoffLink("v=BzYnNdJhZQw&t=83&mix=1&title=%EB%B0%A4%ED%8E%B8%EC%A7%80&channel=IU")).setup().get()
+        idle()
+        // 웹 페이지가 보낸 링크라 바로 틀지 않고 한 번 묻는다
+        assertTrue(phoneOpened.isEmpty())
+        val header = rows(a).first() as Row.Header
+        assertEquals("밤편지", header.title)
+        assertEquals(context.getString(R.string.tube_handoff_sub, "1:23"), header.subtitle)
+        assertEquals(listOf(TubeRows.A_HANDOFF, TubeRows.A_CANCEL), rows(a).filterIsInstance<Row.Action>().map { it.id })
+        tap(a) { it is Row.Action && it.id == TubeRows.A_HANDOFF }
+        idle()
+        assertEquals(listOf(TubeLinks.watchUrl("BzYnNdJhZQw", mix = true, startSec = 83)), phoneOpened)
+        assertEquals("BzYnNdJhZQw", TubeState(context).lastPlayed()?.id)
+        // 다 하면 처음 화면
+        assertTrue(rows(a).first() is Row.Header && (rows(a).first() as Row.Header).title == context.getString(R.string.tube_title))
+        assertFalse(a.isFinishing)
+    }
+
+    @Test
+    fun cancellingAHandOffGoesHomeWithoutOpeningAnything() {
+        fakePhone()
+        val a = Robolectric.buildActivity(TubeActivity::class.java, handoffLink("v=BzYnNdJhZQw&t=10")).setup().get()
+        idle()
+        val header = rows(a).first() as Row.Header
+        assertEquals(context.getString(R.string.tube_handoff_untitled), header.title)
+        tap(a) { it is Row.Action && it.id == TubeRows.A_CANCEL }
+        assertTrue(phoneOpened.isEmpty())
+        assertEquals(context.getString(R.string.tube_title), (rows(a).first() as Row.Header).title)
+        assertNull(TubeState(context).lastPlayed())
+    }
+
+    @Test
+    fun aHandOffForASongYouAlreadyHaveShowsAndKeepsItsRealName() {
+        // 이어 듣기 링크의 제목은 웹 페이지가 붙인 것 — 이미 들은 곡이면 워치에 저장된 진짜 이름·길이를 쓴다
+        fakePhone()
+        TubeState(context).addPlayed(song)
+        val a = Robolectric.buildActivity(TubeActivity::class.java, handoffLink("v=${song.id}&t=30&title=%EA%B0%80%EC%A7%9C%20%EC%A0%9C%EB%AA%A9")).setup().get()
+        idle()
+        assertEquals(song.title, (rows(a).first() as Row.Header).title)
+        tap(a) { it is Row.Action && it.id == TubeRows.A_HANDOFF }
+        idle()
+        val kept = TubeState(context).lastPlayed()!!
+        assertEquals(song.title, kept.title)
+        assertEquals(song.channel, kept.channel)
+        assertEquals(294, kept.durationSec)
+    }
+
+    @Test
+    fun aNewerHandOffIsNotClearedWhenAnOlderOneFinishesOpening() {
+        // 폰에서 여는 사이 재생 화면에서 또 '폰에서 이어 듣기'가 오면, 앞의 것이 끝나도 새로 온 것은 남아 묻는다
+        PhoneOpener.override = { url -> delay(1_000); phoneOpened += url; PhoneOpener.Result.OPENED }
+        val c = Robolectric.buildActivity(TubeActivity::class.java, handoffLink("v=BzYnNdJhZQw&t=5")).setup()
+        idle()
+        val a = c.get()
+        tap(a) { it is Row.Action && it.id == TubeRows.A_HANDOFF }
+        c.newIntent(handoffLink("v=pSUydWEqKwE&t=7&title=Ditto"))
+        shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofSeconds(2))
+        assertEquals(listOf(TubeLinks.watchUrl("BzYnNdJhZQw", mix = false, startSec = 5)), phoneOpened)
+        assertEquals("Ditto", (rows(a).first() as Row.Header).title)
+        assertEquals(listOf(TubeRows.A_HANDOFF, TubeRows.A_CANCEL), rows(a).filterIsInstance<Row.Action>().map { it.id })
+    }
+
+    @Test
+    fun tileRequestsArriveOnlyAsPlainIntentsNotWithLinkData() {
+        // 타일의 '믹스 이어 듣기'는 주소 없는 인텐트로만 온다 — 주소(data)나 BROWSABLE 이 붙은 건 따르지 않는다
+        installBrowser()
+        TubeState(context).addPlayed(song)
+        val sneaky = Intent(context, TubeActivity::class.java).setData(Uri.parse("kakaowatch://tube")).putExtra(TubeActivity.EXTRA_MIX, true)
+        val a = Robolectric.buildActivity(TubeActivity::class.java, sneaky).setup().get()
+        idle()
+        assertNull(startedLink(a))
+        val browsable = Intent(context, TubeActivity::class.java).addCategory(Intent.CATEGORY_BROWSABLE).putExtra(TubeActivity.EXTRA_VOICE, true)
+        val b = Robolectric.buildActivity(TubeActivity::class.java, browsable).setup().get()
+        idle()
+        assertNull(shadowOf(b).nextStartedActivityForResult)
+        assertFalse(b.isFinishing)
+    }
+
+    @Test
+    fun aHandOffWithBadValuesJustOpensHome() {
+        fakePhone()
+        val a = Robolectric.buildActivity(TubeActivity::class.java, handoffLink("v=%3Cscript%3E&t=1")).setup().get()
+        idle()
+        assertEquals(context.getString(R.string.tube_title), (rows(a).first() as Row.Header).title)
+        assertTrue(phoneOpened.isEmpty())
+    }
+
+    @Test
+    fun aHandOffArrivingWhileTheScreenIsOpenAlsoAsks() {
+        fakePhone()
+        val c = Robolectric.buildActivity(TubeActivity::class.java).setup()
+        idle()
+        c.newIntent(handoffLink("v=BzYnNdJhZQw&t=5"))
+        idle()
+        val a = c.get()
+        assertEquals(listOf(TubeRows.A_HANDOFF, TubeRows.A_CANCEL), rows(a).filterIsInstance<Row.Action>().map { it.id })
+        // 뒤로 가기 = 취소
+        a.onBackPressedDispatcher.onBackPressed()
+        idle()
+        assertEquals(context.getString(R.string.tube_title), (rows(a).first() as Row.Header).title)
+        assertTrue(phoneOpened.isEmpty())
+    }
+
+    @Test
+    fun aFailedHandOffSaysSoAndLetsYouTryAgain() {
+        fakePhone(PhoneOpener.Result.NO_PHONE)
+        val a = Robolectric.buildActivity(TubeActivity::class.java, handoffLink("v=BzYnNdJhZQw&t=5")).setup().get()
+        idle()
+        tap(a) { it is Row.Action && it.id == TubeRows.A_HANDOFF }
+        idle()
+        assertTrue(ShadowToast.showedToast(context.getString(R.string.tube_no_phone)))
+        // 다시 누를 수 있게 그 화면 그대로, 기록도 안 함
+        assertEquals(listOf(TubeRows.A_HANDOFF, TubeRows.A_CANCEL), rows(a).filterIsInstance<Row.Action>().map { it.id })
+        assertNull(TubeState(context).lastPlayed())
+    }
+
+    @Test
+    fun comingBackThroughALinkEndsTheTilesOneOffJob() {
+        // 타일 '노래 검색'으로 열었다가(마치면 닫히는 한 번의 일) 재생 화면의 '다른 곡 찾기'로 돌아와 곡을 고르면 닫히지 않는다
+        fakePhone()
+        TubeApi.override = { _, _, _ -> TubeResult(TubePage(listOf(song), null), TubeSource.YOUTUBE) }
+        val c = Robolectric.buildActivity(TubeActivity::class.java, Intent(context, TubeActivity::class.java).putExtra(TubeActivity.EXTRA_VOICE, true)).setup()
+        idle()
+        val a = c.get()
+        val input = shadowOf(a).nextStartedActivityForResult
+        val data = Intent()
+        RemoteInput.addResultsToIntent(arrayOf(RemoteInput.Builder("query").build()), data, Bundle().apply { putCharSequence("query", "밤편지") })
+        shadowOf(a).receiveResult(input.intent, Activity.RESULT_OK, data)
+        waitForSearch(a)
+        c.newIntent(Intent(Intent.ACTION_VIEW, Uri.parse("kakaowatch://tube")).addCategory(Intent.CATEGORY_BROWSABLE))
+        idle()
+        tap(a) { it is Row.VideoItem }
+        shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofSeconds(3))
+        assertEquals(listOf(TubeLinks.watchUrl(song.id, mix = true)), phoneOpened)
+        assertFalse(a.isFinishing)
     }
 
     @Test

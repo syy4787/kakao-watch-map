@@ -7,7 +7,7 @@ name: Watch player page
 on:
   push:
     branches: [ main ]
-    paths: [ 'web/**', '.github/workflows/pages.yml' ]
+    paths: [ 'web/**', 'tools/tube-sim/**', '.github/workflows/pages.yml' ]
   workflow_dispatch:
 
 permissions:
@@ -20,8 +20,29 @@ concurrency:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
+
+      # 올리기 전에 시뮬레이터로 확인: 실제 크로미움 + 실제 플레이어 동작을 흉내 낸 가짜 유튜브 플레이어로
+      # 사용자 시나리오(자동 재생 막힘·막힌 곡·믹스 끝·화면 꺼짐·뒤로 가기 …)를 돌리고 유튜브 규칙·단단함을 확인.
+      # 하나라도 실패하면 워치가 여는 화면을 바꾸지 않는다 (실패한 시나리오만 한 번 더 돌려 봄)
+      - name: Check the player page (simulator)
+        working-directory: tools/tube-sim
+        run: |
+          set -euo pipefail
+          npm install --no-save --no-package-lock --no-audit --no-fund playwright@1.56.0
+          npx playwright install --with-deps chromium
+          node sim.mjs --retry=1 --shots="$RUNNER_TEMP/tube-sim-shots"
+
+      # 실패하면 그 순간의 화면과 기록(report.json)을 남긴다 (Actions 실행 화면의 Artifacts)
+      - name: Keep simulator screenshots
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: tube-sim-shots
+          path: ${{ runner.temp }}/tube-sim-shots
+          retention-days: 14
 
       - name: Publish web/ to gh-pages
         run: |

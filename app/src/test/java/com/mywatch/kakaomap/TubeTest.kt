@@ -89,6 +89,53 @@ class TubeTest {
     }
 
     @Test
+    fun phoneLinksCanStartWhereTheWatchLeftOff() {
+        // 워치에서 듣던 곳부터 폰에서 이어 듣기
+        assertEquals("https://www.youtube.com/watch?v=BzYnNdJhZQw&list=RDBzYnNdJhZQw&start_radio=1&t=83s", TubeLinks.watchUrl("BzYnNdJhZQw", mix = true, startSec = 83))
+        assertEquals("https://www.youtube.com/watch?v=BzYnNdJhZQw&t=5s", TubeLinks.watchUrl("BzYnNdJhZQw", mix = false, startSec = 5))
+        assertEquals(TubeLinks.watchUrl("BzYnNdJhZQw", mix = true), TubeLinks.watchUrl("BzYnNdJhZQw", mix = true, startSec = 0))
+    }
+
+    @Test
+    fun handOffLinksFromThePlayerPageAreReadCarefully() {
+        // 재생 화면의 '폰에서 이어 듣기' → kakaowatch://tube/phone?v=…&t=…&mix=1&title=…&channel=…
+        val h = TubeLinks.handoff("kakaowatch://tube/phone?v=BzYnNdJhZQw&t=83&mix=1&title=%EB%B0%A4%ED%8E%B8%EC%A7%80%20%26%20Night&channel=IU")
+        assertEquals(TubeVideo("BzYnNdJhZQw", "밤편지 & Night", "IU"), h?.video)
+        assertEquals(83, h?.startSec)
+        assertEquals(true, h?.mix)
+        // 제목이 없어도, 믹스가 아니어도
+        val plain = TubeLinks.handoff("kakaowatch://tube/phone?v=BzYnNdJhZQw&t=0")
+        assertEquals(TubeVideo("BzYnNdJhZQw", "", ""), plain?.video)
+        assertEquals(false, plain?.mix)
+        // 웹 페이지가 보낸 값이라 이상하면 버리거나 바로잡는다
+        listOf(
+            "kakaowatch://tube",
+            "kakaowatch://tube/phone",
+            "kakaowatch://tube/phone?v=short&t=1",
+            "kakaowatch://tube/phone?v=BzYnNdJhZQw%22%3E&t=1",
+            "kakaowatch://other/phone?v=BzYnNdJhZQw",
+            "https://tube/phone?v=BzYnNdJhZQw",
+            "kakaowatch://tube/play?v=BzYnNdJhZQw",
+            "not a uri ::",
+        ).forEach { assertNull(it, TubeLinks.handoff(it)) }
+        listOf("-5", "abc", "999999999999", "90000").forEach {
+            assertEquals(it, 0, TubeLinks.handoff("kakaowatch://tube/phone?v=BzYnNdJhZQw&t=$it")?.startSec)
+        }
+        val messy = TubeLinks.handoff("kakaowatch://tube/phone?v=BzYnNdJhZQw&t=3&title=" + "%E2%80%8B%0A%09가".repeat(80) + "&channel=" + "나".repeat(90))
+        assertTrue(messy!!.video.title.codePointCount(0, messy.video.title.length) <= 100)
+        assertFalse(messy.video.title.any { it == '\n' || it == '\t' })
+        assertEquals(40, messy.video.channel.length)
+        // 글자 방향을 뒤집거나(U+202E) 안 보이게 숨기는 글자(U+200B·U+2066) 는 뺀다 — 확인 화면 제목이 다르게 보이지 않게
+        val tricky = TubeLinks.handoff("kakaowatch://tube/phone?v=BzYnNdJhZQw&t=3&title=%E2%80%AEevil%E2%81%A6%E2%80%8Bsong&channel=%EF%BB%BFIU")
+        assertEquals("evilsong", tricky?.video?.title)
+        assertEquals("IU", tricky?.video?.channel)
+        assertEquals("가 나", TubeText.clean("가\u200B \u202A나\u2069", 10))
+        // 잉글랜드·스코틀랜드 같은 깃발 이모지는 '태그 글자'로 이어 붙인다 — 그건 남긴다
+        val england = "\uD83C\uDFF4\uDB40\uDC67\uDB40\uDC62\uDB40\uDC65\uDB40\uDC6E\uDB40\uDC67\uDB40\uDC7F"
+        assertEquals("응원 $england", TubeText.clean("응원 $england", 20))
+    }
+
+    @Test
     fun titlesComeOutAsPlainText() {
         assertEquals("[MV] IU(아이유) _ Through the Night(밤편지)", TubeText.plain("[MV] <b>IU</b>(<b>아이유</b>) _ Through the Night(밤편지)"))
         assertEquals("Guns N' Roses - Sweet Child O' Mine", TubeText.plain("Guns N&#39; Roses - Sweet Child O&#x27; Mine"))

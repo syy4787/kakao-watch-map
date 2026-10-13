@@ -173,4 +173,6 @@ tasks.register("kakaoKeyHash") {
 // 화면 그림 테스트(render 패키지)는 ./gradlew testDebugUnitTest -Prender 일 때만 — 평소·CI 테스트는 빠르게
 tasks.withType<Test>().configureEach {
     if (!project.hasProperty("render")) exclude("**/render/**")
+    // 유튜브 화면 무작위 사용자 시뮬레이션 씨앗 범위 (예: -Ptube.seeds=1..1000) — 평소엔 테스트에 적힌 기본값
+    project.findProperty("tube.seeds")?.let { systemProperty("tube.seeds", it) }
 }

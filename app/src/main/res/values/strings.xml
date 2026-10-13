@@ -117,6 +117,10 @@
     <string name="tube_phone_one">폰 유튜브에서 이 곡만</string>
     <string name="tube_opening_watch">워치에서 여는 중…</string>
     <string name="tube_watch_unreachable">워치 재생 화면을 열 수 없어 폰에서 틀어요</string>
+    <string name="tube_handoff_sub">폰 유튜브에서 %1$s부터 이어서 들어요</string>
+    <string name="tube_handoff_sub_start">폰 유튜브에서 이어서 들어요</string>
+    <string name="tube_handoff_go">폰에서 이어 듣기</string>
+    <string name="tube_handoff_untitled">워치에서 듣던 곡</string>
     <string name="tube_how">고른 곡은 폰의 유튜브 앱이 ‘믹스’로 틀어요. 평소 계정의 추천대로 다음 곡이 이어지고, 일시정지·다음 곡은 워치 미디어 컨트롤로 하면 돼요.</string>
     <string name="tube_opened_on_phone">폰 유튜브에서 재생</string>
     <string name="tube_opened_search_on_phone">폰 유튜브에서 검색</string>

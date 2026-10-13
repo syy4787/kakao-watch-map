@@ -21,6 +21,9 @@ data class TubeVideo(
     val live: Boolean = false,
 )
 
+/** 워치 재생 화면의 '폰에서 이어 듣기'가 맡긴 일: 이 곡을 [startSec] 초부터, [mix] 면 믹스로 */
+data class Handoff(val video: TubeVideo, val startSec: Int, val mix: Boolean)
+
 /** 한 번 검색한 결과 한 쪽. [next] = 다음 쪽을 받을 값(유튜브 토큰 또는 카카오 쪽 번호), 없으면 끝 */
 data class TubePage(val videos: List<TubeVideo>, val next: String?)
 
@@ -58,8 +61,26 @@ object TubeLinks {
      * 폰에서 열 주소. [mix] = 이 곡으로 시작하는 유튜브 '믹스' — 로그인된 폰 유튜브 앱이
      * 내 시청 기록으로 비슷한 곡을 끝없이 이어 준다 (평소 폰에서 듣던 그 알고리즘)
      */
-    fun watchUrl(id: String, mix: Boolean): String =
-        if (mix) "https://www.youtube.com/watch?v=$id&list=RD$id&start_radio=1" else "https://www.youtube.com/watch?v=$id"
+    fun watchUrl(id: String, mix: Boolean, startSec: Int = 0): String =
+        (if (mix) "https://www.youtube.com/watch?v=$id&list=RD$id&start_radio=1" else "https://www.youtube.com/watch?v=$id") +
+            (if (startSec > 0) "&t=${startSec}s" else "")
+
+    /** 이어 듣기에서 받아들이는 시각 (하루) — 그 밖이면 처음부터 */
+    private const val MAX_START_SEC = 86_400
+
+    /**
+     * 재생 화면(웹 페이지)이 보낸 '폰에서 이어 듣기' 링크 kakaowatch://tube/phone?v=…&t=…&mix=1&title=…&channel=… 읽기.
+     * 아무 웹 페이지나 보낼 수 있는 값이라 꼼꼼히: 모양이 다르거나 영상 번호가 이상하면 null, 시각이 이상하면 0, 글은 다듬어 자른다
+     */
+    fun handoff(link: String): Handoff? {
+        val uri = runCatching { URI(link.trim()) }.getOrNull() ?: return null
+        if (!uri.scheme.equals("kakaowatch", ignoreCase = true) || uri.host != "tube" || uri.rawPath != "/phone") return null
+        val id = param(uri.rawQuery, "v")?.takeIf(::isId) ?: return null
+        val start = param(uri.rawQuery, "t")?.toIntOrNull()?.takeIf { it in 0..MAX_START_SEC } ?: 0
+        val title = TubeText.clean(param(uri.rawQuery, "title"), 100)
+        val channel = TubeText.clean(param(uri.rawQuery, "channel"), 40)
+        return Handoff(TubeVideo(id, title, channel), start, param(uri.rawQuery, "mix") == "1")
+    }
 
     /** 폰 유튜브 앱의 검색 결과 (워치 검색이 안 될 때) */
     fun searchUrl(query: String): String = "https://www.youtube.com/results?search_query=" + encode(query.trim())
@@ -82,7 +103,8 @@ object TubeLinks {
     /**
      * 워치 인터넷 앱으로 열 재생 화면 주소. 곡은 # 뒤에 — 브라우저가 서버로 보내지 않고 화면 안에서만 읽는다.
      * [mix] = 이 곡으로 시작하는 유튜브 믹스(유튜브가 비슷한 곡을 이어 줌). 제목·채널은 열리자마자 보여 줄 이름.
-     * [nonce] = 같은 곡을 다시 골라도 주소가 달라지게 (같은 탭에서 주소가 똑같으면 화면이 그대로라 다시 틀지 않음)
+     * [nonce] = 고른 시각(ms). 같은 곡을 다시 골라도 주소가 달라지게 (같은 탭에서 주소가 똑같으면 화면이 그대로라 다시 틀지 않음),
+     * 재생 화면은 이 시각이 최근인 것만 바로 튼다 (뒤로 가기로 온 예전 주소·며칠 뒤 되살아난 탭은 ▶ 를 기다림)
      */
     fun playerUrl(base: String, video: TubeVideo, mix: Boolean, nonce: Long? = null): String = buildString {
         append(base).append("#v=").append(video.id)
@@ -109,6 +131,23 @@ object TubeText {
     private val NAMED = mapOf("amp" to "&", "lt" to "<", "gt" to ">", "quot" to "\"", "apos" to "'", "nbsp" to " ")
     private val SPACES = Regex("\\s+")
     private val ISO = Regex("P(?:(\\d+)D)?(?:T(?:(\\d+)H)?(?:(\\d+)M)?(?:(\\d+)S)?)?")
+
+    /**
+     * 밖에서 받은 글: 줄바꿈·제어 문자를 띄어쓰기로, 글자 방향을 뒤집거나(U+202E 등) 안 보이게 끼우는 글자(U+200B·U+FEFF 등)는 빼고,
+     * 띄어쓰기를 하나로, 글자 수(이모지도 한 글자)로 자르기. 이모지를 잇는 U+200C·U+200D 와 깃발 이모지의 태그 글자(U+E0020~E007F)는 둔다
+     */
+    fun clean(s: String?, max: Int): String {
+        val sb = StringBuilder()
+        s.orEmpty().codePoints().forEach { cp ->
+            when {
+                Character.getType(cp) == Character.FORMAT.toInt() && cp != 0x200C && cp != 0x200D && cp !in 0xE0020..0xE007F -> Unit
+                Character.isISOControl(cp) -> sb.append(' ')
+                else -> sb.appendCodePoint(cp)
+            }
+        }
+        val one = SPACES.replace(sb, " ").trim()
+        return if (one.codePointCount(0, one.length) <= max) one else one.substring(0, one.offsetByCodePoints(0, max)).trim()
+    }
 
     /** 검색 결과 제목의 강조 태그(<b>)를 떼고 &amp;·&#39; 같은 글자를 되돌린다 */
     fun plain(s: String): String {

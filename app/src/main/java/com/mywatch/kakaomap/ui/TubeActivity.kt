@@ -19,6 +19,7 @@ import androidx.wear.widget.ConfirmationOverlay
 import com.mywatch.kakaomap.R
 import com.mywatch.kakaomap.data.ErrorLog
 import com.mywatch.kakaomap.tile.TubeTileService
+import com.mywatch.kakaomap.tube.Handoff
 import com.mywatch.kakaomap.tube.PhoneOpener
 import com.mywatch.kakaomap.tube.SearchHistory
 import com.mywatch.kakaomap.tube.TubeApi
@@ -31,6 +32,7 @@ import com.mywatch.kakaomap.tube.YouTubeQuotaException
 import com.mywatch.kakaomap.ui.TubeRows.A_CANCEL
 import com.mywatch.kakaomap.ui.TubeRows.A_CLEAR
 import com.mywatch.kakaomap.ui.TubeRows.A_FORGET
+import com.mywatch.kakaomap.ui.TubeRows.A_HANDOFF
 import com.mywatch.kakaomap.ui.TubeRows.A_HOME
 import com.mywatch.kakaomap.ui.TubeRows.A_MIX
 import com.mywatch.kakaomap.ui.TubeRows.A_MORE
@@ -61,7 +63,7 @@ import kotlinx.coroutines.withContext
  */
 class TubeActivity : ComponentActivity() {
 
-    private enum class Screen { HOME, RESULTS, MENU }
+    private enum class Screen { HOME, RESULTS, MENU, HANDOFF }
 
     private lateinit var ui: WearList
     private lateinit var state: TubeState
@@ -71,6 +73,8 @@ class TubeActivity : ComponentActivity() {
     /** 메뉴를 닫으면 돌아갈 화면 */
     private var menuFrom = Screen.HOME
     private var menuVideo: TubeVideo? = null
+    /** 재생 화면의 '폰에서 이어 듣기'로 온 일 (한 번 묻고 연다) */
+    private var handoff: Handoff? = null
 
     // 검색 결과 화면
     private var query: String? = null
@@ -101,6 +105,7 @@ class TubeActivity : ComponentActivity() {
     private val back = object : OnBackPressedCallback(false) {
         override fun handleOnBackPressed() {
             when (screen) {
+                Screen.HANDOFF -> cancelHandoff()
                 Screen.MENU -> closeMenu()
                 Screen.RESULTS -> {
                     shortcut = null   // 처음 화면으로 돌아와 직접 쓰기 시작 — 다음에 곡을 틀어도 닫지 않는다
@@ -160,6 +165,8 @@ class TubeActivity : ComponentActivity() {
         UpdateManager.prefsForListening(this).registerOnSharedPreferenceChangeListener(updateListener)
         // 타일로 바로 열어 첫 화면을 거치지 않아도 새 버전 확인
         UpdateWorker.onAppOpened(this)
+        // 워치 재생 화면이 열리는지 미리 확인 — 곡을 누를 때 기다리지 않게
+        if (WatchPlayer.needsCheck(this)) lifecycleScope.launch { WatchPlayer.prewarm() }
     }
 
     override fun onPause() {
@@ -171,8 +178,18 @@ class TubeActivity : ComponentActivity() {
         if (intent == null) return
         // '최근 앱'에서 다시 열면 처음 열 때의 요청(믹스 틀기 등)이 그대로 다시 온다 → 그냥 처음 화면
         if ((intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY) != 0) return
-        // 재생 화면의 '다른 곡 찾기'(웹 링크)로 열렸으면 처음 화면만 — 웹 페이지가 끼워 넣은 값으로 곡을 틀거나 말 입력을 열지 않는다
-        if (intent.action == Intent.ACTION_VIEW) return
+        // 재생 화면의 링크(웹)로 열렸으면 끼워 넣은 값(타일용 믹스·말 입력)은 따르지 않는다.
+        // '다른 곡 찾기'는 그냥 이 화면, '폰에서 이어 듣기'는 한 번 묻는 화면
+        if (intent.action == Intent.ACTION_VIEW) {
+            // 링크로 돌아왔으면 새로 쓰기 시작한 것 — 타일에서 온 한 번의 일(마치면 닫기)은 잊는다
+            shortcut = null
+            closeJob?.cancel()
+            closeJob = null
+            intent.dataString?.let(TubeLinks::handoff)?.let(::showHandoff)
+            return
+        }
+        // 타일의 요청은 주소 없는 인텐트로만 온다 — 주소(data)나 BROWSABLE 이 붙은 건 웹에서 왔을 수 있어 따르지 않는다
+        if (intent.data != null || intent.hasCategory(Intent.CATEGORY_BROWSABLE)) return
         when {
             intent.getBooleanExtra(EXTRA_VOICE, false) -> {
                 shortcut = EXTRA_VOICE
@@ -217,6 +234,10 @@ class TubeActivity : ComponentActivity() {
                     else -> ui.rows = TubeRows.results(this, q, source, results, hasMore = next != null, note = note, loadingMore = loadingMore)
                 }
             }
+            Screen.HANDOFF -> {
+                val h = handoff
+                if (h == null) goHome() else ui.rows = TubeRows.handoff(this, h)
+            }
             Screen.MENU -> {
                 val v = menuVideo
                 if (v == null) closeMenu() else ui.rows = TubeRows.menu(this, v, fromHome = menuFrom == Screen.HOME, watch = WatchPlayer.available(this))
@@ -225,6 +246,7 @@ class TubeActivity : ComponentActivity() {
     }
 
     private fun goHome() {
+        handoff = null
         searchJob?.cancel()
         searching = false
         loadingMore = false
@@ -232,6 +254,35 @@ class TubeActivity : ComponentActivity() {
         menuVideo = null
         screen = Screen.HOME
         render()
+    }
+
+    private fun showHandoff(h: Handoff) {
+        shortcut = null
+        closeJob?.cancel()
+        menuVideo = null
+        // 이미 들은 곡이면 워치에 저장된 진짜 이름·길이로 (링크의 제목은 웹 페이지가 붙인 것)
+        val known = state.played().firstOrNull { it.video.id == h.video.id }?.video
+        handoff = if (known != null) h.copy(video = known) else h
+        screen = Screen.HANDOFF
+        render()
+    }
+
+    private fun cancelHandoff() {
+        handoff = null
+        goHome()
+    }
+
+    /** 폰 유튜브에서 그 곡을 그 시각부터 (믹스였으면 믹스로) — 열리면 기록하고 처음 화면, 안 되면 알리고 그대로(다시 누를 수 있게) */
+    private fun doHandoff(h: Handoff) {
+        openOnPhone(TubeLinks.watchUrl(h.video.id, h.mix, h.startSec), R.string.tube_opened_on_phone) {
+            state.addPlayed(h.video.copy(title = h.video.title.ifBlank { getString(R.string.tube_handoff_untitled) }))
+            TubeTileService.refresh(this)
+            // 그 사이 재생 화면에서 또 넘겨 왔으면 그것은 남겨 둔다 (다시 묻도록)
+            if (handoff === h) {
+                handoff = null
+                screen = Screen.HOME
+            }
+        }
     }
 
     private fun showMenu(video: TubeVideo) {
@@ -277,7 +328,8 @@ class TubeActivity : ComponentActivity() {
                     TubeTileService.refresh(this)
                     closeMenu()
                 }
-                row.id == A_CANCEL -> closeMenu()
+                row.id == A_HANDOFF -> handoff?.let(::doHandoff)
+                row.id == A_CANCEL -> if (screen == Screen.HANDOFF) cancelHandoff() else closeMenu()
             }
             else -> Unit
         }

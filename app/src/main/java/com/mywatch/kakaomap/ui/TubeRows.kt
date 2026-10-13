@@ -2,6 +2,7 @@ package com.mywatch.kakaomap.ui
 
 import android.content.Context
 import com.mywatch.kakaomap.R
+import com.mywatch.kakaomap.tube.Handoff
 import com.mywatch.kakaomap.tube.Played
 import com.mywatch.kakaomap.tube.TubeSource
 import com.mywatch.kakaomap.tube.TubeText
@@ -20,6 +21,7 @@ object TubeRows {
     const val A_PLAY_ONE = "play_one"
     const val A_WATCH_MIX = "watch_mix"
     const val A_WATCH_ONE = "watch_one"
+    const val A_HANDOFF = "handoff"
     const val A_FORGET = "forget"
     const val A_CANCEL = "cancel"
     const val A_UPDATE = "update"
@@ -59,6 +61,16 @@ object TubeRows {
         }
         return rows
     }
+
+    /** 재생 화면의 '폰에서 이어 듣기': 무엇을 어디서부터 틀지 보여 주고 한 번 묻는다 (웹 페이지가 보낸 일이라 바로 틀지 않는다) */
+    fun handoff(c: Context, h: Handoff): List<Row> = listOf(
+        Row.Header(
+            h.video.title.ifBlank { c.getString(R.string.tube_handoff_untitled) },
+            if (h.startSec > 0) c.getString(R.string.tube_handoff_sub, TubeText.clock(h.startSec)) else c.getString(R.string.tube_handoff_sub_start),
+        ),
+        Row.Action(A_HANDOFF, R.drawable.ic_smartphone, c.getString(R.string.tube_handoff_go), accent = true),
+        Row.Action(A_CANCEL, R.drawable.ic_close, c.getString(R.string.cancel)),
+    )
 
     /** 검색 결과. [loadingMore] = '더 보기'를 받는 중 (버튼 자리에 '더 불러오는 중…') */
     fun results(

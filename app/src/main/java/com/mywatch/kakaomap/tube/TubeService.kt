@@ -104,6 +104,7 @@ class PhoneOpener(context: Context) {
      * 무슨 일이 있어도 예외를 밖으로 내지 않는다(같은 프로세스의 길안내까지 꺼지지 않게). 취소만 그대로 전한다
      */
     suspend fun open(url: String): Result {
+        override?.let { return it(url) }
         val h = helper ?: return Result.FAILED
         try {
             withTimeout(15_000) { h.startRemoteActivity(intent(url)).await() }
@@ -131,6 +132,10 @@ class PhoneOpener(context: Context) {
     }
 
     companion object {
+        /** 테스트·시뮬레이션에서 폰 대신 (폰이 연 것처럼/폰이 없는 것처럼) */
+        @androidx.annotation.VisibleForTesting
+        @Volatile internal var override: (suspend (String) -> Result)? = null
+
         /** 원격 실행은 '열 수 있는 링크'(VIEW + BROWSABLE + 주소)만 받는다 */
         fun intent(url: String): Intent = Intent(Intent.ACTION_VIEW, url.toUri()).addCategory(Intent.CATEGORY_BROWSABLE)
     }
@@ -142,8 +147,13 @@ class PhoneOpener(context: Context) {
 object TubeApi {
     private const val YT = "https://www.googleapis.com/youtube/v3"
 
+    /** 테스트·시뮬레이션에서 검색 대신 (결과·오류를 마음대로) */
+    @androidx.annotation.VisibleForTesting
+    @Volatile internal var override: ((query: String, next: String?, source: TubeSource?) -> TubeResult)? = null
+
     /** [next]·[source] = '더 보기'일 때 앞 결과의 다음 쪽과 출처 (같은 곳에서 이어서) */
     fun search(context: Context, query: String, next: String? = null, source: TubeSource? = null): TubeResult {
+        override?.let { return it(query, next, source) }
         val state = TubeState(context)
         val key = BuildConfig.YOUTUBE_API_KEY
         return TubeSearcher(

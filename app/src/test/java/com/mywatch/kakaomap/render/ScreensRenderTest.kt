@@ -239,6 +239,19 @@ class ScreensRenderTest {
     }
 
     @Test
+    fun tubeHandoffAndLargeFonts() {
+        // 재생 화면의 '폰에서 이어 듣기' → 한 번 묻는 화면 (보통·큰 글자), 워치 재생 처음 화면·메뉴 큰 글자
+        TubeThumbs.enabled = false
+        val h = com.mywatch.kakaomap.tube.Handoff(tubeVideos[3], 83, true)
+        shoot("tube_handoff", TubeRows.handoff(tubeApp, h), pages = 1)
+        shoot("tube_handoff_font130", TubeRows.handoff(tubeApp, h), pages = 2, fontScale = 1.3f)
+        shoot("tube_handoff_untitled", TubeRows.handoff(tubeApp, h.copy(video = tubeVideos[0].copy(title = ""), startSec = 0)), pages = 1)
+        val played = tubeVideos.take(2).mapIndexed { i, v -> Played(v, 1_000L - i) }
+        shoot("tube_home_watch_font130", TubeRows.home(tubeApp, played, emptyList(), watch = true), pages = 4, fontScale = 1.3f)
+        shoot("tube_menu_watch_font130", TubeRows.menu(tubeApp, tubeVideos[3], fromHome = true, watch = true), pages = 4, fontScale = 1.3f)
+    }
+
+    @Test
     fun tubeHomeEmpty() {
         TubeThumbs.enabled = false
         shoot("tube_home_empty", TubeRows.home(tubeApp, emptyList(), emptyList()), pages = 1)

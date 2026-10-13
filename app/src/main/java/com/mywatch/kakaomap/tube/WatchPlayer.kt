@@ -10,6 +10,8 @@ import com.mywatch.kakaomap.data.ErrorLog
 import com.mywatch.kakaomap.net.Http
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 
@@ -36,6 +38,12 @@ object WatchPlayer {
     /** 안 열리면 이때까지는 묻지 않고 바로 폰으로 (누를 때마다 기다리지 않게) */
     @VisibleForTesting
     @Volatile internal var failUntil = 0L
+
+    /** 확인은 한 번에 하나 — 화면을 열 때 미리 확인하는 사이 누르면 그 결과를 기다린다 */
+    private val lock = Mutex()
+
+    /** 확인이 실패한 횟수 — 기다리는 사이 앞의 확인이 실패했는지 알려고 */
+    @Volatile private var failures = 0L
 
     private const val OK_FOR_MS = 30 * 60_000L
     private const val FAIL_FOR_MS = 2 * 60_000L
@@ -75,9 +83,31 @@ object WatchPlayer {
      * 재생 화면에 닿는지 (GitHub Pages 가 꺼졌거나 인터넷이 안 되면 false → 폰으로).
      * 되면 30분, 안 되면 2분 동안은 다시 묻지 않는다
      */
-    suspend fun reachable(nowMs: Long = System.currentTimeMillis()): Boolean {
+    suspend fun reachable(nowMs: Long = System.currentTimeMillis()): Boolean = check(nowMs, rememberFailure = true)
+
+    /**
+     * 유튜브 화면을 열 때 미리 확인해 둔다 — 곡을 누를 때 기다리지 않게. 되면 기억하고, 안 되면 기억하지 않는다
+     * (워치가 막 깨어 인터넷이 다시 잡히는 중일 수 있으니 누를 때 다시 확인)
+     */
+    suspend fun prewarm(nowMs: Long = System.currentTimeMillis()) {
+        check(nowMs, rememberFailure = false)
+    }
+
+    /** 미리 확인할 게 있는지: 인터넷 앱이 있고, 지금 확인 중이 아니고, 아직 모름 */
+    fun needsCheck(context: Context, nowMs: Long = System.currentTimeMillis()): Boolean =
+        !lock.isLocked && nowMs >= okUntil && nowMs >= failUntil && available(context)
+
+    // 같은 확인을 두 번 하지 않게 하나씩 — 앞의 확인이 끝나면 그 결과(기억)를 본다
+    private suspend fun check(nowMs: Long, rememberFailure: Boolean): Boolean {
+        val seen = failures
+        return lock.withLock { checkLocked(nowMs, rememberFailure, seen) }
+    }
+
+    private suspend fun checkLocked(nowMs: Long, rememberFailure: Boolean, seen: Long): Boolean {
         if (nowMs < okUntil) return true
         if (nowMs < failUntil) return false
+        // 기다리는 사이 앞의 확인(화면을 열 때 미리 한 것)이 방금 실패했다 — 같은 순간의 인터넷이니 또 기다리게 하지 않는다
+        if (failures != seen) return false
         val b = base ?: return false
         val ok = try {
             withTimeoutOrNull(PROBE_MS * 3L) { probe(b) } ?: false
@@ -86,7 +116,12 @@ object WatchPlayer {
         } catch (e: Exception) {
             false
         }
-        if (ok) okUntil = nowMs + OK_FOR_MS else failUntil = nowMs + FAIL_FOR_MS
+        if (ok) {
+            okUntil = nowMs + OK_FOR_MS
+        } else {
+            failures++
+            if (rememberFailure) failUntil = nowMs + FAIL_FOR_MS
+        }
         return ok
     }
 

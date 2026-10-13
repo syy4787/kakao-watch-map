@@ -68,6 +68,7 @@ class TubeUpdateTest {
             list.measure(480, 480)
             list.layout(0, 0, 480, 480)
             list.scrollToPosition(pos)
+            list.measure(480, 480)   // 스크롤은 다시 재고 놓아야 적용된다
             list.layout(0, 0, 480, 480)
             list.findViewHolderForAdapterPosition(pos)!!.itemView.performClick()
             val started = shadowOf(activity).nextStartedActivity
