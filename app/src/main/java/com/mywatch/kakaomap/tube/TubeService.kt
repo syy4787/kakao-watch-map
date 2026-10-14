@@ -21,10 +21,11 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 
-/** 검색어·본 동영상 기록 (워치 안에만 저장) */
+/** 검색어·본 동영상 기록과 추천에 쓰는 것(믹스 추천·관심 없음·본 Shorts) — 워치 안에만 저장 */
 class TubeState(context: Context) {
 
-    private val prefs = context.applicationContext.getSharedPreferences("tube", Context.MODE_PRIVATE)
+    private val app = context.applicationContext
+    private val prefs = app.getSharedPreferences("tube", Context.MODE_PRIVATE)
 
     val searches: List<String> get() = SearchHistory.decode(prefs.getString(K_SEARCHES, null))
 
@@ -55,21 +56,102 @@ class TubeState(context: Context) {
         prefs.edit { putString(K_PLAYED, PlayedHistory.encode(played(nowMs).filterNot { it.video.id == id })) }
     }
 
+    /** 받아 둔 믹스 추천 (새것부터 · 7일 · 12개). 지난 것은 보여 주지 않을 뿐 아니라 저장소에서도 지운다 */
+    fun harvests(nowMs: Long = System.currentTimeMillis()): List<Harvest> = synchronized(LOCK) {
+        val all = MixHarvests.decode(prefs.getString(K_HARVESTS, null))
+        val kept = MixHarvests.prune(all, nowMs).take(MixHarvests.MAX)
+        if (kept.size != all.size) prefs.edit { putString(K_HARVESTS, MixHarvests.encode(kept)) }
+        kept
+    }
+
+    /** 재생 화면이 받은 믹스 하나를 받아 둔다 (같은 씨앗은 바꾼다) */
+    fun addHarvest(h: Harvest, nowMs: Long = System.currentTimeMillis()) = synchronized(LOCK) {
+        prefs.edit { putString(K_HARVESTS, MixHarvests.encode(MixHarvests.add(harvests(nowMs), h, nowMs))) }
+    }
+
+    /** '관심 없음' 동영상 (새것부터 · 30일) — 홈에서 뺀다 */
+    fun dismissedVideos(nowMs: Long = System.currentTimeMillis()): Set<String> = ids(K_DISMISSED_VIDEOS, nowMs, TubeLinks::isId)
+
+    /** 동영상 번호만 받는다 */
+    fun dismissVideo(id: String, nowMs: Long = System.currentTimeMillis()) {
+        if (TubeLinks.isId(id)) mark(K_DISMISSED_VIDEOS, id, nowMs)
+    }
+
+    /** '채널 추천 안 함' 채널 (새것부터 · 30일) — 홈에서 뺀다 */
+    fun dismissedChannels(nowMs: Long = System.currentTimeMillis()): Set<String> = ids(K_DISMISSED_CHANNELS, nowMs, TubeLinks::isChannelId)
+
+    /** 채널 번호(UC…)만 받는다 */
+    fun dismissChannel(id: String, nowMs: Long = System.currentTimeMillis()) {
+        if (TubeLinks.isChannelId(id)) mark(K_DISMISSED_CHANNELS, id, nowMs)
+    }
+
+    /** 본 Shorts (새것부터 · 30일) — 다음엔 뒤로 미룬다 */
+    fun seenShorts(nowMs: Long = System.currentTimeMillis()): Set<String> = ids(K_SEEN_SHORTS, nowMs, TubeLinks::isId)
+
+    /** 동영상 번호만 받는다 */
+    fun markSeen(id: String, nowMs: Long = System.currentTimeMillis()) {
+        if (TubeLinks.isId(id)) mark(K_SEEN_SHORTS, id, nowMs)
+    }
+
+    /**
+     * 재생 화면이 보낸 것([TubeInbox])을 적용 — 믹스 추천(recs)은 받아 두고 본 Shorts(seen)는 표시한다. 그 밖은 버린다.
+     * 바뀐 것이 있으면 true
+     */
+    fun ingest(links: List<String>, nowMs: Long = System.currentTimeMillis()): Boolean = synchronized(LOCK) {
+        val mixes = links.mapNotNull { TubeLinks.recs(it, nowMs) }
+        val seen = links.mapNotNull { TubeLinks.seen(it) }
+        if (mixes.isNotEmpty()) {
+            val list = mixes.fold(harvests(nowMs)) { acc, h -> MixHarvests.add(acc, h, nowMs) }
+            prefs.edit { putString(K_HARVESTS, MixHarvests.encode(list)) }
+        }
+        if (seen.isNotEmpty()) {
+            val list = seen.fold(marks(K_SEEN_SHORTS, nowMs)) { acc, id -> Marks.add(acc, id, nowMs) }
+            prefs.edit { putString(K_SEEN_SHORTS, Marks.encode(list)) }
+        }
+        mixes.isNotEmpty() || seen.isNotEmpty()
+    }
+
+    /** [key] 의 표시 목록 — 30일이 지난 것은 저장소에서도 지운다 */
+    private fun marks(key: String, nowMs: Long): List<Mark> = synchronized(LOCK) {
+        val all = Marks.decode(prefs.getString(key, null))
+        val kept = Marks.prune(all, nowMs).take(Marks.MAX)
+        if (kept.size != all.size) prefs.edit { putString(key, Marks.encode(kept)) }
+        kept
+    }
+
+    private fun ids(key: String, nowMs: Long, valid: (String) -> Boolean): Set<String> =
+        marks(key, nowMs).mapNotNullTo(LinkedHashSet()) { m -> m.id.takeIf(valid) }
+
+    private fun mark(key: String, id: String, nowMs: Long) = synchronized(LOCK) {
+        prefs.edit { putString(key, Marks.encode(Marks.add(marks(key, nowMs), id, nowMs))) }
+    }
+
     /**
      * YouTube 약관·이 앱의 개인정보 처리방침에 동의했는지 (유튜브 API 정책: 앱을 쓰기 전에 동의).
-     * 처리방침이 크게 바뀌면 [TERMS_VERSION] 을 올려 다시 묻는다. '기록 지우기'로는 지워지지 않는다
+     * 처리방침이 크게 바뀌면 [TERMS_VERSION] 을 올려 다시 묻는다 — 판 2 는 워치 안 기록(본 동영상·믹스 추천·관심 없음·본 Shorts)을
+     * 추천에 쓴다고 알린 것이라 판 1 에 동의한 사람에게도 다시 묻는다. '기록 지우기'로는 지워지지 않는다
      */
     val agreed: Boolean get() = prefs.getInt(K_AGREED, 0) >= TERMS_VERSION
 
     fun agree() = prefs.edit { putInt(K_AGREED, TERMS_VERSION) }
 
-    /** '기록 지우기' — 본 동영상·검색어 (예전 버전의 '듣는 곳' 설정도 함께 정리) */
-    fun clear() = synchronized(LOCK) {
-        prefs.edit {
-            remove(K_SEARCHES)
-            remove(K_PLAYED)
-            remove(K_TARGET)
+    /**
+     * '기록 지우기' — 본 동영상·검색어·믹스 추천·관심 없음(동영상·채널)·본 Shorts, 아직 읽지 않은 재생 화면의 알림([TubeInbox])까지
+     * (예전 버전의 '듣는 곳' 설정도 함께 정리)
+     */
+    fun clear() {
+        synchronized(LOCK) {
+            prefs.edit {
+                remove(K_SEARCHES)
+                remove(K_PLAYED)
+                remove(K_TARGET)
+                remove(K_HARVESTS)
+                remove(K_DISMISSED_VIDEOS)
+                remove(K_DISMISSED_CHANNELS)
+                remove(K_SEEN_SHORTS)
+            }
         }
+        TubeInbox.of(app).drain()
     }
 
     /** 오늘(유튜브 기준 날짜) 유튜브 검색 한도를 다 썼으면 카카오 검색만 쓴다 — 실패할 요청을 계속 보내지 않게 */
@@ -81,8 +163,13 @@ class TubeState(context: Context) {
         private const val K_SEARCHES = "searches"
         private const val K_PLAYED = "played"
         private const val K_YT_BLOCKED = "youtube_blocked_day"
+        private const val K_HARVESTS = "mix_harvests"
+        private const val K_DISMISSED_VIDEOS = "dismissed_videos"
+        private const val K_DISMISSED_CHANNELS = "dismissed_channels"
+        private const val K_SEEN_SHORTS = "seen_shorts"
         private const val K_AGREED = "terms_agreed"
-        private const val TERMS_VERSION = 1
+        /** 동의받는 처리방침의 판 — 1: 처음 · 2: 워치 안 기록으로 추천 (2026-10) */
+        private const val TERMS_VERSION = 2
         /** 예전 버전의 '듣는 곳' (지금은 쓰지 않음 — 기록 지우기 때 정리) */
         private const val K_TARGET = "target"
         private val LOCK = Any()
