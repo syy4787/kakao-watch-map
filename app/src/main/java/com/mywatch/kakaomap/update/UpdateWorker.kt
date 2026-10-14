@@ -98,7 +98,8 @@ class UpdateInstallWorker(context: Context, params: WorkerParameters) : Coroutin
         // 받을 때마다 손상된 파일이면(update.json 과 다름) 같은 릴리스를 자동으로 또 받지 않는다 — 폰 데이터 낭비
         if (!UpdateManager.autoDownloadAllowed(c, info)) return@withContext Result.success()
         try {
-            val file = UpdateManager.download(c, info, wifiOnly = UpdateManager.autoNeedsWifi(c, info))
+            // 작업이 멈춰지면(앱을 열었다 닫아 갈아 끼워짐·조건이 깨짐) 받기도 바로 멈춘다 — 받은 데까지는 다음에 이어받기
+            val file = UpdateManager.download(c, info, wifiOnly = UpdateManager.autoNeedsWifi(c, info), cancelled = { isStopped })
             // 내려받는 사이 이 작업이 취소·교체됐으면(앱을 열었다 닫음 등) 설치하지 않는다 — 두 번 설치 방지
             if (isStopped) return@withContext Result.retry()
             UpdateManager.verify(c, file, info)?.let {
@@ -112,6 +113,9 @@ class UpdateInstallWorker(context: Context, params: WorkerParameters) : Coroutin
         } catch (e: UpdateManager.NeedsWifi) {
             // 큰 업데이트 — 워치 Wi-Fi 를 만날 때(6시간마다 확인·앱을 열 때 다시 해 봄). 실패가 아니라 기다림
             Result.success()
+        } catch (e: UpdateManager.Cancelled) {
+            // 멈춰졌을 뿐 — 실패로 남기지 않고 다음에 이어받기
+            Result.retry()
         } catch (e: Exception) {
             Log.w(MapApp.TAG, "자동 업데이트 실패", e)
             UpdateManager.recordFailure(c, WHERE, e.message ?: "자동 업데이트 실패")

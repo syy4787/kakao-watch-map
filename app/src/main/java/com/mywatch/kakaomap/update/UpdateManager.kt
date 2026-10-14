@@ -156,14 +156,23 @@ object UpdateManager {
     /**
      * 자동 업데이트와 화면의 '지금 업데이트'가 동시에 같은 파일을 받지 않게 한 번에 하나씩.
      * 워치 Wi-Fi 를 [wifiWaitMs] 까지 기다려 보고([UpdateNet]) 오면 그쪽으로, 아니면 늘 쓰던 망(폰 블루투스 등)으로.
-     * [wifiOnly] 면 Wi-Fi 로만 — 없거나 받다 끊기면 [NeedsWifi] (받은 데까지는 남겨 두고 다음에 이어받기)
+     * [wifiOnly] 면 Wi-Fi 로만 — 없거나 받다 끊기면 [NeedsWifi] (받은 데까지는 남겨 두고 다음에 이어받기).
+     * [cancelled] 가 true 가 되면(작업이 멈춰짐·화면이 닫힘) 64KB 안에 멈추고 [Cancelled] — 받은 데까지는 남기고 Wi-Fi 는 놓아준다
      */
     @Throws(IOException::class)
-    fun download(c: Context, info: UpdateInfo, wifiWaitMs: Long = WIFI_WAIT_MS, wifiOnly: Boolean = false, onProgress: (Int) -> Unit = {}): File =
+    fun download(
+        c: Context,
+        info: UpdateInfo,
+        wifiWaitMs: Long = WIFI_WAIT_MS,
+        wifiOnly: Boolean = false,
+        cancelled: () -> Boolean = { false },
+        onProgress: (Int) -> Unit = {},
+    ): File =
         synchronized(downloadLock) {
             downloading = true
             try {
-                downloadLocked(c, info, wifiWaitMs, wifiOnly, onProgress)
+                if (cancelled()) throw Cancelled()
+                downloadLocked(c, info, wifiWaitMs, wifiOnly, cancelled, onProgress)
             } finally {
                 downloading = false
             }
@@ -171,6 +180,9 @@ object UpdateManager {
 
     /** 큰 업데이트를 Wi-Fi 로만 받으려는데 Wi-Fi 가 없음 — 실패가 아니라 기다림 */
     class NeedsWifi : IOException("워치 Wi-Fi 를 기다려요")
+
+    /** 받기를 맡긴 쪽이 멈춤 — 실패가 아니라 다음에 이어받기 */
+    class Cancelled : IOException("업데이트 받기를 멈췄어요")
 
     /** 이보다 큰 APK 는 자동 업데이트가 워치 Wi-Fi 에서만 받는다 (재생 엔진이 들어 있어 약 105MB — 폰 데이터로 매번 받지 않게) */
     const val BIG_BYTES = 30L * 1024 * 1024
@@ -229,7 +241,14 @@ object UpdateManager {
 
     private fun cacheDir(c: Context) = File(c.cacheDir, "update")
 
-    private fun downloadLocked(c: Context, info: UpdateInfo, wifiWaitMs: Long, wifiOnly: Boolean, onProgress: (Int) -> Unit): File {
+    private fun downloadLocked(
+        c: Context,
+        info: UpdateInfo,
+        wifiWaitMs: Long,
+        wifiOnly: Boolean,
+        cancelled: () -> Boolean,
+        onProgress: (Int) -> Unit,
+    ): File {
         val dir = cacheDir(c).apply { mkdirs() }
         val name = cacheFileName(info)
         // 다른 버전·다른 APK 의 옛 파일은 지운다
@@ -240,16 +259,17 @@ object UpdateManager {
         try {
             if (wifi == null) {
                 if (wifiOnly && !UpdateNet.onWifiNow(c)) throw NeedsWifi()
-                fetchWithRetries(info, file, onProgress, null, RETRY_DELAYS_MS)
+                fetchWithRetries(info, file, onProgress, null, RETRY_DELAYS_MS, cancelled)
             } else {
                 try {
-                    fetchWithRetries(info, file, onProgress, wifi::open, WIFI_RETRY_DELAYS_MS)
+                    fetchWithRetries(info, file, onProgress, wifi::open, WIFI_RETRY_DELAYS_MS, cancelled)
                 } catch (e: IOException) {
                     // Wi-Fi 가 끊겼으면(집을 나섬 등) 받은 데까지는 두고 늘 쓰던 망으로 이어받는다 (Wi-Fi 로만이면 다음에 Wi-Fi 에서).
-                    // 없는 파일(4xx)은 어디서나 같다
+                    // 없는 파일(4xx)은 어디서나 같다. 멈추라고 했으면 그대로 멈춘다
+                    if (e is Cancelled) throw e
                     if (e is HttpStatusException && e.code in 400..499) throw e
                     if (wifiOnly) throw NeedsWifi()
-                    fetchWithRetries(info, file, onProgress, null, RETRY_DELAYS_MS)
+                    fetchWithRetries(info, file, onProgress, null, RETRY_DELAYS_MS, cancelled)
                 }
             }
         } finally {
@@ -268,27 +288,47 @@ object UpdateManager {
      * 끊기면 [delays] 만큼 쉬며 받은 데부터 이어받는다 (폰 블루투스로 받을 땐 잠깐씩 끊긴다).
      * 서버가 없다고 한 것(4xx)은 다시 물어도 같으니 바로 알린다. [open] = 이 망으로 연결 (null 이면 늘 쓰던 망)
      */
-    private fun fetchWithRetries(info: UpdateInfo, file: File, onProgress: (Int) -> Unit, open: ((URL) -> URLConnection)?, delays: List<Long>) {
+    private fun fetchWithRetries(
+        info: UpdateInfo,
+        file: File,
+        onProgress: (Int) -> Unit,
+        open: ((URL) -> URLConnection)?,
+        delays: List<Long>,
+        cancelled: () -> Boolean,
+    ) {
         var attempt = 0
         while (true) {
             try {
-                fetchOrRestart(info, file, onProgress, open)
+                fetchOrRestart(info, file, onProgress, open, cancelled)
                 return
             } catch (e: IOException) {
+                if (e is Cancelled) throw e
                 if (e is HttpStatusException && e.code in 400..499) throw e
                 val wait = delays.getOrNull(attempt++) ?: throw e
-                if (wait > 0) Thread.sleep(wait)
+                sleepUnlessCancelled(wait, cancelled)
             }
         }
     }
 
-    private fun fetchOrRestart(info: UpdateInfo, file: File, onProgress: (Int) -> Unit, open: ((URL) -> URLConnection)?) {
+    /** 다시 잇기 전 쉬는 동안에도 멈추라고 하면 바로 */
+    private fun sleepUnlessCancelled(ms: Long, cancelled: () -> Boolean) {
+        var left = ms
+        while (left > 0) {
+            if (cancelled()) throw Cancelled()
+            val step = minOf(left, 250L)
+            Thread.sleep(step)
+            left -= step
+        }
+        if (cancelled()) throw Cancelled()
+    }
+
+    private fun fetchOrRestart(info: UpdateInfo, file: File, onProgress: (Int) -> Unit, open: ((URL) -> URLConnection)?, cancelled: () -> Boolean) {
         try {
-            fetch(info, file, resume = file.exists() && file.length() > 0, onProgress, open)
+            fetch(info, file, resume = file.exists() && file.length() > 0, onProgress, open, cancelled)
         } catch (e: RangeNotUsable) {
             // 이어받기가 안 되는 조각 파일(손상·크기 초과 등)이면 지우고 처음부터
             file.delete()
-            fetch(info, file, resume = false, onProgress, open)
+            fetch(info, file, resume = false, onProgress, open, cancelled)
         }
     }
 
@@ -303,7 +343,14 @@ object UpdateManager {
     private class HttpStatusException(val code: Int) : IOException("다운로드 실패 ($code)")
 
     /** 받다 만 파일이 있으면 Range 요청으로 이어받는다 */
-    private fun fetch(info: UpdateInfo, file: File, resume: Boolean, onProgress: (Int) -> Unit, open: ((URL) -> URLConnection)?) {
+    private fun fetch(
+        info: UpdateInfo,
+        file: File,
+        resume: Boolean,
+        onProgress: (Int) -> Unit,
+        open: ((URL) -> URLConnection)?,
+        cancelled: () -> Boolean,
+    ) {
         val already = if (resume) file.length() else 0L
         val url = URL(info.apkUrl)
         val conn = ((open?.invoke(url) ?: url.openConnection()) as HttpURLConnection).apply {
@@ -330,6 +377,7 @@ object UpdateManager {
                     val buf = ByteArray(64 * 1024)
                     var lastPct = -1
                     while (true) {
+                        if (cancelled()) throw Cancelled()
                         val n = input.read(buf)
                         if (n < 0) break
                         out.write(buf, 0, n)

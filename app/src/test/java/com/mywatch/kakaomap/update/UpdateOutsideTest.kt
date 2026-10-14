@@ -9,13 +9,26 @@ import android.os.BatteryManager
 import android.os.Looper
 import android.view.WindowManager
 import androidx.wear.widget.WearableRecyclerView
+import androidx.work.Configuration
 import androidx.work.ListenableWorker
+import androidx.work.WorkManager
+import androidx.work.testing.SynchronousExecutor
 import androidx.work.testing.TestListenableWorkerBuilder
+import androidx.work.testing.WorkManagerTestInitHelper
 import com.mywatch.kakaomap.R
-import com.mywatch.kakaomap.tube.PlayerPresence
 import com.mywatch.kakaomap.data.ErrorLog
+import com.mywatch.kakaomap.tube.PlayerPresence
 import com.mywatch.kakaomap.ui.Row
 import com.mywatch.kakaomap.ui.RowAdapter
+import java.io.File
+import java.io.IOException
+import java.net.URL
+import java.net.URLConnection
+import java.time.Duration
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
+import kotlin.concurrent.thread
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -32,13 +45,6 @@ import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import org.robolectric.shadows.ShadowNetworkCapabilities
 import org.robolectric.shadows.ShadowSystemClock
-import java.io.IOException
-import java.net.URL
-import java.net.URLConnection
-import java.time.Duration
-import java.util.concurrent.CountDownLatch
-import java.util.concurrent.atomic.AtomicInteger
-import kotlin.concurrent.thread
 
 /**
  * 집 밖(카페·길)에서도 업데이트가 되는지 — 워치는 폰 블루투스로 인터넷을 쓰고(느리고 잠깐씩 끊김), 충전 중도 아니다.
@@ -241,6 +247,80 @@ class UpdateOutsideTest {
         background.join(5_000)
         waitUntil("받기 끝") { rows(activity).any { it is Row.Note && it.text.startsWith("⚠") } }
         assertEquals("같은 파일을 두 번 받지 않는다", 1, server.apkRequests.size)
+    }
+
+    @Test
+    fun aStoppedDownloadStopsRightAwayKeepsWhatItGotAndLetsGoOfTheWifi() {
+        // 자동 업데이트 작업이 멈춰지면(앱을 열었다 닫아 작업이 갈아 끼워짐·배터리 부족 등) 받기도 바로 멈춰야 한다 —
+        // 계속 받으면 Wi-Fi 를 붙잡고 다음 작업은 그동안 기다린다
+        server.apk = ByteArray(3_000_000) { (it * 13 % 251).toByte() }
+        val wifi = FakeWifi()
+        UpdateNet.override = { _, _ -> wifi }
+        val stop = AtomicBoolean(false)
+        var progress = 0
+        assertThrows(UpdateManager.Cancelled::class.java) {
+            UpdateManager.download(context, info(), cancelled = { stop.get() }) { if (++progress >= 3) stop.set(true) }
+        }
+        val partial = File(File(context.cacheDir, "update"), UpdateManager.cacheFileName(info()))
+        assertTrue("받은 데까지는 남김: ${partial.length()}", partial.length() in 1 until server.apk.size)
+        assertTrue("Wi-Fi 를 놓아줌", wifi.closed)
+        assertEquals("멈춘 뒤 다시 묻지 않음", 1, server.apkRequests.size)
+        // 다음 번엔 받은 데부터
+        val file = UpdateManager.download(context, info())
+        assertEquals(FakeReleaseServer.sha256Hex(server.apk), UpdateManager.sha256(file))
+        assertTrue(server.apkRequests.toString(), Regex("""bytes=[1-9]\d*-""").containsMatchIn(server.apkRequests.last()))
+    }
+
+    @Test
+    fun aDownloadAlreadyStoppedDoesNotStart() {
+        assertThrows(UpdateManager.Cancelled::class.java) { UpdateManager.download(context, info(), cancelled = { true }) }
+        assertEquals(0, server.apkRequests.size)
+    }
+
+    @Test
+    fun aManualUpdateThatFinishesAfterILeftTheScreenWaitsInsteadOfClosingWhatIAmDoing() {
+        // '지금 업데이트'를 누르고 홈으로 가 유튜브를 틀었는데, 다 받은 순간 설치돼 재생이 끊기면 안 된다
+        WorkManagerTestInitHelper.initializeTestWorkManager(context, Configuration.Builder().setExecutor(SynchronousExecutor()).build())
+        val installed = mutableListOf<File>()
+        UpdateActivity.verifyApk = { _, _, _ -> null }
+        UpdateActivity.installApk = { _, f -> installed += f }
+        try {
+            server.updateJson = server.updateJsonFor(999)
+            UpdateManager.check(context)
+            val hold = CountDownLatch(1).also { server.holdApk = it }
+            val controller = Robolectric.buildActivity(UpdateActivity::class.java).setup()
+            val activity = controller.get()
+            shadowOf(Looper.getMainLooper()).idle()
+            tap(activity, "지금 업데이트")
+            waitUntil("내려받기 시작") { server.apkRequests.isNotEmpty() }
+            controller.pause().stop()   // 홈으로 나감
+            hold.countDown()
+            waitUntil("다 받고 미룸") { UpdateManager.lastError(context)?.contains("설치") == true }
+            assertTrue("화면을 떠났으면 바로 설치하지 않는다", installed.isEmpty())
+            val queued = WorkManager.getInstance(context).getWorkInfosForUniqueWork("update-install").get()
+            assertTrue("앱을 다 닫으면 자동 설치가 이어서", queued.isNotEmpty())
+        } finally {
+            UpdateActivity.verifyApk = UpdateManager::verify
+            UpdateActivity.installApk = UpdateManager::install
+        }
+    }
+
+    @Test
+    fun aManualUpdateInstallsRightAwayWhileIAmStillWatchingTheScreen() {
+        val installed = mutableListOf<File>()
+        UpdateActivity.verifyApk = { _, _, _ -> null }
+        UpdateActivity.installApk = { _, f -> installed += f }
+        try {
+            server.updateJson = server.updateJsonFor(999)
+            UpdateManager.check(context)
+            val activity = Robolectric.buildActivity(UpdateActivity::class.java).setup().get()
+            shadowOf(Looper.getMainLooper()).idle()
+            tap(activity, "지금 업데이트")
+            waitUntil("설치") { installed.isNotEmpty() }
+        } finally {
+            UpdateActivity.verifyApk = UpdateManager::verify
+            UpdateActivity.installApk = UpdateManager::install
+        }
     }
 
     @Test

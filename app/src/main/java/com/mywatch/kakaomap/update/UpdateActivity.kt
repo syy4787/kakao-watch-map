@@ -13,6 +13,8 @@ import android.provider.Settings
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.annotation.VisibleForTesting
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.wear.input.RemoteInputIntentHelper
 import com.kakao.vectormap.KakaoMapSdk
@@ -21,15 +23,17 @@ import com.mywatch.kakaomap.data.ErrorLog
 import com.mywatch.kakaomap.data.ErrorLogFormat
 import com.mywatch.kakaomap.nav.NavigationService
 import com.mywatch.kakaomap.net.TagoApi
+import com.mywatch.kakaomap.tube.PlayerPresence
 import com.mywatch.kakaomap.ui.Row
 import com.mywatch.kakaomap.ui.WearList
+import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 
 /** 앱 정보 · 업데이트 화면 */
 class UpdateActivity : ComponentActivity() {
@@ -221,28 +225,30 @@ class UpdateActivity : ComponentActivity() {
         val app = applicationContext
         lifecycleScope.launch {
             var deferred: String? = null
-            val error = withContext(Dispatchers.IO) {
-                runCatching {
-                    // 기다리는 사람이 있으니 Wi-Fi 는 조금만 기다려 본다 (없으면 바로 폰으로)
-                    val file = UpdateManager.download(app, info, UpdateManager.MANUAL_WIFI_WAIT_MS) { pct ->
+            val error = runCatching {
+                val file = withContext(Dispatchers.IO) {
+                    // 기다리는 사람이 있으니 Wi-Fi 는 조금만 기다려 본다 (없으면 바로 폰으로). 화면이 없어지면 멈춘다(다음에 이어받기)
+                    val got = UpdateManager.download(app, info, UpdateManager.MANUAL_WIFI_WAIT_MS, cancelled = { !isActive }) { pct ->
                         runOnUiThread {
                             busy = "내려받는 중… $pct%"
                             render()
                         }
                     }
-                    UpdateManager.verify(app, file, info)?.let { throw IllegalStateException(it) }
-                    if (!isActive || NavigationService.running) {
-                        // 받는 사이 화면을 닫았거나 안내를 시작함 → 지금 설치하면 쓰던 화면·안내가 끊기므로 미룬다
-                        // (받은 파일은 남겨 두고, 앱을 다 닫았을 때·안내가 끝났을 때 자동 설치가 이어서 설치)
-                        deferred = app.getString(
-                            if (NavigationService.running) R.string.update_after_navigation else R.string.update_deferred
-                        )
-                        UpdateInstallWorker.enqueueSoon(app)
-                    } else {
-                        UpdateManager.install(app, file)
-                    }
-                }.exceptionOrNull()
-            }
+                    verifyApk(app, got, info)?.let { throw IllegalStateException(it) }
+                    got
+                }
+                // 받는 사이 홈으로 나가 다른 것(동영상 등)을 하고 있거나 안내를 시작함 → 지금 설치하면 그것이 끊기므로 미룬다
+                // (받은 파일은 남겨 두고, 앱을 다 닫았을 때·안내가 끝났을 때 자동 설치가 이어서 설치)
+                val stillHere = lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
+                if (!stillHere || NavigationService.running || PlayerPresence.of(app).busy(0)) {
+                    deferred = app.getString(
+                        if (NavigationService.running) R.string.update_after_navigation else R.string.update_deferred
+                    )
+                    UpdateInstallWorker.enqueueSoon(app)
+                } else {
+                    withContext(Dispatchers.IO) { installApk(app, file) }
+                }
+            }.exceptionOrNull()
             busy = if (error == null && deferred == null) "$INSTALLING 앱이 잠시 닫혔다가 바뀌어요" else null
             deferred?.let { UpdateManager.recordError(app, it) }
             error?.let { UpdateManager.recordFailure(app, "업데이트", it.message ?: "업데이트 실패") }
@@ -264,6 +270,14 @@ class UpdateActivity : ComponentActivity() {
     }
 
     companion object {
+        /** 받은 APK 확인 (시험에선 가짜 APK 를 통과시키려고 바꿔 끼운다) */
+        @VisibleForTesting
+        internal var verifyApk: (Context, File, UpdateInfo) -> String? = UpdateManager::verify
+
+        /** 설치 (시험에선 설치 대신 기록) */
+        @VisibleForTesting
+        internal var installApk: (Context, File) -> Unit = UpdateManager::install
+
         /** 첫 화면·지도·유튜브의 '업데이트' 버튼으로 열 때: 확인하고 새 버전이면 바로 받아 설치 (버튼을 또 누르지 않게) */
         const val EXTRA_UPDATE_NOW = "update_now"
 
