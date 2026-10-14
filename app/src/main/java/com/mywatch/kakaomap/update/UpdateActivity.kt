@@ -30,6 +30,7 @@ import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -256,6 +257,11 @@ class UpdateActivity : ComponentActivity() {
                     withContext(Dispatchers.IO) { installApk(app, file) }
                 }
             }.exceptionOrNull()
+            if (error is CancellationException || error is UpdateManager.Cancelled) {
+                // 받는 중에 화면을 닫아 받기가 멈춤 — 실패가 아니다. 받은 데까지는 남았으니 뒤에서 이어받아(자동 설치 규칙대로) 끝내게 맡긴다
+                UpdateInstallWorker.enqueue(app)
+                return@launch
+            }
             busy = if (error == null && deferred == null) "$INSTALLING 앱이 잠시 닫혔다가 바뀌어요" else null
             deferred?.let { UpdateManager.recordError(app, it) }
             error?.let { UpdateManager.recordFailure(app, "업데이트", it.message ?: "업데이트 실패") }

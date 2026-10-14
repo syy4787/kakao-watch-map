@@ -29,6 +29,9 @@ class FakeReleaseServer : AutoCloseable {
     @Volatile var updateJson: String? = null
     /** /files/<이름> 으로 주는 그 밖의 파일 (작은 업데이트 패치 등) — Range 요청이면 그 뒤부터 */
     val files = java.util.concurrent.ConcurrentHashMap<String, ByteArray>()
+    /** 이만큼 남은 동안 /files/ 요청은 받다가 끊긴다 (폰 블루투스가 끊긴 것처럼 — 앞 [cutFilesAt] 바이트만 보내고 닫음) */
+    @Volatile var filesDown = 0
+    @Volatile var cutFilesAt = 1_000
     fun fileUrl(name: String) = "$base/files/$name"
     @Volatile var apk: ByteArray = ByteArray(0)
     @Volatile var apkMissing = false
@@ -83,7 +86,11 @@ class FakeReleaseServer : AutoCloseable {
                     val from = range?.removePrefix("bytes=")?.substringBefore('-')?.toIntOrNull() ?: 0
                     if (from > 0) head("206 Partial Content", bytes.size - from, "Content-Range: bytes $from-${bytes.size - 1}/${bytes.size}\r\n")
                     else head("200 OK", bytes.size)
-                    out.write(bytes, from, bytes.size - from)
+                    val down = filesDown > 0
+                    if (down) filesDown--
+                    // 끊긴 동안엔 앞부분만 보내고 닫는다 (받는 쪽은 짧게 끝난 것으로 알고 다시 이어받으려 함)
+                    val end = if (down) minOf(bytes.size, maxOf(from, from + cutFilesAt)) else bytes.size
+                    out.write(bytes, from, end - from)
                 }
             }
             path.startsWith("/apk/") -> {

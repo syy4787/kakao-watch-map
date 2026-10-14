@@ -11,3 +11,5 @@
 .cxx/
 /tools/tube-sim/shots/
 /tools/tube-sim/node_modules/
+__pycache__/
+*.pyc

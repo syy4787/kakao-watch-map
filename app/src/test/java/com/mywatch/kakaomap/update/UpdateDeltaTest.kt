@@ -60,6 +60,7 @@ class UpdateDeltaTest {
 
     @After
     fun tearDown() {
+        UpdateManager.retryDelaysMs = UpdateManager.DEFAULT_RETRY_DELAYS_MS
         UpdateManager.baseUrl = UpdateManager.GITHUB
         UpdateManager.installedApk = { c -> c.applicationInfo?.sourceDir?.let(::File)?.takeIf { it.canRead() } }
         UpdateNet.override = null
@@ -92,6 +93,9 @@ class UpdateDeltaTest {
         runBlocking { TestListenableWorkerBuilder<UpdateInstallWorker>(context).build().doWork() }
         assertEquals(1, patchRequests())
         assertEquals(0, server.apkRequests.size)
+        // Wi-Fi 를 기다린 것이 아니므로 '이틀 기다림'은 세기 시작하지 않는다 (리뷰에서 찾음: 패치로 받아도 시계가 돌아
+        // 릴리스가 잦은 며칠 뒤 패치가 한 번 안 맞으면 105MB 를 바로 폰으로 받았다)
+        assertFalse(context.getSharedPreferences("updates", Context.MODE_PRIVATE).contains("waiting_since"))
     }
 
     @Test
@@ -108,6 +112,31 @@ class UpdateDeltaTest {
         UpdateManager.download(context, latest())
         assertEquals(1, patchRequests())
         assertEquals(2, server.apkRequests.size)
+    }
+
+    /**
+     * 리뷰에서 찾음: 작은 업데이트를 받다 폰 연결이 잠깐 끊기면(재시도까지 다 실패) '깨진 패치'로 보고 그 릴리스는 다시 쓰지 않고
+     * 받다 만 패치도 지운 채 바로 105MB 전체 APK 를 폰으로 받았다 → 끊긴 것은 실패로 알리고 받은 데까지 두었다가 다음에 이어받는다
+     */
+    @Test
+    fun aDroppedConnectionWhileGettingThePatchKeepsItForNextTimeInsteadOfPullingTheFullApk() {
+        UpdateManager.retryDelaysMs = listOf(0L, 0L, 0L)
+        server.updateJson = updateJson()
+        UpdateManager.check(context)
+        server.filesDown = 4   // 처음 받기 + 다시 잇기 3번 모두 끊김
+        try {
+            UpdateManager.download(context, latest())
+            org.junit.Assert.fail("끊겼으면 이번엔 실패")
+        } catch (e: java.io.IOException) {
+            assertFalse(e is UpdateManager.NeedsWifi)
+        }
+        assertEquals("전체 APK 로 넘어가지 않는다", 0, server.apkRequests.size)
+        assertTrue("다음에 이어받으려고 받은 데까지 남긴다", File(context.cacheDir, "update").listFiles().orEmpty().any { it.name.endsWith(".kwdelta") && it.length() > 0 })
+        // 다음 번: 같은 패치를 받은 데부터 이어받아 끝낸다
+        val file = UpdateManager.download(context, latest())
+        assertEquals(sha(target), UpdateManager.sha256(file))
+        assertEquals(0, server.apkRequests.size)
+        assertTrue(server.requests.toString(), server.requests.any { it.contains("/files/p.kwdelta (bytes=") })
     }
 
     @Test

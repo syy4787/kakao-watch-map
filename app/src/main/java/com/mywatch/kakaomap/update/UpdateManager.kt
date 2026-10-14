@@ -228,17 +228,34 @@ object UpdateManager {
      * 버전마다 새로 세면 Wi-Fi 없는 워치는 영영 못 받는다). 최신이 되면 [check] 가 지운다.
      * 예전 앱이 남긴 "버전:시각" 도 시각만 쓰고, 미래 시각(시계 변경 등)은 믿지 않는다
      */
-    private fun waitingSince(c: Context, now: Long): Long {
+    private fun waitingSince(c: Context, now: Long): Long? {
         val p = prefs(c)
-        val saved = p.getString(KEY_WAITING, null)?.substringAfterLast(':')?.toLongOrNull()
+        val raw = p.getString(KEY_WAITING, null) ?: return null
+        val saved = raw.substringAfterLast(':').toLongOrNull()
         if (saved != null && saved <= now) return saved
+        // 미래 시각(시계 변경 등)·읽을 수 없는 값은 믿지 않고 지금부터 다시 센다
         p.edit { putString(KEY_WAITING, now.toString()) }
         return now
     }
 
-    /** 자동 업데이트가 Wi-Fi 에서만 받아야 하는지: 큰 업데이트이고 아직 이틀이 안 됨 ('지금 업데이트'는 언제나 어디서든) */
-    fun autoNeedsWifi(c: Context, info: UpdateInfo, now: Long = clock()): Boolean =
-        isBig(info) && now - waitingSince(c, now) < WIFI_PATIENCE_MS
+    /**
+     * 큰 업데이트를 정말로 Wi-Fi 를 기다리기 시작함 (Wi-Fi 가 없어 받지 못하고 미룰 때) — 이미 세고 있으면 그대로.
+     * 작은 업데이트(패치)로 받은 릴리스는 기다린 것이 아니므로 세지 않는다
+     */
+    private fun startWaitingForWifi(c: Context) {
+        val now = clock()
+        if (waitingSince(c, now) == null) prefs(c).edit { putString(KEY_WAITING, now.toString()) }
+    }
+
+    /**
+     * 자동 업데이트가 Wi-Fi 에서만 받아야 하는지: 큰 업데이트이고 아직 이틀이 안 됨 ('지금 업데이트'는 언제나 어디서든).
+     * 아직 기다리기 시작하지 않았으면 Wi-Fi 로만 (작은 업데이트가 있으면 그것은 어디서든 받는다)
+     */
+    fun autoNeedsWifi(c: Context, info: UpdateInfo, now: Long = clock()): Boolean {
+        if (!isBig(info)) return false
+        val since = waitingSince(c, now) ?: return true
+        return now - since < WIFI_PATIENCE_MS
+    }
 
     /** 지금 시각 (시험에선 바꿔 끼운다) */
     @VisibleForTesting
@@ -291,19 +308,27 @@ object UpdateManager {
             // 작은 업데이트: 깔린 APK + 바뀐 부분만 받아 새 APK 를 똑같이 다시 만든다 (105MB 대신 몇 MB — Wi-Fi 없이도)
             try {
                 return viaPatch(c, info, patch, File(dir, patchName!!), file, cancelled, onProgress)
-            } catch (e: Cancelled) {
-                throw e
-            } catch (e: IOException) {
-                // 안 되면(깨짐·서버 오류·이 워치의 APK 와 안 맞음) 전체 APK 로 — 같은 패치는 다시 쓰지 않는다
+            } catch (e: DeltaPatch.BadPatch) {
+                // 깨졌거나 이 워치의 APK 와 안 맞음 → 전체 APK 로 — 같은 패치는 다시 쓰지 않는다
+                notePatchFailed(c, patch, e.message ?: "작은 업데이트 실패")
+                File(dir, patchName!!).delete()
+            } catch (e: HttpStatusException) {
+                // 서버에 없는 패치(4xx)도 전체 APK 로. 서버가 잠깐 안 되면(5xx) 이번만 실패 — 다음에 같은 패치로
+                if (e.code !in 400..499) throw e
                 notePatchFailed(c, patch, e.message ?: "작은 업데이트 실패")
                 File(dir, patchName!!).delete()
             }
+            // 그 밖의 오류(연결이 끊김·저장 공간 부족·멈춤)는 그대로 알린다 — 받은 데까지는 남겨 다음에 이어받고,
+            // 105MB 전체 APK 를 폰으로 대신 받지 않는다 (끊긴 것은 패치 탓이 아니다)
         }
         val wifi = UpdateNet.wifi(c, wifiWaitMs)
         try {
             if (wifi == null) {
-                if (wifiOnly && !UpdateNet.onWifiNow(c)) throw NeedsWifi()
-                fetchWithRetries(info.apkUrl, file, onProgress, null, RETRY_DELAYS_MS, cancelled)
+                if (wifiOnly && !UpdateNet.onWifiNow(c)) {
+                    startWaitingForWifi(c)
+                    throw NeedsWifi()
+                }
+                fetchWithRetries(info.apkUrl, file, onProgress, null, retryDelaysMs, cancelled)
             } else {
                 try {
                     fetchWithRetries(info.apkUrl, file, onProgress, wifi::open, WIFI_RETRY_DELAYS_MS, cancelled)
@@ -312,8 +337,11 @@ object UpdateManager {
                     // 없는 파일(4xx)은 어디서나 같다. 멈추라고 했으면 그대로 멈춘다
                     if (e is Cancelled) throw e
                     if (e is HttpStatusException && e.code in 400..499) throw e
-                    if (wifiOnly) throw NeedsWifi()
-                    fetchWithRetries(info.apkUrl, file, onProgress, null, RETRY_DELAYS_MS, cancelled)
+                    if (wifiOnly) {
+                        startWaitingForWifi(c)
+                        throw NeedsWifi()
+                    }
+                    fetchWithRetries(info.apkUrl, file, onProgress, null, retryDelaysMs, cancelled)
                 }
             }
         } finally {
@@ -377,7 +405,11 @@ object UpdateManager {
     }
 
     /** 끊긴 내려받기를 다시 잇기 전 쉬는 시간 — 첫 번은 바로 (블루투스가 잠깐 끊긴 경우가 대부분) */
-    private val RETRY_DELAYS_MS = listOf(0L, 3_000L, 10_000L)
+    @VisibleForTesting
+    internal val DEFAULT_RETRY_DELAYS_MS = listOf(0L, 3_000L, 10_000L)
+
+    @VisibleForTesting
+    internal var retryDelaysMs = DEFAULT_RETRY_DELAYS_MS
 
     /** Wi-Fi 로 받다 끊기면 한 번만 바로 다시 — 그래도 안 되면 Wi-Fi 가 사라진 것으로 보고 늘 쓰던 망으로 */
     private val WIFI_RETRY_DELAYS_MS = listOf(0L)
@@ -508,9 +540,9 @@ object UpdateManager {
         cancelled: () -> Boolean,
         onProgress: (Int) -> Unit,
     ): File {
-        val installed = installedApk(c) ?: throw IOException("깔린 앱 파일을 찾지 못했어요")
+        val installed = installedApk(c) ?: throw DeltaPatch.BadPatch("깔린 앱 파일을 찾지 못했어요")
         if (!(patchFile.exists() && sha256(patchFile) == patch.sha256)) {
-            fetchWithRetries(patch.url, patchFile, onProgress, null, RETRY_DELAYS_MS, cancelled)
+            fetchWithRetries(patch.url, patchFile, onProgress, null, retryDelaysMs, cancelled)
             if (sha256(patchFile) != patch.sha256) {
                 patchFile.delete()
                 throw DeltaPatch.BadPatch("작은 업데이트 파일이 손상됐어요")

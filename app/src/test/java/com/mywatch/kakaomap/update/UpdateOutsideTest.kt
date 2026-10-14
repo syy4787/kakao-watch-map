@@ -32,6 +32,7 @@ import kotlin.concurrent.thread
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
@@ -303,6 +304,30 @@ class UpdateOutsideTest {
             UpdateActivity.verifyApk = UpdateManager::verify
             UpdateActivity.installApk = UpdateManager::install
         }
+    }
+
+    /**
+     * 리뷰에서 찾음: 받는 중에 업데이트 화면을 닫으면(뒤로) 받기가 멈추는데, 그것을 '업데이트 실패'로 남기고(⚠)
+     * 이어받을 일도 맡기지 않아 다음 확인(최대 6시간)까지 멈춰 있었다 → 실패로 남기지 않고 뒤에서 이어받게 맡긴다
+     */
+    @Test
+    fun closingTheUpdateScreenMidDownloadIsNotAFailureAndTheDownloadContinuesInTheBackground() {
+        WorkManagerTestInitHelper.initializeTestWorkManager(context, Configuration.Builder().setExecutor(SynchronousExecutor()).build())
+        server.apk = ByteArray(3_000_000) { (it * 13 % 251).toByte() }
+        server.updateJson = server.updateJsonFor(999)
+        UpdateManager.check(context)
+        val hold = CountDownLatch(1).also { server.holdApk = it }
+        val controller = Robolectric.buildActivity(UpdateActivity::class.java).setup()
+        val activity = controller.get()
+        shadowOf(Looper.getMainLooper()).idle()
+        tap(activity, "지금 업데이트")
+        waitUntil("내려받기 시작") { server.apkRequests.isNotEmpty() }
+        controller.pause().stop().destroy()   // 뒤로 — 화면이 닫힘 (받기는 멈춘다)
+        hold.countDown()
+        waitUntil("뒤에서 이어받게 맡긴다") {
+            WorkManager.getInstance(context).getWorkInfosForUniqueWork("update-install").get().isNotEmpty()
+        }
+        assertNull("멈춘 것은 실패가 아니다: ${UpdateManager.lastError(context)}", UpdateManager.lastError(context))
     }
 
     @Test

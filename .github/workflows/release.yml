@@ -45,9 +45,22 @@ jobs:
             exit 1
           fi
           if [ "$NEWEST" != "$GITHUB_SHA" ]; then
-            echo "::notice::이 커밋(${GITHUB_SHA::7})은 main 의 최신(${NEWEST::7})이 아니라 배포하지 않아요 — 최신 커밋의 실행이 배포해요"
-            echo "ready=false" >> "$GITHUB_OUTPUT"
-            exit 0
+            # 그 뒤 커밋들이 문서·재생 화면처럼 이 워크플로를 돌리지 않는 파일(paths-ignore)만 바꿨으면 이 커밋이 앱의 최신이다 —
+            # 그 커밋들의 실행은 없으므로 여기서 배포하지 않으면 이 앱 커밋은 영영 배포되지 않는다
+            STATUS=$(gh api "repos/$GITHUB_REPOSITORY/compare/${GITHUB_SHA}...${NEWEST}" --jq .status || true)
+            APP_CHANGES=yes
+            if [ "$STATUS" = "ahead" ]; then
+              CHANGED=$(gh api "repos/$GITHUB_REPOSITORY/compare/${GITHUB_SHA}...${NEWEST}" --jq '.files[].filename' || echo "?")
+              if [ -n "$CHANGED" ] && ! printf '%s\n' "$CHANGED" | grep -Ev '(\.md$|^web/|^tools/|^\.github/workflows/pages\.yml$)' > /dev/null; then
+                APP_CHANGES=no
+              fi
+            fi
+            if [ "$APP_CHANGES" = "yes" ]; then
+              echo "::notice::이 커밋(${GITHUB_SHA::7})은 main 의 최신(${NEWEST::7})이 아니라 배포하지 않아요 — 최신 커밋의 실행이 배포해요"
+              echo "ready=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "::notice::뒤 커밋(${NEWEST::7})은 문서·재생 화면만 바꿔 배포를 돌리지 않으므로 이 커밋(${GITHUB_SHA::7})을 배포해요"
           fi
           echo "ready=true" >> "$GITHUB_OUTPUT"
 
@@ -214,8 +227,12 @@ jobs:
           done
           ls -l deltas
           cat update.json
-          N=$(ls deltas/*.kwdelta 2>/dev/null | wc -l)
-          echo "::notice title=작은 업데이트::패치 ${N}개 — $(ls -l deltas/*armeabi-v7a*.kwdelta 2>/dev/null | awk '{printf "%s %.1fMB  ", $9, $5/1048576}')"
+          shopt -s nullglob
+          ALL=(deltas/*.kwdelta)
+          V7=(deltas/*armeabi-v7a*.kwdelta)
+          SIZES=""
+          for F in "${V7[@]}"; do SIZES="$SIZES $(basename "$F") $(awk -v b="$(stat -c %s "$F")" 'BEGIN{printf "%.1fMB", b/1048576}') "; done
+          echo "::notice title=작은 업데이트::패치 ${#ALL[@]}개 —${SIZES:- 없음}"
 
       - name: Publish GitHub release
         if: steps.check.outputs.ready == 'true'
