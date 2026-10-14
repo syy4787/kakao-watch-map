@@ -456,6 +456,9 @@ class TubeAppTest {
         tapAction(a, TubeRows.A_LOGIN_PHONE)
         settle { phoneOpened.isNotEmpty() }
         assertEquals(listOf("https://www.google.com/device"), phoneOpened)
+        settle { rows(a).any { it is Row.Note && it.text == context.getString(R.string.tube_login_phone_opened) } }
+        assertTrue("코드는 그대로 보인다", rows(a).any { it is Row.Code })
+        assertTrue(rows(a).any { it is Row.Note && it.text == context.getString(R.string.tube_login_phone_opened) })
 
         // 폰에서 허용 → 다음 물음에서 끝난다
         tokenReply = Http.Response(200, """{"access_token":"AT","expires_in":3599,"refresh_token":"RT","scope":"https://www.googleapis.com/auth/youtube.readonly"}""")

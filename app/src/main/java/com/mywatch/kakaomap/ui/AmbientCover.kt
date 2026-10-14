@@ -19,7 +19,7 @@ import com.mywatch.kakaomap.R
  */
 class AmbientCover(
     private val activity: ComponentActivity,
-    private val summary: () -> String,
+    private val summary: () -> CharSequence,
     private val onAmbientChanged: (ambient: Boolean) -> Unit = {},
 ) {
     var inAmbient = false

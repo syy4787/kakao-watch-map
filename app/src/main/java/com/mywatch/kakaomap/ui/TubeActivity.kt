@@ -143,8 +143,9 @@ class TubeActivity : ComponentActivity() {
         outState.putString(STATE_NAV, nav.save())
     }
 
-    private fun ambientSummary(): String =
-        listOfNotNull(getString(R.string.tube_app_name), state.lastPlayed()?.title).joinToString("\n")
+    /** 손목을 내렸을 때: 로그인 코드를 기다리는 중이면 코드와 주소, 아니면 앱 이름 + 마지막에 본 것 */
+    private fun ambientSummary(): CharSequence =
+        TubeRows.ambient(this, state.lastPlayed()?.title, if (nav.top == Page.Login) login else null)
 
     /** 타일에서 온 일을 마쳐 곧 닫히려는데 화면을 만졌으면 계속 쓰려는 것 — 닫지 않는다 */
     override fun onUserInteraction() {
@@ -498,7 +499,7 @@ class TubeActivity : ComponentActivity() {
                 goBack()
             }
             id == TubeRows.A_LOGIN -> if (top == Page.Login) startLogin() else go(Page.Login)
-            id == TubeRows.A_LOGIN_PHONE -> (login as? LoginState.Waiting)?.let { openOnPhone(it.code.verificationUrl, R.string.tube_opened_phone_page) {} }
+            id == TubeRows.A_LOGIN_PHONE -> (login as? LoginState.Waiting)?.let(::openLoginOnPhone)
             id == TubeRows.A_LOGOUT -> signOut()
             id == TubeRows.A_PERMISSIONS -> openOnPhone(PERMISSIONS_URL, R.string.tube_opened_phone_page) {}
             id == TubeRows.A_HANDOFF -> (top as? Page.Handoff)?.let { doHandoff(it.handoff) }
@@ -563,6 +564,29 @@ class TubeActivity : ComponentActivity() {
             login = LoginState.Waiting(code)
             render()
             waitForApproval(code)
+        }
+    }
+
+    /**
+     * '폰에서 주소 열기': 코드는 그대로 두고(폰에 넣으려면 봐야 한다) 코드 아래 한 줄로 '여는 중…' → '열었어요'.
+     * 예전엔 화면 전체가 '여는 중…'이 됐다가 큰 확인 그림이 코드를 덮었다
+     */
+    private fun openLoginOnPhone(w: LoginState.Waiting) {
+        if (w.phone == TubeRows.PhoneStep.SENDING) return
+        login = w.copy(phone = TubeRows.PhoneStep.SENDING)
+        render()
+        lifecycleScope.launch {
+            val result = phone.open(w.code.verificationUrl)
+            val now = login as? LoginState.Waiting ?: return@launch
+            if (now.code != w.code) return@launch
+            login = now.copy(
+                phone = when (result) {
+                    PhoneOpener.Result.OPENED -> TubeRows.PhoneStep.OPENED
+                    PhoneOpener.Result.NO_PHONE -> TubeRows.PhoneStep.NO_PHONE
+                    PhoneOpener.Result.FAILED -> TubeRows.PhoneStep.FAILED
+                },
+            )
+            if (nav.top == Page.Login) render()
         }
     }
 

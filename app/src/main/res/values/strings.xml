@@ -161,6 +161,9 @@
     <string name="tube_login_starting">코드를 받는 중…</string>
     <string name="tube_login_how">폰(또는 컴퓨터)에서 위 주소를 열고 이 코드를 넣은 뒤 허용하세요</string>
     <string name="tube_login_phone">폰에서 주소 열기</string>
+    <string name="tube_login_phone_sending">폰에서 주소를 여는 중…</string>
+    <string name="tube_login_phone_opened">폰에서 주소를 열었어요 · 위 코드를 넣어 주세요</string>
+    <string name="tube_login_phone_again">폰에서 다시 열기</string>
     <string name="tube_login_waiting">허용을 기다리는 중… 끝나면 저절로 넘어가요</string>
     <string name="tube_login_denied">로그인을 허용하지 않았어요</string>
     <string name="tube_login_again">다시 로그인</string>

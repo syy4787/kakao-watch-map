@@ -66,12 +66,18 @@ object TubeRows {
     /** 로그인 화면의 상태 */
     sealed interface LoginState {
         data object Starting : LoginState
-        /** [intervalSec] = 지금 묻는 간격 (구글이 천천히 하라면 늘어난 것 — 화면이 꺼졌다 켜져도 그대로) */
-        data class Waiting(val code: DeviceCode, val intervalSec: Int = code.intervalSec) : LoginState
+        /**
+         * [intervalSec] = 지금 묻는 간격 (구글이 천천히 하라면 늘어난 것 — 화면이 꺼졌다 켜져도 그대로),
+         * [phone] = '폰에서 주소 열기'를 누른 결과 (코드 아래 한 줄로)
+         */
+        data class Waiting(val code: DeviceCode, val intervalSec: Int = code.intervalSec, val phone: PhoneStep? = null) : LoginState
         data object Denied : LoginState
         data object Expired : LoginState
         data class Failed(val message: String) : LoginState
     }
+
+    /** 로그인 화면에서 '폰에서 주소 열기'를 누른 뒤 */
+    enum class PhoneStep { SENDING, OPENED, NO_PHONE, FAILED }
 
     /** 홈에 필요한 것: 이 앱의 기록·검색어, 구독 피드(로그인했으면), 인기 음악·인기 동영상, 계정, 새 버전 */
     data class HomeData(
@@ -363,9 +369,20 @@ object TubeRows {
         when (s) {
             LoginState.Starting -> rows += Row.Note(c.getString(R.string.tube_login_starting))
             is LoginState.Waiting -> {
-                rows += Row.Code(s.code.userCode, s.code.verificationUrl.removePrefix("https://").removePrefix("http://").trimEnd('/'))
+                rows += Row.Code(s.code.userCode, shortUrl(s.code))
                 rows += Row.Note(c.getString(R.string.tube_login_how))
-                rows += Row.Action(A_LOGIN_PHONE, R.drawable.ic_smartphone, c.getString(R.string.tube_login_phone), accent = true)
+                // 폰에서 주소를 열어도 코드는 그대로 (폰에 넣으려면 봐야 한다) — 결과는 아래 한 줄로
+                val phone = Row.Action(A_LOGIN_PHONE, R.drawable.ic_smartphone, c.getString(R.string.tube_login_phone), accent = true)
+                rows += when (s.phone) {
+                    null -> listOf(phone)
+                    PhoneStep.SENDING -> listOf(Row.Note(c.getString(R.string.tube_login_phone_sending)))
+                    PhoneStep.OPENED -> listOf(
+                        Row.Note(c.getString(R.string.tube_login_phone_opened)),
+                        phone.copy(text = c.getString(R.string.tube_login_phone_again), accent = false),
+                    )
+                    PhoneStep.NO_PHONE -> listOf(Row.Note(c.getString(R.string.tube_no_phone)), phone)
+                    PhoneStep.FAILED -> listOf(Row.Note(c.getString(R.string.tube_phone_failed)), phone)
+                }
                 rows += Row.Note(c.getString(R.string.tube_login_waiting))
             }
             LoginState.Denied -> {
@@ -383,6 +400,28 @@ object TubeRows {
         }
         rows += Row.Action(A_CANCEL, R.drawable.ic_close, c.getString(R.string.cancel))
         return rows
+    }
+
+    private fun shortUrl(code: DeviceCode) = code.verificationUrl.removePrefix("https://").removePrefix("http://").trimEnd('/')
+
+    /**
+     * 손목을 내렸을 때(저전력 화면)의 글: 앱 이름 + 마지막에 본 것. 로그인 코드를 기다리는 중이면 코드와 주소를 크게 —
+     * 폰에 코드를 넣는 동안 손목을 내려도 코드가 보이게 (점검 C6)
+     */
+    fun ambient(c: Context, lastTitle: String?, login: LoginState?): CharSequence {
+        val app = c.getString(R.string.tube_app_name)
+        if (login is LoginState.Waiting) {
+            val code = login.code.userCode
+            return android.text.SpannableStringBuilder().apply {
+                append(code)
+                setSpan(android.text.style.RelativeSizeSpan(1.7f), 0, length, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                setSpan(android.text.style.StyleSpan(android.graphics.Typeface.BOLD), 0, length, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                setSpan(android.text.style.ForegroundColorSpan(android.graphics.Color.WHITE), 0, length, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                append("\n")
+                append(shortUrl(login.code))
+            }
+        }
+        return listOfNotNull(app, lastTitle).joinToString("\n")
     }
 
     /** 내 계정: 사진·이름 · 무엇을 하는지 · 로그아웃 · 폰에서 권한 관리 */

@@ -249,6 +249,37 @@ class TubeRowsTest {
         assertTrue(TubeRows.login(c, LoginState.Failed("구글 로그인 오류 (500)")).any { it is Row.Note && it.text == "구글 로그인 오류 (500)" })
     }
 
+    /**
+     * 점검 C6: '폰에서 주소 열기'를 누르면 화면 전체가 '여는 중…'으로 바뀌고 끝나면 큰 확인 그림이 덮어 코드가 안 보였다
+     * (폰에 코드를 넣으려면 코드를 봐야 하는데). 코드는 그대로 두고 그 아래 한 줄로 알린다
+     */
+    @Test
+    fun openingTheAddressOnThePhoneKeepsTheCodeInSight() {
+        val code = DeviceCode("dc", "GQVQ-JKEC", "https://www.google.com/device", now + 1_800_000, 5)
+        fun notes(rows: List<Row>) = rows.filterIsInstance<Row.Note>().map { it.text }
+        val sending = TubeRows.login(c, LoginState.Waiting(code, phone = TubeRows.PhoneStep.SENDING))
+        assertEquals("GQVQ-JKEC", sending.filterIsInstance<Row.Code>().single().code)
+        assertTrue(notes(sending).contains(c.getString(R.string.tube_login_phone_sending)))
+        assertFalse("여는 중엔 또 누를 버튼이 없다", actions(sending).contains(TubeRows.A_LOGIN_PHONE))
+        val opened = TubeRows.login(c, LoginState.Waiting(code, phone = TubeRows.PhoneStep.OPENED))
+        assertTrue(opened.any { it is Row.Code })
+        assertTrue(notes(opened).contains(c.getString(R.string.tube_login_phone_opened)))
+        assertTrue("다시 열 수 있다", actions(opened).contains(TubeRows.A_LOGIN_PHONE))
+        val noPhone = TubeRows.login(c, LoginState.Waiting(code, phone = TubeRows.PhoneStep.NO_PHONE))
+        assertTrue(notes(noPhone).contains(c.getString(R.string.tube_no_phone)))
+        assertTrue(noPhone.any { it is Row.Code })
+    }
+
+    @Test
+    fun theDimmedScreenKeepsShowingTheLoginCode() {
+        val code = DeviceCode("dc", "GQVQ-JKEC", "https://www.google.com/device", now + 1_800_000, 5)
+        val text = TubeRows.ambient(c, "밤편지", LoginState.Waiting(code)).toString()
+        assertTrue(text.contains("GQVQ-JKEC"))
+        assertTrue(text.contains("www.google.com/device"))
+        assertEquals("유튜브\n밤편지", TubeRows.ambient(c, "밤편지", null).toString())
+        assertEquals("유튜브", TubeRows.ambient(c, null, LoginState.Denied).toString())
+    }
+
     @Test
     fun theVideoMenuOffersWhatMakesSense() {
         val rows = TubeRows.menu(c, videos[0], inHistory = true)
