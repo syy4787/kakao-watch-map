@@ -29,11 +29,17 @@ data class UpdateInfo(
     val notes: String,
     /** 받을 APK 크기 (바이트). 예전 update.json 엔 없다 */
     val sizeBytes: Long? = null,
+    /** 이전 버전 APK 에서 이 APK 를 만드는 작은 업데이트들 (워치에 깔린 APK 와 [Patch.from] 이 같은 것만 쓸 수 있다) */
+    val patches: List<Patch> = emptyList(),
 ) {
+    /** 작은 업데이트(.kwdelta) — [from] = 이 패치를 적용할 수 있는 APK 의 SHA-256 */
+    data class Patch(val from: String, val url: String, val sha256: String, val size: Long)
+
     fun toJson(): String = JSONObject()
         .put("versionCode", versionCode).put("versionName", versionName)
         .put("apkUrl", apkUrl).put("sha256", sha256).put("notes", notes)
         .apply { sizeBytes?.let { put("size", it) } }
+        .apply { if (patches.isNotEmpty()) put("patches", patchesJson(patches)) }
         .toString()
 
     companion object {
@@ -54,7 +60,25 @@ data class UpdateInfo(
                 sha256 = (own?.getString("sha256") ?: o.getString("sha256")).lowercase(),
                 notes = o.optString("notes"),
                 sizeBytes = (own ?: o).optLong("size", -1).takeIf { it > 0 },
+                // 이 CPU 용 APK 의 작은 업데이트들 (기억해 둔 것을 다시 읽을 땐 맨 위에)
+                patches = parsePatches((own ?: o).optJSONArray("patches")),
             )
+        }
+
+        private fun parsePatches(a: org.json.JSONArray?): List<Patch> {
+            if (a == null) return emptyList()
+            return (0 until a.length()).mapNotNull { i ->
+                val p = a.optJSONObject(i) ?: return@mapNotNull null
+                val from = p.optString("from").lowercase()
+                val url = p.optString("url")
+                val sha = p.optString("sha256").lowercase()
+                val size = p.optLong("size", -1)
+                if (from.length != 64 || sha.length != 64 || url.isBlank() || size <= 0) null else Patch(from, url, sha, size)
+            }
+        }
+
+        private fun patchesJson(list: List<Patch>) = org.json.JSONArray().apply {
+            list.forEach { put(JSONObject().put("from", it.from).put("url", it.url).put("sha256", it.sha256).put("size", it.size)) }
         }
 
         private fun deviceAbis(): List<String> =
@@ -83,6 +107,8 @@ object UpdateManager {
     private const val KEY_BAD_SHA = "bad_sha"
     private const val KEY_BAD_SHA_COUNT = "bad_sha_count"
     private const val KEY_WAITING = "waiting_since"
+    private const val KEY_INSTALLED_SHA = "installed_sha"
+    private const val KEY_PATCH_BAD = "patch_bad"
 
     /** 받은 파일이 update.json 의 SHA-256 과 계속 다르면 같은 릴리스는 자동으로 이만큼만 받아 본다 (밖에선 폰 데이터라) */
     private const val MAX_AUTO_CORRUPT = 2
@@ -139,7 +165,11 @@ object UpdateManager {
             if (code !in 200..299) throw IOException("업데이트 정보를 받지 못했어요 ($code)")
             val info = UpdateInfo.parse(conn.inputStream.bufferedReader().use { it.readText() })
             prefs(c).edit { putString(KEY_LATEST, info.toJson()).remove(KEY_ERROR) }
-            if (info.versionCode > currentVersionCode(c)) return info
+            if (info.versionCode > currentVersionCode(c)) {
+                // 작은 업데이트를 쓸 수 있는지 미리 알아 둔다 (깔린 APK 의 SHA-256 — 화면이 크기를 바로 보여 주게)
+                if (info.patches.isNotEmpty()) installedApkSha(c)
+                return info
+            }
             // 이미 최신 → 설치하고 남은 APK(십수 MB)는 워치 저장공간만 차지하므로 지우고, 큰 업데이트 기다림도 끝
             prefs(c).edit { remove(KEY_WAITING) }
             synchronized(downloadLock) { cacheDir(c).listFiles()?.forEach { it.delete() } }
@@ -251,25 +281,39 @@ object UpdateManager {
     ): File {
         val dir = cacheDir(c).apply { mkdirs() }
         val name = cacheFileName(info)
-        // 다른 버전·다른 APK 의 옛 파일은 지운다
-        dir.listFiles()?.filter { it.name != name }?.forEach { it.delete() }
+        val patch = usablePatch(c, info)?.takeIf { it.size <= BIG_BYTES || !wifiOnly }
+        val patchName = patch?.let { patchFileName(it) }
+        // 다른 버전·다른 APK 의 옛 파일은 지운다 (이 버전의 받다 만 작은 업데이트는 남겨 이어받기)
+        dir.listFiles()?.filter { it.name != name && it.name != patchName }?.forEach { it.delete() }
         val file = File(dir, name)
         if (file.exists() && sha256(file) == info.sha256) return file
+        if (patch != null) {
+            // 작은 업데이트: 깔린 APK + 바뀐 부분만 받아 새 APK 를 똑같이 다시 만든다 (105MB 대신 몇 MB — Wi-Fi 없이도)
+            try {
+                return viaPatch(c, info, patch, File(dir, patchName!!), file, cancelled, onProgress)
+            } catch (e: Cancelled) {
+                throw e
+            } catch (e: IOException) {
+                // 안 되면(깨짐·서버 오류·이 워치의 APK 와 안 맞음) 전체 APK 로 — 같은 패치는 다시 쓰지 않는다
+                notePatchFailed(c, patch, e.message ?: "작은 업데이트 실패")
+                File(dir, patchName!!).delete()
+            }
+        }
         val wifi = UpdateNet.wifi(c, wifiWaitMs)
         try {
             if (wifi == null) {
                 if (wifiOnly && !UpdateNet.onWifiNow(c)) throw NeedsWifi()
-                fetchWithRetries(info, file, onProgress, null, RETRY_DELAYS_MS, cancelled)
+                fetchWithRetries(info.apkUrl, file, onProgress, null, RETRY_DELAYS_MS, cancelled)
             } else {
                 try {
-                    fetchWithRetries(info, file, onProgress, wifi::open, WIFI_RETRY_DELAYS_MS, cancelled)
+                    fetchWithRetries(info.apkUrl, file, onProgress, wifi::open, WIFI_RETRY_DELAYS_MS, cancelled)
                 } catch (e: IOException) {
                     // Wi-Fi 가 끊겼으면(집을 나섬 등) 받은 데까지는 두고 늘 쓰던 망으로 이어받는다 (Wi-Fi 로만이면 다음에 Wi-Fi 에서).
                     // 없는 파일(4xx)은 어디서나 같다. 멈추라고 했으면 그대로 멈춘다
                     if (e is Cancelled) throw e
                     if (e is HttpStatusException && e.code in 400..499) throw e
                     if (wifiOnly) throw NeedsWifi()
-                    fetchWithRetries(info, file, onProgress, null, RETRY_DELAYS_MS, cancelled)
+                    fetchWithRetries(info.apkUrl, file, onProgress, null, RETRY_DELAYS_MS, cancelled)
                 }
             }
         } finally {
@@ -289,7 +333,7 @@ object UpdateManager {
      * 서버가 없다고 한 것(4xx)은 다시 물어도 같으니 바로 알린다. [open] = 이 망으로 연결 (null 이면 늘 쓰던 망)
      */
     private fun fetchWithRetries(
-        info: UpdateInfo,
+        url: String,
         file: File,
         onProgress: (Int) -> Unit,
         open: ((URL) -> URLConnection)?,
@@ -299,7 +343,7 @@ object UpdateManager {
         var attempt = 0
         while (true) {
             try {
-                fetchOrRestart(info, file, onProgress, open, cancelled)
+                fetchOrRestart(url, file, onProgress, open, cancelled)
                 return
             } catch (e: IOException) {
                 if (e is Cancelled) throw e
@@ -322,13 +366,13 @@ object UpdateManager {
         if (cancelled()) throw Cancelled()
     }
 
-    private fun fetchOrRestart(info: UpdateInfo, file: File, onProgress: (Int) -> Unit, open: ((URL) -> URLConnection)?, cancelled: () -> Boolean) {
+    private fun fetchOrRestart(url: String, file: File, onProgress: (Int) -> Unit, open: ((URL) -> URLConnection)?, cancelled: () -> Boolean) {
         try {
-            fetch(info, file, resume = file.exists() && file.length() > 0, onProgress, open, cancelled)
+            fetch(url, file, resume = file.exists() && file.length() > 0, onProgress, open, cancelled)
         } catch (e: RangeNotUsable) {
             // 이어받기가 안 되는 조각 파일(손상·크기 초과 등)이면 지우고 처음부터
             file.delete()
-            fetch(info, file, resume = false, onProgress, open, cancelled)
+            fetch(url, file, resume = false, onProgress, open, cancelled)
         }
     }
 
@@ -344,7 +388,7 @@ object UpdateManager {
 
     /** 받다 만 파일이 있으면 Range 요청으로 이어받는다 */
     private fun fetch(
-        info: UpdateInfo,
+        address: String,
         file: File,
         resume: Boolean,
         onProgress: (Int) -> Unit,
@@ -352,7 +396,7 @@ object UpdateManager {
         cancelled: () -> Boolean,
     ) {
         val already = if (resume) file.length() else 0L
-        val url = URL(info.apkUrl)
+        val url = URL(address)
         val conn = ((open?.invoke(url) ?: url.openConnection()) as HttpURLConnection).apply {
             connectTimeout = 20_000
             readTimeout = 30_000
@@ -397,6 +441,94 @@ object UpdateManager {
         } finally {
             conn.disconnect()
         }
+    }
+
+    // ───────────────── 작은 업데이트 (.kwdelta) ─────────────────
+
+    /** 지금 깔린 이 앱의 APK (시험에선 바꿔 끼운다) */
+    @VisibleForTesting
+    internal var installedApk: (Context) -> File? = { c -> c.applicationInfo?.sourceDir?.let(::File)?.takeIf { it.canRead() } }
+
+    /**
+     * 깔린 APK 의 SHA-256 — 한 번 재면 기억한다 (설치할 때마다 경로가 바뀌므로 경로·크기·시각이 같을 때만 그대로).
+     * 105MB 를 읽으므로 작업 스레드에서만
+     */
+    fun installedApkSha(c: Context): String? {
+        val apk = installedApk(c) ?: return null
+        cachedInstalledApkSha(c)?.let { return it }
+        val sha = runCatching { sha256(apk) }.getOrNull() ?: return null
+        prefs(c).edit { putString(KEY_INSTALLED_SHA, "${apkKey(apk)}|$sha") }
+        return sha
+    }
+
+    /** 이미 재 둔 깔린 APK 의 SHA-256 (없으면 재지 않고 null — 화면에서 씀) */
+    fun cachedInstalledApkSha(c: Context): String? {
+        val apk = installedApk(c) ?: return null
+        val saved = prefs(c).getString(KEY_INSTALLED_SHA, null) ?: return null
+        return saved.substringAfterLast('|').takeIf { saved.substringBeforeLast('|') == apkKey(apk) && it.length == 64 }
+    }
+
+    private fun apkKey(apk: File) = "${apk.path}|${apk.length()}|${apk.lastModified()}"
+
+    /** 이 워치에 깔린 APK 로 쓸 수 있는 작은 업데이트 (전에 실패한 것은 빼고). 작업 스레드에서만 */
+    fun usablePatch(c: Context, info: UpdateInfo): UpdateInfo.Patch? {
+        if (info.patches.isEmpty()) return null
+        val mine = installedApkSha(c) ?: return null
+        return info.patches.firstOrNull { it.from == mine && !patchFailed(c, it) }
+    }
+
+    /** 화면용: 이미 아는 것만으로 받을 크기 (작은 업데이트면 그 크기) — 재지 않는다 */
+    fun knownDownloadSize(c: Context, info: UpdateInfo): Long? {
+        val mine = cachedInstalledApkSha(c)
+        val patch = info.patches.firstOrNull { it.from == mine && !patchFailed(c, it) }
+        return patch?.size ?: info.sizeBytes
+    }
+
+    /** 화면용: 작은 업데이트로 받게 되는지 (이미 아는 것만으로) */
+    fun knownSmallUpdate(c: Context, info: UpdateInfo): Boolean {
+        val mine = cachedInstalledApkSha(c) ?: return false
+        return info.patches.any { it.from == mine && !patchFailed(c, it) }
+    }
+
+    private fun patchFailed(c: Context, p: UpdateInfo.Patch) = prefs(c).getString(KEY_PATCH_BAD, null) == p.sha256
+
+    private fun notePatchFailed(c: Context, p: UpdateInfo.Patch, why: String) {
+        prefs(c).edit { putString(KEY_PATCH_BAD, p.sha256) }
+        ErrorLog.record("작은 업데이트", "$why — 전체 파일로 받아요")
+    }
+
+    private fun patchFileName(p: UpdateInfo.Patch) = "patch-${p.sha256.take(16)}.kwdelta"
+
+    private fun viaPatch(
+        c: Context,
+        info: UpdateInfo,
+        patch: UpdateInfo.Patch,
+        patchFile: File,
+        target: File,
+        cancelled: () -> Boolean,
+        onProgress: (Int) -> Unit,
+    ): File {
+        val installed = installedApk(c) ?: throw IOException("깔린 앱 파일을 찾지 못했어요")
+        if (!(patchFile.exists() && sha256(patchFile) == patch.sha256)) {
+            fetchWithRetries(patch.url, patchFile, onProgress, null, RETRY_DELAYS_MS, cancelled)
+            if (sha256(patchFile) != patch.sha256) {
+                patchFile.delete()
+                throw DeltaPatch.BadPatch("작은 업데이트 파일이 손상됐어요")
+            }
+        }
+        val part = File(target.parentFile, target.name + ".part")
+        val made = DeltaPatch.apply(installed, patchFile, part, cancelled)
+        if (made != info.sha256) {
+            part.delete()
+            throw DeltaPatch.BadPatch("작은 업데이트로 만든 파일이 새 버전과 달라요")
+        }
+        if (!part.renameTo(target)) {
+            part.delete()
+            throw IOException("받은 파일을 옮기지 못했어요")
+        }
+        patchFile.delete()
+        onProgress(100)
+        return target
     }
 
     // ───────────────── 확인(서명) ─────────────────

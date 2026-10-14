@@ -27,6 +27,9 @@ class FakeReleaseServer : AutoCloseable {
     val apkRequests: List<String> get() = requests.filter { it.contains("/apk/") }
 
     @Volatile var updateJson: String? = null
+    /** /files/<이름> 으로 주는 그 밖의 파일 (작은 업데이트 패치 등) — Range 요청이면 그 뒤부터 */
+    val files = java.util.concurrent.ConcurrentHashMap<String, ByteArray>()
+    fun fileUrl(name: String) = "$base/files/$name"
     @Volatile var apk: ByteArray = ByteArray(0)
     @Volatile var apkMissing = false
     /** 첫 APK 응답은 이만큼만 보내고 연결을 닫는다 (받는 쪽은 조용히 끝난 것처럼 보임) */
@@ -72,6 +75,15 @@ class FakeReleaseServer : AutoCloseable {
                 if (body == null) head("404 Not Found", 0) else {
                     head("200 OK", body.size)
                     out.write(body)
+                }
+            }
+            path.startsWith("/files/") -> {
+                val bytes = files[path.removePrefix("/files/")]
+                if (bytes == null) head("404 Not Found", 0) else {
+                    val from = range?.removePrefix("bytes=")?.substringBefore('-')?.toIntOrNull() ?: 0
+                    if (from > 0) head("206 Partial Content", bytes.size - from, "Content-Range: bytes $from-${bytes.size - 1}/${bytes.size}\r\n")
+                    else head("200 OK", bytes.size)
+                    out.write(bytes, from, bytes.size - from)
                 }
             }
             path.startsWith("/apk/") -> {

@@ -115,8 +115,9 @@ class UpdateActivity : ComponentActivity() {
             }
             rows += Row.Note(status)
             if (UpdateManager.hasUpdate(c)) {
-                // 크기를 알면 얼마나 받는지 (재생 엔진이 들어 있어 큼 — 워치 Wi-Fi 가 있으면 그쪽으로 받음)
-                val size = latest?.sizeBytes?.let { "약 ${(it + 500_000) / 1_000_000}MB · Wi-Fi 가 있으면 그쪽으로" }
+                // 얼마나 받는지 — 깔린 앱으로 바뀐 부분만 받을 수 있으면(작은 업데이트) 몇 MB, 아니면 전체(재생 엔진이 들어 있어 큼 —
+                // 워치 Wi-Fi 가 있으면 그쪽으로 받음)
+                val size = latest?.let { sizeLabel(UpdateManager.knownDownloadSize(c, it), UpdateManager.knownSmallUpdate(c, it)) }
                 rows += Row.Action(ACTION_INSTALL, R.drawable.ic_download, "지금 업데이트", accent = true, sub = size)
             }
             rows += Row.Action(ACTION_CHECK, R.drawable.ic_refresh, "업데이트 확인")
@@ -151,6 +152,12 @@ class UpdateActivity : ComponentActivity() {
         rows += Row.Header("이 워치에서의 성능")
         rows += Row.Note(deviceReport())
         ui.rows = rows
+    }
+
+    private fun sizeLabel(bytes: Long?, small: Boolean): String? {
+        bytes ?: return null
+        val mb = if (bytes < 1_000_000) "1MB 미만" else "약 ${(bytes + 500_000) / 1_000_000}MB"
+        return if (small) "$mb · 바뀐 부분만 받아요" else "$mb · Wi-Fi 가 있으면 그쪽으로"
     }
 
     /** 워치가 이 앱을 감당하는지 실제 기기에서 확인할 수 있는 수치 */
