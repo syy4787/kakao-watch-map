@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 곡 그림(정사각) 자리 — 그림이 오기 전에도 모양이 보이게 -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <solid android:color="@color/tube_art" />
+    <corners android:radius="12dp" />
+</shape>

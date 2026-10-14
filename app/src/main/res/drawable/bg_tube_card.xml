@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 곡 한 줄: 어두운 회색 둥근 카드 (그림 모서리와 같은 결로) -->
+<ripple xmlns:android="http://schemas.android.com/apk/res/android" android:color="#33FFFFFF">
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="@color/tube_surface" />
+            <corners android:radius="22dp" />
+        </shape>
+    </item>
+</ripple>

@@ -14,6 +14,7 @@ import android.provider.Browser
 import android.view.View
 import androidx.recyclerview.widget.RecyclerView
 import com.mywatch.kakaomap.tube.PhoneOpener
+import com.mywatch.kakaomap.tube.PlayTarget
 import com.mywatch.kakaomap.tube.TubeApi
 import com.mywatch.kakaomap.tube.TubeLinks
 import com.mywatch.kakaomap.tube.TubePage
@@ -46,8 +47,9 @@ import org.robolectric.annotation.Config
 import org.robolectric.shadows.ShadowToast
 
 /**
- * 워치에서 바로 듣기: 곡을 누르면 워치의 인터넷 앱(삼성 인터넷)이 둥근 화면용 재생 화면을 연다
- * (그 안의 유튜브 공식 플레이어가 재생). 인터넷 앱이 없거나 재생 화면에 닿지 못하면 지금처럼 폰 유튜브로.
+ * 워치 화면 플레이어('듣는 곳'으로 고른 경우): 곡을 누르면 워치의 인터넷 앱(삼성 인터넷)이 둥근 화면용 재생 화면을 연다
+ * (그 안의 유튜브 공식 플레이어가 재생). 인터넷 앱이 없거나 재생 화면에 닿지 못하면 폰 YouTube Music 으로.
+ * 기본 '듣는 곳'(프리미엄)은 [TubeMusicTest].
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35], application = Application::class)
@@ -67,10 +69,13 @@ class TubeWatchTest {
         WatchPlayer.okUntil = 0L
         WatchPlayer.failUntil = 0L
         WatchPlayer.probe = { probed++; true }
+        // 이 시험들은 '듣는 곳'을 워치 화면 플레이어로 고른 사용자
+        TubeState(context).target = PlayTarget.WATCH_WEB
     }
 
     @After
     fun tearDown() {
+        TubeState(context).target = null
         TubeThumbs.enabled = true
         WatchPlayer.reset()
         PhoneOpener.override = null
@@ -171,18 +176,22 @@ class TubeWatchTest {
     fun theHomeScreenSaysSongsPlayOnTheWatch() {
         installBrowser()
         val a = open()
-        val header = rows(a).first() as Row.Header
-        assertEquals(context.getString(R.string.tube_subtitle_watch), header.subtitle)
-        assertTrue(rows(a).any { it is Row.Note && it.text == context.getString(R.string.tube_how_watch) })
+        val chip = rows(a).filterIsInstance<Row.Action>().first { it.id == TubeRows.A_TARGET }
+        assertEquals(context.getString(R.string.tube_target_watch_web), chip.text)
+        assertTrue(rows(a).any { it is Row.Note && it.text == context.getString(R.string.tube_how_watch_web) })
     }
 
     @Test
     fun withoutABrowserOnTheWatchSongsStillGoToThePhoneAndItSaysHowToPlayOnTheWatch() {
         TubeState(context).addPlayed(song)
         val a = open()
-        val header = rows(a).first() as Row.Header
-        assertEquals(context.getString(R.string.tube_subtitle), header.subtitle)
+        val chip = rows(a).filterIsInstance<Row.Action>().first { it.id == TubeRows.A_TARGET }
+        assertEquals(context.getString(R.string.tube_target_phone_music), chip.text)
+        // '듣는 곳'을 고르는 화면에서 워치 화면 플레이어에 무엇이 필요한지 알려 준다
+        tap(a) { it is Row.Action && it.id == TubeRows.A_TARGET }
         assertTrue(rows(a).any { it is Row.Note && it.text == context.getString(R.string.tube_watch_needs_browser) })
+        a.onBackPressedDispatcher.onBackPressed()
+        idle()
         tap(a) { it is Row.VideoItem }
         // 워치에서 열지 않는다 (폰으로 보낸다)
         val started = startedLink(a)
@@ -230,7 +239,7 @@ class TubeWatchTest {
         tap(a) { it is Row.VideoItem }
         shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofSeconds(5))
         assertEquals(1, probed)
-        assertEquals(listOf(TubeLinks.watchUrl(song.id, mix = true)), phoneOpened)
+        assertEquals(listOf(TubeLinks.musicUrl(song.id, mix = true)), phoneOpened)
     }
 
     @Test
@@ -254,9 +263,11 @@ class TubeWatchTest {
         tap(a, long = true) { it is Row.VideoItem }
         val ids = rows(a).filterIsInstance<Row.Action>().map { it.id }
         assertEquals(
-            listOf(TubeRows.A_WATCH_MIX, TubeRows.A_WATCH_ONE, TubeRows.A_PLAY_MIX, TubeRows.A_PLAY_ONE, TubeRows.A_FORGET, TubeRows.A_CANCEL),
+            listOf(TubeRows.A_PHONE_MUSIC, TubeRows.A_WATCH_MIX, TubeRows.A_WATCH_ONE, TubeRows.A_FORGET, TubeRows.A_CANCEL),
             ids,
         )
+        // 평소 듣는 곳(워치 화면 플레이어)이 흰 버튼
+        assertEquals(listOf(TubeRows.A_WATCH_MIX), rows(a).filterIsInstance<Row.Action>().filter { it.accent }.map { it.id })
         // '워치에서 이 곡만' → 믹스 없이
         tap(a) { it is Row.Action && it.id == TubeRows.A_WATCH_ONE }
         assertEquals(TubeLinks.playerUrl(base, song, mix = false), startedLink(a)?.page())
@@ -268,7 +279,7 @@ class TubeWatchTest {
         val a = open()
         tap(a, long = true) { it is Row.VideoItem }
         val ids = rows(a).filterIsInstance<Row.Action>().map { it.id }
-        assertEquals(listOf(TubeRows.A_PLAY_MIX, TubeRows.A_PLAY_ONE, TubeRows.A_FORGET, TubeRows.A_CANCEL), ids)
+        assertEquals(listOf(TubeRows.A_PHONE_MUSIC, TubeRows.A_FORGET, TubeRows.A_CANCEL), ids)
     }
 
     @Test
@@ -458,7 +469,8 @@ class TubeWatchTest {
         idle()
         tap(a) { it is Row.VideoItem }
         shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofSeconds(3))
-        assertEquals(listOf(TubeLinks.watchUrl(song.id, mix = true)), phoneOpened)
+        // 워치에 인터넷 앱이 없으니 고른 워치 화면 플레이어 대신 폰 YouTube Music (프리미엄)
+        assertEquals(listOf(TubeLinks.musicUrl(song.id, mix = true)), phoneOpened)
         assertFalse(a.isFinishing)
     }
 

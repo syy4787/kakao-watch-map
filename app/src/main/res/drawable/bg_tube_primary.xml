@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 유튜브 화면의 주 버튼: 유튜브 뮤직의 '재생'처럼 흰 알약 + 검은 글자 -->
+<ripple xmlns:android="http://schemas.android.com/apk/res/android" android:color="#33000000">
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="@android:color/white" />
+            <corners android:radius="30dp" />
+        </shape>
+    </item>
+</ripple>

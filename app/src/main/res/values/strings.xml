@@ -86,45 +86,88 @@
     <string name="tap_to_retry">👆 톡 하면 다시 시도</string>
     <string name="error_sdk_init">카카오맵 SDK 시작 실패\n(%1$s)\n\nx86 에뮬레이터는 지원 안 돼요.\n실제 워치에서 실행하세요.</string>
 
-    <!-- 유튜브 음악: 워치에서 찾고, 폰의 유튜브 앱(내 계정 = 내 알고리즘)이 '믹스'로 재생 -->
+    <!-- 유튜브 음악: 워치에서 찾고, 유튜브 뮤직 앱(YouTube Music · 내 계정·프리미엄)이 재생. '듣는 곳'은 고를 수 있다 -->
     <string name="tube_app_name">유튜브 음악</string>
     <string name="tube_title">유튜브 음악</string>
-    <string name="tube_subtitle">폰 유튜브 앱으로 재생\n내 알고리즘 그대로</string>
     <string name="tube_search">노래 검색</string>
     <string name="tube_search_again">다시 검색</string>
     <string name="tube_prompt">어떤 노래 들을까요?</string>
     <string name="tube_searching">유튜브에서 찾는 중…</string>
     <string name="tube_loading_more">더 불러오는 중…</string>
     <string name="tube_sending">폰 유튜브에서 여는 중…</string>
-    <string name="tube_continue_mix">믹스 이어 듣기 · %1$s</string>
+    <string name="tube_sending_music">폰 유튜브 뮤직에서 여는 중…</string>
+    <string name="tube_mix">믹스 이어 듣기</string>
     <string name="tube_recent_played">최근 들은 곡</string>
     <string name="tube_recent_searches">최근 검색</string>
     <string name="tube_clear">기록 지우기</string>
     <string name="tube_more">더 보기</string>
     <string name="tube_search_on_phone">폰 유튜브에서 이 검색 열기</string>
     <string name="tube_home">처음으로</string>
-    <string name="tube_play_mix">믹스로 듣기 (다음 곡 자동)</string>
-    <string name="tube_play_one">이 곡만 듣기</string>
     <string name="tube_forget">기록에서 지우기</string>
+    <string name="tube_close">닫기</string>
     <string name="tube_live">LIVE</string>
     <string name="tube_count">%1$s · %2$d개</string>
-    <string name="tube_subtitle_watch">워치에서 바로 재생\n고른 곡으로 믹스</string>
-    <string name="tube_how_watch">고른 곡은 워치에서 유튜브 공식 플레이어로 틀어요. 믹스라 비슷한 곡이 이어지고, 화면이 켜져 있는 동안 나와요. 길게 누르면 폰에서 틀 수도 있어요.</string>
-    <string name="tube_watch_needs_browser">워치에 ‘삼성 인터넷’을 설치하면 워치에서 바로 들을 수 있어요 (워치 Play 스토어에서 ‘삼성 인터넷’ 검색).</string>
-    <string name="tube_watch_mix">워치에서 믹스로 듣기</string>
-    <string name="tube_watch_one">워치에서 이 곡만</string>
-    <string name="tube_phone_mix">폰 유튜브에서 믹스로</string>
-    <string name="tube_phone_one">폰 유튜브에서 이 곡만</string>
+
+    <!-- 듣는 곳: 워치 유튜브 뮤직 · 폰 유튜브 뮤직 (프리미엄) · 워치 화면 플레이어 (무료) -->
+    <string name="tube_target_label">듣는 곳 · 바꾸기</string>
+    <string name="tube_target_pick">듣는 곳 고르기</string>
+    <string name="tube_target_pick_sub">프리미엄은 유튜브 뮤직으로</string>
+    <string name="tube_target_set">앞으로 %1$s에서 틀어요</string>
+    <string name="tube_selected">지금 고른 곳</string>
+    <string name="tube_target_watch_music">워치 유튜브 뮤직</string>
+    <string name="tube_target_watch_music_sub">프리미엄 · 화면 꺼져도 계속</string>
+    <string name="tube_target_phone_music">폰 유튜브 뮤직</string>
+    <string name="tube_target_phone_music_sub">프리미엄 · 폰에서 재생, 워치로 조작</string>
+    <string name="tube_target_watch_web">워치 화면 플레이어</string>
+    <string name="tube_target_watch_web_sub">무료 · 로그인 없이, 화면 켜진 동안</string>
+    <string name="tube_targets_title">어디서 들을까요?</string>
+    <string name="tube_targets_sub">고른 곳은 다음에도 그대로예요</string>
+    <string name="tube_how_watch_music">고른 곡은 워치 유튜브 뮤직이 내 계정(프리미엄)으로 틀어요. 화면이 꺼져도 계속 나와요.</string>
+    <string name="tube_how_phone_music">고른 곡은 폰 유튜브 뮤직이 내 계정(프리미엄)으로 틀어요. 일시정지·다음 곡은 워치의 미디어 조작으로 하면 돼요.</string>
+    <string name="tube_how_unset">곡을 처음 틀 때 어디서 들을지 골라요. 유튜브 프리미엄은 유튜브 뮤직(워치·폰)으로 들어야 적용돼요.</string>
+    <string name="tube_how_watch_web">고른 곡은 워치 화면의 유튜브 플레이어로 틀어요. 로그인 없이, 화면이 켜져 있는 동안만 나와요.</string>
+    <string name="tube_watch_needs_browser">워치 화면 플레이어는 워치에 ‘삼성 인터넷’이 있어야 써요 (워치 Play 스토어에서 ‘삼성 인터넷’ 검색).</string>
+
+    <!-- 곡을 길게 눌렀을 때 -->
+    <string name="tube_play_watch_music">워치 유튜브 뮤직</string>
+    <string name="tube_play_phone_music">폰 유튜브 뮤직</string>
+    <string name="tube_premium_mix">프리미엄 · 믹스로 재생</string>
+    <string name="tube_watch_mix">워치 화면 플레이어</string>
+    <string name="tube_watch_mix_sub">무료 · 화면 켜진 동안</string>
+    <string name="tube_watch_one">이 곡만 듣기</string>
+    <string name="tube_watch_one_sub">워치 화면 · 무료</string>
+
+    <!-- 프리미엄으로 듣는 법 -->
+    <string name="tube_premium">프리미엄으로 듣는 법</string>
+    <string name="tube_premium_title">프리미엄으로 듣기</string>
+    <string name="tube_premium_sub">내 유튜브 계정 그대로</string>
+    <string name="tube_premium_why">워치 화면 플레이어(삼성 인터넷)는 유튜브에 로그인할 수 없어 프리미엄이 적용되지 않아요. 유튜브 뮤직 앱으로 들으면 광고 없이, 화면이 꺼져도 나와요.</string>
+    <string name="tube_premium_phone">폰 유튜브 뮤직으로 바꾸기</string>
+    <string name="tube_premium_phone_sub">프리미엄 · 폰에 로그인된 계정</string>
+    <string name="tube_premium_watch_music">워치 유튜브 뮤직으로 바꾸기</string>
+    <string name="tube_premium_on_watch">워치에서 듣기</string>
+    <string name="tube_premium_steps">① 워치에 유튜브 뮤직 설치\n② 열어서 설정 → 계정 전환 → 프리미엄 계정</string>
+    <string name="tube_install_music">워치에 유튜브 뮤직 설치</string>
+    <string name="tube_install_music_sub">워치 Play 스토어</string>
+    <string name="tube_open_music">워치 유튜브 뮤직 열기</string>
+    <string name="tube_open_music_sub">설정 → 계정 전환 → 프리미엄 계정</string>
+    <string name="tube_open_music_home_sub">내 라이브러리·믹스 · 프리미엄</string>
+    <string name="tube_premium_no_search">지금 워치 유튜브 뮤직은 이 앱에서 고른 곡을 받지 못해요. 여기서 찾은 곡은 폰 유튜브 뮤직으로 틀고, 워치에선 유튜브 뮤직 앱에서 골라 들어요.</string>
+
+    <!-- 여는 중 · 결과 -->
     <string name="tube_opening_watch">워치에서 여는 중…</string>
-    <string name="tube_watch_unreachable">워치 재생 화면을 열 수 없어 폰에서 틀어요</string>
+    <string name="tube_watch_unreachable">워치 화면 플레이어를 열 수 없어 폰에서 틀어요</string>
+    <string name="tube_music_failed">워치 유튜브 뮤직을 열 수 없어 폰에서 틀어요</string>
+    <string name="tube_store_failed">워치 Play 스토어를 열 수 없어요</string>
     <string name="tube_handoff_sub">폰 유튜브에서 %1$s부터 이어서 들어요</string>
     <string name="tube_handoff_sub_start">폰 유튜브에서 이어서 들어요</string>
     <string name="tube_handoff_go">폰에서 이어 듣기</string>
     <string name="tube_handoff_untitled">워치에서 듣던 곡</string>
-    <string name="tube_how">고른 곡은 폰의 유튜브 앱이 ‘믹스’로 틀어요. 평소 계정의 추천대로 다음 곡이 이어지고, 일시정지·다음 곡은 워치 미디어 컨트롤로 하면 돼요.</string>
     <string name="tube_opened_on_phone">폰 유튜브에서 재생</string>
+    <string name="tube_opened_on_phone_music">폰 유튜브 뮤직에서 재생</string>
     <string name="tube_opened_search_on_phone">폰 유튜브에서 검색</string>
     <string name="tube_no_phone">폰과 연결돼 있지 않아요</string>
+    <string name="tube_no_phone_watch">폰과 연결돼 있지 않아 워치 화면 플레이어로 틀어요</string>
     <string name="tube_phone_failed">폰에서 열지 못했어요. 폰이 잠겨 있으면 잠금을 풀고 다시 눌러 주세요</string>
     <string name="tube_tile_label">유튜브 음악</string>
     <string name="tube_tile_search_sub">말로 찾기</string>

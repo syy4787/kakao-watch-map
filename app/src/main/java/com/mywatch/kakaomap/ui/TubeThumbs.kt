@@ -23,7 +23,7 @@ import java.util.concurrent.ConcurrentHashMap
 
 /**
  * 유튜브 미리보기 그림을 받아 목록에 넣는다 (라이브러리 없이).
- * 워치는 블루투스로 폰 인터넷을 빌려 쓰므로 작게(160×90, RGB_565) 받아 메모리에만 잠깐 둔다 — 파일로 남기지 않는다.
+ * 워치는 블루투스로 폰 인터넷을 빌려 쓰므로 작은 미리보기(320×180, RGB_565)를 받아 메모리에만 잠깐 둔다 — 파일로 남기지 않는다.
  *  · 같은 그림은 한 번만 받고, 목록을 빨리 넘겨 이미 지나간 칸의 그림은 받지 않는다(지금 보이는 칸 먼저)
  *  · 연결이 잠깐 끊겨 못 받은 그림은 다음에 다시 시도, 없는 그림(404)·깨진 그림만 다시 받지 않는다
  *  · 칸(화면)은 약하게만 잡아 닫힌 화면이 메모리에 남지 않게
@@ -36,7 +36,7 @@ object TubeThumbs {
     var enabled = true
 
     private const val MAX_BYTES = 400 * 1024
-    private val cache = object : LruCache<String, Bitmap>(3 * 1024 * 1024) {
+    private val cache = object : LruCache<String, Bitmap>(4 * 1024 * 1024) {
         override fun sizeOf(key: String, value: Bitmap) = value.byteCount
     }
     /** 없거나 깨진 그림 (앱이 살아 있는 동안 다시 받지 않음) */
@@ -88,6 +88,12 @@ object TubeThumbs {
         }
     }
 
+    /** 화면 그림 테스트: 받지 않고 이 그림을 쓴다 */
+    @VisibleForTesting
+    fun preload(url: String, bitmap: Bitmap) {
+        cache.put(url, bitmap)
+    }
+
     @MainThread
     private fun wanted(url: String): Boolean = waiting[url]?.any { it.get()?.getTag(R.id.thumb) == url } == true
 
@@ -109,7 +115,8 @@ object TubeThumbs {
             else -> {
                 val bytes = conn.inputStream.use(::readLimited)
                 val opts = BitmapFactory.Options().apply {
-                    inSampleSize = 2                              // 320×180 → 160×90 (워치 칸 58dp ≈ 123px)
+                    // 320×180 그대로 — 가운데를 정사각(180×180)으로 잘라 곡 그림 칸(50~60dp ≈ 106~128px)에 넣어도 흐리지 않게
+                    inSampleSize = 1
                     inPreferredConfig = Bitmap.Config.RGB_565
                 }
                 val bmp = bytes?.let { BitmapFactory.decodeByteArray(it, 0, it.size, opts) }

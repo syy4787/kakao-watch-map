@@ -27,6 +27,56 @@ data class Handoff(val video: TubeVideo, val startSec: Int, val mix: Boolean)
 /** 한 번 검색한 결과 한 쪽. [next] = 다음 쪽을 받을 값(유튜브 토큰 또는 카카오 쪽 번호), 없으면 끝 */
 data class TubePage(val videos: List<TubeVideo>, val next: String?)
 
+/**
+ * 고른 곡을 틀 곳 ('듣는 곳' — 처음 곡을 틀 때 한 번 묻고 기억). 워치 화면 플레이어는 삼성 인터넷 안의 유튜브 임베드라
+ * 유튜브에 로그인할 수 없어 프리미엄(광고 없음·화면이 꺼져도 재생)이 안 된다 — 프리미엄은 YouTube Music 앱(내 계정)으로.
+ */
+enum class PlayTarget(val key: String) {
+    /** 워치의 YouTube Music 앱 — 곡 링크를 받을 때만 (프리미엄 · 화면이 꺼져도 계속) */
+    WATCH_MUSIC("watch_music"),
+    /** 휴대폰의 YouTube Music 앱 (프리미엄 · 일시정지·다음 곡은 워치 미디어 조작으로) */
+    PHONE_MUSIC("phone_music"),
+    /** 워치 인터넷 앱의 둥근 재생 화면 — 유튜브 공식 플레이어, 로그인 없이 화면이 켜져 있는 동안 (무료) */
+    WATCH_WEB("watch_web");
+
+    companion object {
+        fun of(key: String?): PlayTarget? = entries.firstOrNull { it.key == key }
+
+        /**
+         * 실제로 틀 곳: 고른 곳이 지금도 되면 그곳, 아니면(그 앱을 지움 · 안 고름) 프리미엄이 되는 곳 —
+         * 워치 YouTube Music 이 곡 링크를 받으면 워치, 아니면 폰 (폰은 늘 고를 수 있다: 연결이 안 되면 누를 때 알림)
+         */
+        fun choose(saved: PlayTarget?, watchMusic: Boolean, watchWeb: Boolean): PlayTarget = when {
+            saved == WATCH_MUSIC && watchMusic -> WATCH_MUSIC
+            saved == WATCH_WEB && watchWeb -> WATCH_WEB
+            saved == PHONE_MUSIC -> PHONE_MUSIC
+            watchMusic -> WATCH_MUSIC
+            else -> PHONE_MUSIC
+        }
+    }
+}
+
+/**
+ * 지금 틀 수 있는 곳과 실제로 틀 곳 ([PlayTarget.choose]). [saved] = 사용자가 고른 곳 (아직 안 골랐으면 null — 처음 곡을 틀 때 묻는다).
+ * [watchMusic] = 워치 YouTube Music 이 곡 링크를 받음, [musicApp] = 워치에 YouTube Music 이 있음(열 수 있음),
+ * [watchWeb] = 워치 인터넷 앱으로 둥근 재생 화면을 열 수 있음
+ */
+data class PlayPlaces(
+    val saved: PlayTarget?,
+    val target: PlayTarget,
+    val watchMusic: Boolean,
+    val musicApp: Boolean,
+    val watchWeb: Boolean,
+) {
+    /** 고른 곳이 있다 (없으면 '듣는 곳 고르기') */
+    val chosen: Boolean get() = saved != null
+
+    companion object {
+        fun of(saved: PlayTarget?, watchMusic: Boolean, musicApp: Boolean, watchWeb: Boolean) =
+            PlayPlaces(saved, PlayTarget.choose(saved, watchMusic, watchWeb), watchMusic, musicApp || watchMusic, watchWeb)
+    }
+}
+
 object TubeLinks {
     private val ID = Regex("[A-Za-z0-9_-]{11}")
 
@@ -64,6 +114,13 @@ object TubeLinks {
     fun watchUrl(id: String, mix: Boolean, startSec: Int = 0): String =
         (if (mix) "https://www.youtube.com/watch?v=$id&list=RD$id&start_radio=1" else "https://www.youtube.com/watch?v=$id") +
             (if (startSec > 0) "&t=${startSec}s" else "")
+
+    /**
+     * YouTube Music 앱(휴대폰·워치)에서 열 주소 — 로그인된 내 계정(프리미엄)으로 튼다.
+     * [mix] = 이 곡으로 시작하는 '노래 라디오'(RDAMVM): 내 계정의 추천으로 비슷한 곡이 끝없이 이어진다
+     */
+    fun musicUrl(id: String, mix: Boolean): String =
+        if (mix) "https://music.youtube.com/watch?v=$id&list=RDAMVM$id" else "https://music.youtube.com/watch?v=$id"
 
     /** 이어 듣기에서 받아들이는 시각 (하루) — 그 밖이면 처음부터 */
     private const val MAX_START_SEC = 86_400

@@ -91,7 +91,7 @@ async function openPage(browser, sc) {
 
 // 글자 크게 (안드로이드 '글자 크기'처럼 글자만 키움)
 function textScaleCss(k) {
-  const sizes = [['#title', 15], ['#channel', 12], ['#status', 12], ['#time', 11], ['.next h2', 12], ['.next .t', 12], ['.tail a', 13], ['.tail p', 11], ['.tail button', 13], ['.pill', 13]];
+  const sizes = [['#title', 18], ['#channel', 14], ['#status', 13], ['#time', 12], ['.next h2', 16], ['.next .t', 14], ['.tail a', 15], ['.tail p', 13], ['.tail button', 15], ['.pill', 15]];
   return sizes.map(([s, px]) => `${s}{font-size:${(px * k).toFixed(1)}px !important}`).join('\n');
 }
 

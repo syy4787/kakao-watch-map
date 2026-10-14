@@ -19,4 +19,12 @@
     <color name="fastest_bg">#1C3A26</color>
     <!-- 안내 종료 버튼 -->
     <color name="end_red">#E2382F</color>
+
+    <!-- 유튜브 음악 화면 (유튜브 뮤직처럼: 검은 바탕 · 어두운 회색 카드 · 흰 주 버튼 · 회색 둘째 줄) -->
+    <color name="tube_surface">#1F1F1F</color>
+    <color name="tube_art">#2E2E2E</color>
+    <color name="tube_dim">#AAAAAA</color>
+    <color name="tube_on_primary">#0F0F0F</color>
+    <color name="tube_on_primary_dim">#505050</color>
+    <color name="tube_live">#FF5A52</color>
 </resources>

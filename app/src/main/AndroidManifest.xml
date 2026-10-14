@@ -11,13 +11,15 @@
         android:name="android.hardware.sensor.compass"
         android:required="false" />
 
-    <!-- 워치에서 바로 듣기: 재생 화면(https 링크)을 열 인터넷 앱(삼성 인터넷)이 워치에 있는지 -->
+    <!-- 워치에서 바로 듣기: 재생 화면(https 링크)을 열 인터넷 앱(삼성 인터넷)이 워치에 있는지,
+         프리미엄으로 듣기: 워치에 YouTube Music 앱이 있는지·곡 링크를 받는지 -->
     <queries>
         <intent>
             <action android:name="android.intent.action.VIEW" />
             <category android:name="android.intent.category.BROWSABLE" />
             <data android:scheme="https" />
         </intent>
+        <package android:name="com.google.android.apps.youtube.music" />
     </queries>
 
     <!-- 지도·검색·길찾기·업데이트 다운로드 -->
@@ -98,7 +100,8 @@
             android:exported="false"
             android:taskAffinity="com.mywatch.kakaomap.main" />
         <!-- 유튜브 음악: 첫 화면에서 고르거나 타일로 연다(타일이 열므로 exported). 지도와 다른 작업(task)이라 최근 앱에서도 따로 보인다.
-             고른 곡은 워치 인터넷 앱의 재생 화면(유튜브 공식 플레이어) 또는 폰의 유튜브 앱이 재생한다 (이 앱은 검색·고르기만) -->
+             고른 곡은 YouTube Music 앱(워치·폰, 내 계정·프리미엄) 또는 워치 인터넷 앱의 재생 화면(유튜브 공식 플레이어)이 재생한다
+             (이 앱은 검색·고르기만) -->
         <activity
             android:name=".ui.TubeActivity"
             android:exported="true"

@@ -20,12 +20,15 @@ import com.mywatch.kakaomap.model.TransitStep
 import com.mywatch.kakaomap.model.TransitStepType
 import com.mywatch.kakaomap.model.TravelMode
 import com.mywatch.kakaomap.model.Vehicle
+import com.mywatch.kakaomap.ui.Look
 import com.mywatch.kakaomap.ui.Row
 import com.mywatch.kakaomap.ui.RouteRows
 import com.mywatch.kakaomap.ui.WearList
 import com.mywatch.kakaomap.ui.TubeRows
 import com.mywatch.kakaomap.ui.HubActivity
 import com.mywatch.kakaomap.ui.TubeThumbs
+import com.mywatch.kakaomap.tube.PlayPlaces
+import com.mywatch.kakaomap.tube.PlayTarget
 import com.mywatch.kakaomap.tube.Played
 import com.mywatch.kakaomap.tube.TubeSource
 import com.mywatch.kakaomap.tube.TubeVideo
@@ -99,7 +102,7 @@ class ScreensRenderTest {
         Row.ModeTabs(mode, seconds, RouteChoices.fastestMode(seconds)),
     )
 
-    private fun shoot(name: String, rows: List<Row>, pages: Int = 3, fontScale: Float = 1f) {
+    private fun shoot(name: String, rows: List<Row>, pages: Int = 3, fontScale: Float = 1f, look: Look = Look.MAP) {
         val controller = Robolectric.buildActivity(ComponentActivity::class.java)
         val activity = controller.get()
         activity.requestWindowFeature(Window.FEATURE_NO_TITLE)   // 워치 테마엔 제목 막대가 없다
@@ -112,7 +115,7 @@ class ScreensRenderTest {
         controller.setup()
         activity.setTheme(R.style.Theme_KakaoWatchMap)
         activity.setContentView(R.layout.activity_list)
-        val ui = WearList(activity, {})
+        val ui = WearList(activity, {}, null, look)
         ui.rows = rows
         shadowOf(Looper.getMainLooper()).idle()
         val root = activity.window.decorView
@@ -210,7 +213,7 @@ class ScreensRenderTest {
         controller.pause().stop().destroy()
     }
 
-    // ---------- 유튜브 음악 (워치에서 찾고 폰 유튜브 앱으로 재생) ----------
+    // ---------- 유튜브 음악 (유튜브 뮤직처럼 — 워치에서 찾고 YouTube Music 앱·워치 화면 플레이어로 재생) ----------
 
     private val tubeVideos = listOf(
         TubeVideo("BzYnNdJhZQw", "[MV] IU(아이유) _ Through the Night(밤편지)", "1theK (원더케이)", 294),
@@ -222,63 +225,93 @@ class ScreensRenderTest {
 
     private val tubeApp get() = org.robolectric.RuntimeEnvironment.getApplication()
 
+    /** 아무 앱도 없는 워치 (폰 YouTube Music) · 워치에 삼성 인터넷만 · 워치 YouTube Music 까지 (곡 링크를 받음) */
+    private val phoneOnly = PlayPlaces.of(null, watchMusic = false, musicApp = false, watchWeb = false)
+    private val withBrowser = PlayPlaces.of(null, watchMusic = false, musicApp = false, watchWeb = true)
+    private val webChosen = PlayPlaces.of(PlayTarget.WATCH_WEB, watchMusic = false, musicApp = true, watchWeb = true)
+    private val everything = PlayPlaces.of(null, watchMusic = true, musicApp = true, watchWeb = true)
+
+    /**
+     * 유튜브 화면을 그린다. 곡 그림은 받지 않고 곡마다 다른 색 그림(160×90, 실제로 받는 크기)을 넣어
+     * 정사각으로 잘린 모양·글자와의 균형까지 보이게
+     */
+    private fun tube(name: String, rows: List<Row>, pages: Int = 3, fontScale: Float = 1f) {
+        val palette = listOf(0xFF3A5BA0, 0xFFB0413E, 0xFF2E7D5B, 0xFF7B4FA0, 0xFFC08A2E).map { it.toInt() }
+        tubeVideos.forEachIndexed { i, v ->
+            val bmp = Bitmap.createBitmap(160, 90, Bitmap.Config.ARGB_8888)
+            val c = Canvas(bmp)
+            c.drawColor(palette[i % palette.size])
+            val p = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(150, 255, 255, 255) }
+            c.drawCircle(80f, 40f, 22f, p)
+            c.drawRect(52f, 64f, 108f, 90f, p)
+            TubeThumbs.preload(com.mywatch.kakaomap.tube.TubeLinks.thumbnail(v.id), bmp)
+        }
+        shoot(name, rows, pages, fontScale, Look.TUBE)
+    }
+
     @Test
     fun tubeHome() {
         TubeThumbs.enabled = false
         val played = tubeVideos.take(3).mapIndexed { i, v -> Played(v, 1_000L - i) }
-        shoot("tube_home", TubeRows.home(tubeApp, played, listOf("아이유 밤편지", "뉴진스 Ditto", "비 오는 날 듣기 좋은 노래 플레이리스트 모음")), pages = 5)
+        tube("tube_home", TubeRows.home(tubeApp, played, listOf("아이유 밤편지", "뉴진스 Ditto", "비 오는 날 듣기 좋은 노래 플레이리스트 모음"), places = withBrowser), pages = 6)
     }
 
     @Test
     fun tubeHomeOnWatch() {
-        // 워치에 인터넷 앱이 있으면 곡을 워치에서 바로 튼다
+        // 워치 화면 플레이어를 고른 사람 · 워치 YouTube Music 이 있는 사람
         TubeThumbs.enabled = false
         val played = tubeVideos.take(3).mapIndexed { i, v -> Played(v, 1_000L - i) }
-        shoot("tube_home_watch", TubeRows.home(tubeApp, played, listOf("아이유 밤편지"), watch = true), pages = 5)
-        shoot("tube_menu_watch", TubeRows.menu(tubeApp, tubeVideos[0], fromHome = true, watch = true), pages = 3)
+        tube("tube_home_watch", TubeRows.home(tubeApp, played, listOf("아이유 밤편지"), places = webChosen), pages = 5)
+        tube("tube_menu_watch", TubeRows.menu(tubeApp, tubeVideos[0], fromHome = true, places = everything), pages = 4)
+        tube("tube_targets", TubeRows.targets(tubeApp, everything), pages = 3)
+        tube("tube_targets_chosen", TubeRows.targets(tubeApp, webChosen), pages = 2)
+        tube("tube_targets_phone", TubeRows.targets(tubeApp, phoneOnly), pages = 2)
+        tube("tube_premium", TubeRows.premium(tubeApp, phoneOnly), pages = 4)
+        tube("tube_premium_app", TubeRows.premium(tubeApp, webChosen), pages = 4)
     }
 
     @Test
     fun tubeHandoffAndLargeFonts() {
-        // 재생 화면의 '폰에서 이어 듣기' → 한 번 묻는 화면 (보통·큰 글자), 워치 재생 처음 화면·메뉴 큰 글자
+        // 재생 화면의 '폰에서 이어 듣기' → 한 번 묻는 화면 (보통·큰 글자), 처음 화면·메뉴 큰 글자
         TubeThumbs.enabled = false
         val h = com.mywatch.kakaomap.tube.Handoff(tubeVideos[3], 83, true)
-        shoot("tube_handoff", TubeRows.handoff(tubeApp, h), pages = 1)
-        shoot("tube_handoff_font130", TubeRows.handoff(tubeApp, h), pages = 2, fontScale = 1.3f)
-        shoot("tube_handoff_untitled", TubeRows.handoff(tubeApp, h.copy(video = tubeVideos[0].copy(title = ""), startSec = 0)), pages = 1)
+        tube("tube_handoff", TubeRows.handoff(tubeApp, h), pages = 2)
+        tube("tube_handoff_font130", TubeRows.handoff(tubeApp, h), pages = 3, fontScale = 1.3f)
+        tube("tube_handoff_untitled", TubeRows.handoff(tubeApp, h.copy(video = tubeVideos[0].copy(title = ""), startSec = 0)), pages = 1)
         val played = tubeVideos.take(2).mapIndexed { i, v -> Played(v, 1_000L - i) }
-        shoot("tube_home_watch_font130", TubeRows.home(tubeApp, played, emptyList(), watch = true), pages = 4, fontScale = 1.3f)
-        shoot("tube_menu_watch_font130", TubeRows.menu(tubeApp, tubeVideos[3], fromHome = true, watch = true), pages = 4, fontScale = 1.3f)
+        tube("tube_home_watch_font130", TubeRows.home(tubeApp, played, emptyList(), places = webChosen), pages = 6, fontScale = 1.3f)
+        tube("tube_menu_watch_font130", TubeRows.menu(tubeApp, tubeVideos[3], fromHome = true, places = everything), pages = 5, fontScale = 1.3f)
+        tube("tube_premium_font130", TubeRows.premium(tubeApp, phoneOnly), pages = 5, fontScale = 1.3f)
     }
 
     @Test
     fun tubeHomeEmpty() {
         TubeThumbs.enabled = false
-        shoot("tube_home_empty", TubeRows.home(tubeApp, emptyList(), emptyList()), pages = 1)
+        tube("tube_home_empty", TubeRows.home(tubeApp, emptyList(), emptyList(), places = phoneOnly), pages = 2)
     }
 
     @Test
     fun tubeResults() {
         TubeThumbs.enabled = false
-        shoot("tube_results", TubeRows.results(tubeApp, "아이유 밤편지", TubeSource.KAKAO, tubeVideos, hasMore = true, note = null), pages = 4)
+        tube("tube_results", TubeRows.results(tubeApp, "아이유 밤편지", TubeSource.KAKAO, tubeVideos, hasMore = true, note = null), pages = 5)
     }
 
     @Test
     fun tubeResultsLargeFontWithNote() {
         TubeThumbs.enabled = false
-        shoot(
+        tube(
             "tube_results_font115",
             TubeRows.results(tubeApp, "비 오는 날 듣기 좋은 노래", TubeSource.KAKAO, tubeVideos.take(2), hasMore = false,
                 note = "오늘 유튜브 검색 한도를 다 써서 카카오 동영상 검색으로 찾았어요"),
-            pages = 3, fontScale = 1.15f,
+            pages = 4, fontScale = 1.15f,
         )
     }
 
     @Test
     fun tubeMenuAndError() {
         TubeThumbs.enabled = false
-        shoot("tube_menu", TubeRows.menu(tubeApp, tubeVideos[3], fromHome = true), pages = 2)
-        shoot("tube_error", TubeRows.error(tubeApp, "아이유", "네트워크 연결을 확인하세요"), pages = 1)
+        tube("tube_menu", TubeRows.menu(tubeApp, tubeVideos[3], fromHome = true, places = phoneOnly), pages = 3)
+        tube("tube_error", TubeRows.error(tubeApp, "아이유", "네트워크 연결을 확인하세요"), pages = 2)
     }
 
     private fun place(name: String, category: String, address: String, m: Int?) =

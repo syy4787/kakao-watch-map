@@ -1,53 +1,32 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 유튜브 영상 한 줄: 미리보기(길이 표시) + 제목 두 줄 + 채널 — 유튜브 앱 목록처럼 -->
+<!-- 유튜브 곡 한 줄 — 유튜브 뮤직 목록처럼: 정사각 곡 그림 + 굵은 제목 두 줄 + 회색 채널 · 길이 -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
+    android:layout_marginTop="4dp"
+    android:layout_marginBottom="4dp"
+    android:background="@drawable/bg_tube_card"
     android:baselineAligned="false"
-    android:layout_marginTop="3dp"
-    android:layout_marginBottom="3dp"
-    android:background="@drawable/bg_card"
+    android:gravity="center_vertical"
+    android:minHeight="68dp"
     android:orientation="horizontal"
     android:paddingStart="9dp"
-    android:paddingTop="8dp"
-    android:paddingEnd="12dp"
-    android:paddingBottom="8dp">
+    android:paddingTop="9dp"
+    android:paddingEnd="16dp"
+    android:paddingBottom="9dp">
 
-    <!-- 미리보기 위 재생 시간은 유튜브처럼 작은 글씨 (1:02:03 도 58dp 안에 들어가게) -->
-    <FrameLayout
-        android:layout_width="58dp"
-        android:layout_height="33dp"
-        android:layout_marginTop="1dp">
-
-        <ImageView
-            android:id="@+id/thumb"
-            android:layout_width="match_parent"
-            android:layout_height="match_parent"
-            android:background="@drawable/bg_thumb"
-            android:importantForAccessibility="no"
-            android:scaleType="centerCrop" />
-
-        <TextView
-            android:id="@+id/badge"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_gravity="bottom|end"
-            android:layout_margin="2dp"
-            android:background="@drawable/bg_duration"
-            android:includeFontPadding="false"
-            android:paddingHorizontal="3dp"
-            android:paddingVertical="1dp"
-            android:textColor="@android:color/white"
-            android:textSize="10sp"
-            android:textStyle="bold"
-            tools:ignore="SmallSp" />
-    </FrameLayout>
+    <ImageView
+        android:id="@+id/thumb"
+        android:layout_width="50dp"
+        android:layout_height="50dp"
+        android:background="@drawable/bg_tube_art"
+        android:importantForAccessibility="no"
+        android:scaleType="centerCrop" />
 
     <LinearLayout
         android:layout_width="0dp"
         android:layout_height="wrap_content"
-        android:layout_marginStart="8dp"
+        android:layout_marginStart="11dp"
         android:layout_weight="1"
         android:orientation="vertical">
 
@@ -58,17 +37,34 @@
             android:ellipsize="end"
             android:maxLines="2"
             android:textColor="@color/text_primary"
-            android:textSize="12.5sp"
+            android:textSize="15sp"
             android:textStyle="bold" />
 
-        <TextView
-            android:id="@+id/meta"
+        <!-- 채널은 길면 줄이고, 길이(또는 LIVE)는 늘 보이게 오른쪽에 -->
+        <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="1dp"
-            android:ellipsize="end"
-            android:maxLines="1"
-            android:textColor="@color/text_secondary"
-            android:textSize="11sp" />
+            android:layout_marginTop="2dp"
+            android:orientation="horizontal">
+
+            <TextView
+                android:id="@+id/meta"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:textColor="@color/tube_dim"
+                android:textSize="13sp" />
+
+            <TextView
+                android:id="@+id/time"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="6dp"
+                android:maxLines="1"
+                android:textColor="@color/tube_dim"
+                android:textSize="13sp" />
+        </LinearLayout>
     </LinearLayout>
 </LinearLayout>
