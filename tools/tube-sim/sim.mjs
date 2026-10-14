@@ -39,6 +39,7 @@ async function openPage(browser, sc) {
     if (cfg.minuteMs) window.__kwMinuteMs = cfg.minuteMs;
     if (cfg.freshMs) window.__kwFreshMs = cfg.freshMs;
     if (cfg.pageReadyMs) window.__kwReadyMs = cfg.pageReadyMs;
+    if (cfg.stallMs) window.__kwStallMs = cfg.stallMs;
     window.__navs = [];
     window.__kwNavigate = u => window.__navs.push(u);
     window.__playClicks = 0;
@@ -325,6 +326,11 @@ const scripted = [
     ['tap', '#next'], ['wait', 1500], ['expect', s => s.player?.idx === 1, '직접 ⏭ 는 넘어감'], ['tap', '#repeat'], ['wait', 3000] ] },
   { name: '인터넷끊김', cfg: { autoplay: true, mixLen: 4, duration: 3 }, steps: [
     ['wait', 1500], ['offline'], ['tap', '#next'], ['wait', 16500], ['expect', s => /인터넷/.test(s.status), '끊기면 알림'], ['online'], ['wait', 1500], ['expect', s => !/끊겼/.test(s.status), '다시 연결되면 알림 바뀜'] ] },
+  // 끊긴 채 오래 못 불러오면 멈춘다 — 불러오는 중엔 엔진이 '재생 중'으로 보고 화면을 계속 켜 두었다 (배터리)
+  { name: '오래끊김_멈춤', cfg: { autoplay: true, mixLen: 4, duration: 30, stallMs: 4000 }, steps: [
+    ['wait', 1500], ['offline'], ['tap', '#next'], ['wait', 16500], ['expect', s => /인터넷/.test(s.status), '끊기면 알림'],
+    ['wait', 5000], ['expect', s => s.player?.state !== 3 && s.player?.state !== 1 && /멈췄/.test(s.status), '오래 못 불러오면 멈춤'],
+    ['online'], ['wait', 2000], ['expect', s => s.player?.state !== 1, '다시 연결돼도 저절로 틀지 않음 (▶ 로)'] ] },
   { name: '숨김켜짐반복', cfg: { autoplay: true, mixLen: 5, duration: 3, speed: 2 }, steps: [
     ['wait', 1500], ['hide'], ['wait', 1200], ['expect', s => s.player?.state !== 1, '숨기면 멈춤'], ['show'], ['wait', 1500], ['expect', s => s.player?.state !== 1 && /멈췄/.test(s.status), '돌아오면 안내만'],
     ['tap', '#play'], ['wait', 1500], ['hide'], ['wait', 300], ['show'], ['wait', 200], ['hide'], ['wait', 1500], ['show'], ['wait', 800] ] },

@@ -202,6 +202,8 @@
   var SKIP_MS = 2500;         // 막힌 곡을 알리고 다음 곡으로 넘어가기까지
   var MAX_ERRORS = 6;         // 연달아 이만큼 막히면 멈춘다 (전부 막힌 목록을 끝없이 넘기지 않게)
   var SLOW_MS = 15000;        // 이만큼 불러오기만 하면 '인터넷이 느려요' (그동안만 화면을 켜 둠)
+  // '느려요' 뒤에도 이만큼 더 못 불러오면 멈춘다 — 불러오는 중엔 엔진이 재생 중으로 보고 화면을 켜 두므로 끊긴 채 화면이 계속 켜져 있었다
+  var STALL_PAUSE_MS = window.__kwStallMs || 45000;
   var API_WAIT_MS = 15000;    // 유튜브 플레이어 스크립트를 이만큼 기다린다
   // 화면이 켜진 채 이만큼 기다려도 플레이어가 준비되지 않으면 '다시 시도' (화면이 꺼진 동안은 세지 않음 — 꺼지면 브라우저가 멈춤)
   var READY_MS = window.__kwReadyMs || 20000;
@@ -250,7 +252,7 @@
   var player = null;
   var session = 0;             // load 마다 늘어남 — 예전 곡에 걸어 둔 일은 버린다
   var cur = null;
-  var timers = { hint: 0, skip: 0, slow: 0, prog: 0, msg: 0, wait: 0, bridge: 0, cont: 0, ready: 0, keep: 0, hold: 0 };
+  var timers = { hint: 0, skip: 0, slow: 0, stall: 0, prog: 0, msg: 0, wait: 0, bridge: 0, cont: 0, ready: 0, keep: 0, hold: 0 };
   var waiters = [];
   var statusAt = 0;
   var statusKeep = false;
@@ -716,6 +718,8 @@
     clearTimeout(timers.hint);
     clearTimeout(timers.slow);   // 막혀서 멈춘 것 — '인터넷이 느려요'가 아니다
     timers.slow = 0;
+    clearTimeout(timers.stall);
+    timers.stall = 0;
     bridge(false);
     if (cur.playing && cur.state !== S.PLAYING) setPlaying(false);
     if (!cur.started) status(document.visibilityState === 'visible' ? '플레이어 가운데 ▶ 를 눌러 시작하세요' : '▶ 를 눌러 재생해요', 'info');
@@ -735,7 +739,19 @@
       timers.bridge = 0;
       setPlaying(false);
       status(navigator.onLine === false ? '인터넷 연결이 끊겼어요' : (loading ? '인터넷이 느려서 불러오는 중이에요…' : '▶ 를 눌러 이어서 재생해요'), 'info');
+      if (loading) armStall();
     }, SLOW_MS);
+  }
+  // 아주 오래 못 불러옴 → 멈춘다 (화면이 꺼질 수 있게 — 배터리). 다시 연결돼도 저절로 틀지 않고 ▶ 로
+  function armStall() {
+    clearTimeout(timers.stall);
+    var my = session;
+    timers.stall = setTimeout(function () {
+      timers.stall = 0;
+      if (my !== session || !cur || cur.state === S.PLAYING || cur.state === S.PAUSED) return;
+      pauseNow();
+      status(navigator.onLine === false ? '인터넷이 끊겨 멈췄어요 · 연결되면 ▶ 를 눌러요' : '인터넷이 느려 멈췄어요 · ▶ 를 눌러 다시', 'info');
+    }, STALL_PAUSE_MS);
   }
 
   function onStateChange(e) {
@@ -747,7 +763,7 @@
     // 재생 중 같은 곡이 잠깐 끊겨 다시 받는 중 (그 뒤 다시 재생돼도 '새로 시작'이 아니다)
     if (s === S.BUFFERING) cur.rebuffer = cur.rebuffer || (prev === S.PLAYING && idx === cur.playingIndex);
     else if (s !== S.PLAYING) cur.rebuffer = false;
-    if (s === S.PLAYING || s === S.PAUSED || s === S.ENDED || s === S.CUED) { clearTimeout(timers.slow); timers.slow = 0; }
+    if (s === S.PLAYING || s === S.PAUSED || s === S.ENDED || s === S.CUED) { clearTimeout(timers.slow); timers.slow = 0; clearTimeout(timers.stall); timers.stall = 0; }
     if (s === S.PAUSED || s === S.ENDED || s === S.CUED) { cur.hold = false; clearTimeout(timers.hold); timers.hold = 0; }   // 플레이어가 멈춤을 받았다
     else if (cur.hold) holdIdle();   // 아직 불러오는 중이면 기다림을 새로
 
@@ -872,6 +888,8 @@
     var code = e && e.data;
     clearTimeout(timers.slow);
     timers.slow = 0;
+    clearTimeout(timers.stall);
+    timers.stall = 0;
     var held = cur.hold;   // 사용자가 멈춘 뒤 불러오던 곡이 막힘
     cur.hold = false;
     var ids = playlist();
@@ -978,6 +996,7 @@
     clearTimeout(timers.hint);
     clearTimeout(timers.skip);
     clearTimeout(timers.slow);
+    clearTimeout(timers.stall);
     clearInterval(timers.prog);
     clearTimeout(timers.msg);
     clearTimeout(timers.bridge);
@@ -985,7 +1004,7 @@
     clearTimeout(timers.ready);
     clearTimeout(timers.keep);
     clearTimeout(timers.hold);
-    timers.hint = timers.skip = timers.slow = timers.prog = timers.msg = timers.bridge = timers.cont = timers.ready = timers.keep = timers.hold = 0;
+    timers.hint = timers.skip = timers.slow = timers.stall = timers.prog = timers.msg = timers.bridge = timers.cont = timers.ready = timers.keep = timers.hold = 0;
     flashBack = null;
     clearWaiters();
   }

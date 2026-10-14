@@ -8,11 +8,14 @@ import androidx.core.content.edit
 import com.mywatch.kakaomap.BuildConfig
 import com.mywatch.kakaomap.MapApp
 import java.io.File
+import java.io.RandomAccessFile
 
 /**
  * 이 워치에서 난 오류 기록 (최근 30줄) — '앱 정보·업데이트' 화면 아래 '최근 오류 기록'에 보여 준다.
  * "잘 안 돼요"일 때 무엇이 안 됐는지(검색·길찾기·실시간 버스·위치·지도·앱 멈춤) 알 수 있게.
  * 워치 밖으로 보내지 않고, 인증키처럼 보이는 값은 지우고 저장한다. 아무 스레드에서나 불러도 된다.
+ * 본체와 재생 화면 프로세스(:player)가 함께 쓰므로 파일 잠금으로 한 번에 하나씩, 임시 파일에 다 쓴 뒤 바꿔 끼운다
+ * (반쯤 쓴 파일이 남지 않게). 잠금·임시 파일은 백업되지 않는 곳에
  */
 object ErrorLog {
     private const val FILE = "error_log.jsonl"
@@ -21,10 +24,31 @@ object ErrorLog {
     private val lock = Any()
 
     @Volatile private var file: File? = null
+    @Volatile private var spare: File? = null
 
     /** Application.onCreate 에서 한 번 */
     fun init(context: Context) {
-        file = File(context.applicationContext.filesDir, FILE)
+        val app = context.applicationContext
+        file = File(app.filesDir, FILE)
+        spare = app.noBackupFilesDir
+    }
+
+    /** 다른 프로세스와도 한 번에 하나씩 (같은 프로세스 안은 [lock]) */
+    private fun <T> exclusive(block: () -> T): T = synchronized(lock) {
+        val dir = spare
+        if (dir == null) block() else RandomAccessFile(File(dir, "$FILE.lock"), "rw").use { raf ->
+            raf.channel.lock().use { block() }
+        }
+    }
+
+    /** 임시 파일에 다 쓴 뒤 바꿔 끼운다 — 쓰다 멈춰도 예전 기록은 그대로 */
+    private fun replace(f: File, text: String) {
+        val tmp = File(spare ?: f.parentFile, "$FILE.tmp")
+        tmp.writeText(text)
+        if (!tmp.renameTo(f)) {
+            f.writeText(text)
+            tmp.delete()
+        }
     }
 
     fun record(where: String, t: Throwable) = record(where, t.message?.ifBlank { null } ?: t.javaClass.simpleName)
@@ -38,13 +62,13 @@ object ErrorLog {
         val f = file ?: return
         val text = ErrorLogFormat.sanitize(message?.trim()?.ifBlank { null } ?: "알 수 없는 오류").take(MAX_MESSAGE)
         val entry = ErrorEntry(atMs, where, text, version)
-        synchronized(lock) {
-            try {
+        try {
+            exclusive {
                 val list = ErrorLogFormat.add(read(f), entry, MAX)
-                f.writeText(list.joinToString("\n") { ErrorLogFormat.encode(it) })
-            } catch (e: Exception) {
-                Log.w(MapApp.TAG, "오류 기록 실패", e)
+                replace(f, list.joinToString("\n") { ErrorLogFormat.encode(it) })
             }
+        } catch (e: Exception) {
+            Log.w(MapApp.TAG, "오류 기록 실패", e)
         }
     }
 
@@ -55,7 +79,7 @@ object ErrorLog {
     }
 
     fun clear() {
-        synchronized(lock) { file?.delete() }
+        runCatching { exclusive { file?.delete() } }
     }
 
     /**
