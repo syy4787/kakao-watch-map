@@ -15,6 +15,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.DrawableRes
 import androidx.annotation.VisibleForTesting
 import androidx.lifecycle.lifecycleScope
+import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.wear.input.RemoteInputIntentHelper
 import com.mywatch.kakaomap.R
 import com.mywatch.kakaomap.data.ErrorLog
@@ -55,6 +56,8 @@ class SearchActivity : ComponentActivity() {
         val nearby: NearbyKind? = null,
         /** 줄 대신 가운데에 보여 줄 글 (검색 중…) */
         val status: String? = null,
+        /** 이 화면에서 보던 자리 (맨 위에 보이던 줄, 그 줄이 위로 넘어간 만큼) — 뒤로 오면 그 자리로 */
+        val spot: Pair<Int, Int>? = null,
     )
 
     private lateinit var ui: WearList
@@ -115,12 +118,29 @@ class SearchActivity : ComponentActivity() {
 
     /** [next] 를 보여 준다. [push] = 지금 화면을 아래에 쌓음 (뒤로 → 지금 화면). '찾는 중' 화면은 쌓지 않는다 */
     private fun show(next: Page, push: Boolean) {
-        if (push && page.status == null) below.addLast(page)
+        if (push && page.status == null) below.addLast(page.copy(spot = spot()))
         page = next
-        if (next.status != null) ui.showStatus(next.status) else ui.rows = next.rows
+        if (next.status != null) {
+            ui.showStatus(next.status)
+        } else {
+            ui.rows = next.rows
+            // 새 화면은 맨 위부터, 뒤로 온 화면은 보던 자리로
+            val at = next.spot
+            val lm = ui.list.layoutManager as? LinearLayoutManager
+            if (at != null && lm != null) lm.scrollToPositionWithOffset(at.first.coerceIn(0, (next.rows.size - 1).coerceAtLeast(0)), at.second)
+            else ui.list.scrollToPosition(0)
+        }
         val canStep = below.isNotEmpty()
         backStep.isEnabled = canStep
         ui.swipeBack = if (canStep) ::goBack else null
+    }
+
+    /** 지금 보던 자리 (맨 위에 보이던 줄과 그 줄이 위로 넘어간 만큼) */
+    private fun spot(): Pair<Int, Int>? {
+        val lm = ui.list.layoutManager as? LinearLayoutManager ?: return null
+        val pos = lm.findFirstVisibleItemPosition().takeIf { it >= 0 } ?: return null
+        val top = lm.findViewByPosition(pos)?.let { lm.getDecoratedTop(it) - ui.list.paddingTop } ?: 0
+        return pos to top
     }
 
     /** 한 단계 뒤로 (찾는 중이면 그만두고). 더 돌아갈 곳이 없으면 닫는다 */

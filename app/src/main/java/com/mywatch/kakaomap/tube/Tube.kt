@@ -59,7 +59,51 @@ data class TubePage(
     val next: String?,
     val channels: List<TubeChannel> = emptyList(),
     val playlists: List<TubePlaylist> = emptyList(),
-)
+    /**
+     * '더 보기'로 이어 붙인 쪽마다 새로 들어온 수 (없으면 한 쪽) — 검색 결과를 받은 쪽 순서대로 그리려고
+     * (둘째 쪽의 채널이 맨 위 첫 쪽 채널 옆에 끼어들어 목록이 밀리지 않게)
+     */
+    val parts: List<Part> = emptyList(),
+) {
+    data class Part(val videos: Int, val channels: Int, val playlists: Int)
+
+    /** 받은 쪽들 — 쪽마다 (동영상, 채널, 재생목록) */
+    fun split(): List<TubePage> {
+        val ps = parts.ifEmpty { listOf(Part(videos.size, channels.size, playlists.size)) }
+        var v = 0
+        var c = 0
+        var p = 0
+        return ps.map { part ->
+            TubePage(
+                videos.subList(v, (v + part.videos).coerceAtMost(videos.size)),
+                null,
+                channels.subList(c, (c + part.channels).coerceAtMost(channels.size)),
+                playlists.subList(p, (p + part.playlists).coerceAtMost(playlists.size)),
+            ).also {
+                v = (v + part.videos).coerceAtMost(videos.size)
+                c = (c + part.channels).coerceAtMost(channels.size)
+                p = (p + part.playlists).coerceAtMost(playlists.size)
+            }
+        }
+    }
+
+    companion object {
+        /** [old] 아래에 [new] 를 붙인다 (이미 있는 것은 빼고) */
+        fun append(old: TubePage, new: TubePage): TubePage {
+            val v = new.videos.filter { n -> old.videos.none { it.id == n.id } }.distinctBy { it.id }
+            val c = new.channels.filter { n -> old.channels.none { it.id == n.id } }.distinctBy { it.id }
+            val p = new.playlists.filter { n -> old.playlists.none { it.id == n.id } }.distinctBy { it.id }
+            val before = old.parts.ifEmpty { listOf(Part(old.videos.size, old.channels.size, old.playlists.size)) }
+            return TubePage(
+                videos = old.videos + v,
+                next = new.next,
+                channels = old.channels + c,
+                playlists = old.playlists + p,
+                parts = before + Part(v.size, c.size, p.size),
+            )
+        }
+    }
+}
 
 object TubeLinks {
     private val ID = Regex("[A-Za-z0-9_-]{11}")

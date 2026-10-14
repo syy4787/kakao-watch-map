@@ -108,9 +108,10 @@ object TubeRows {
         list.take(shown).mapIndexed { i, v -> card(c, v, now, queue(i)) }
 
     /**
-     * 받는 데이터의 자리: 받았으면 [ready], 받는 중이면 회색 자리 둘, 실패면 이유 + 다시 시도 (로그인이 필요하면 로그인)
+     * 받는 데이터의 자리: 받았으면 [ready], 받는 중이면 회색 자리 [placeholders] 개 (받으면 올 카드 수만큼 — 다 받아져도 아래가 밀리지 않게),
+     * 실패면 이유 + 다시 시도 (로그인이 필요하면 로그인)
      */
-    private fun slotRows(c: Context, slot: Slot, ready: (TubePage) -> List<Row>): List<Row> {
+    private fun slotRows(c: Context, slot: Slot, placeholders: Int = 2, ready: (TubePage) -> List<Row>): List<Row> {
         val page = slot.page
         return when {
             page != null -> ready(page)
@@ -119,7 +120,7 @@ object TubeRows {
                 if (slot.signIn) Row.Action(A_LOGIN, R.drawable.ic_person, c.getString(R.string.tube_login), accent = true)
                 else Row.Action(A_RETRY, R.drawable.ic_refresh, c.getString(R.string.tube_retry)),
             )
-            else -> listOf(Row.Skeleton(0), Row.Skeleton(1))
+            else -> (0 until placeholders).map { Row.Skeleton(it) }
         }
     }
 
@@ -151,7 +152,7 @@ object TubeRows {
         }
         if (d.account.signedIn && d.feed != null) {
             rows += Row.Header(c.getString(R.string.tube_feed))
-            rows += slotRows(c, d.feed) { page ->
+            rows += slotRows(c, d.feed, HOME_FEED) { page ->
                 if (page.videos.isEmpty()) listOf(Row.Note(c.getString(R.string.tube_feed_empty)))
                 else cards(c, page.videos, d.now, HOME_FEED) +
                     Row.Action(A_SUBS_MORE, R.drawable.ic_expand_more, c.getString(R.string.tube_more))
@@ -168,7 +169,7 @@ object TubeRows {
     }
 
     private fun chartSection(c: Context, title: String, slot: Slot, now: Long, moreId: String): List<Row> =
-        listOf(Row.Header(title)) + slotRows(c, slot) { page ->
+        listOf(Row.Header(title)) + slotRows(c, slot, HOME_CHART) { page ->
             cards(c, page.videos, now, HOME_CHART) +
                 if (page.videos.size > HOME_CHART || page.next != null) listOf(Row.Action(moreId, R.drawable.ic_expand_more, c.getString(R.string.tube_more))) else emptyList()
         }
@@ -197,15 +198,22 @@ object TubeRows {
         slot.note?.let { rows += Row.Note(it) }
         rows += slotRows(c, slot) { page ->
             if (page.videos.isEmpty() && page.channels.isEmpty() && page.playlists.isEmpty()) return@slotRows listOf(Row.Note(c.getString(R.string.no_results)))
+            // 누르면 그 동영상부터 받은 동영상 끝까지 이어서 (쪽과 상관없이)
+            val all = cards(c, page.videos, now)
             val out = mutableListOf<Row>()
-            out += page.channels.map { channelItem(it) }
-            val playlists = page.playlists.map { playlistItem(it, own = false) }.toMutableList()
-            cards(c, page.videos, now).forEachIndexed { i, card ->
-                out += card
-                // 동영상 3개마다 재생목록 하나 (유튜브 앱처럼 섞어서)
-                if (i % 4 == 2 && playlists.isNotEmpty()) out += playlists.removeAt(0)
+            var at = 0
+            // 받은 쪽 순서대로: 쪽마다 채널 → 동영상(3개마다 재생목록 하나, 유튜브 앱처럼) → 남은 재생목록
+            for (part in page.split()) {
+                out += part.channels.map { channelItem(it) }
+                val playlists = part.playlists.map { playlistItem(it, own = false) }.toMutableList()
+                all.subList(at, at + part.videos.size).forEachIndexed { i, card ->
+                    out += card
+                    if (i % 4 == 2 && playlists.isNotEmpty()) out += playlists.removeAt(0)
+                }
+                at += part.videos.size
+                out += playlists
             }
-            out + playlists
+            out
         }
         rows += more(c, slot)
         rows += Row.Action(A_SEARCH, R.drawable.ic_search, c.getString(R.string.tube_search_again), accent = slot.page?.videos.isNullOrEmpty() && slot.page != null)

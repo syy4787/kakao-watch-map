@@ -64,7 +64,14 @@ class SearchFlowTest {
             PlaceSearch(
                 recent = { center },
                 locate = { null },
-                keyword = { q, _ -> searched += q; if (q == "스타벅스") starbucks else emptyList() },
+                keyword = { q, _ ->
+                    searched += q
+                    when (q) {
+                        "스타벅스" -> starbucks
+                        "카페" -> (1..15).map { p("카페 %02d".format(it), "카페", it * 100) }
+                        else -> emptyList()
+                    }
+                },
                 nearby = { kind, _ -> nearbyAsked += kind; if (kind == NearbyKind.STORE) stores else emptyList() },
             )
         }
@@ -184,6 +191,34 @@ class SearchFlowTest {
         val m = SwipeDismissFrameLayout::class.java.getDeclaredMethod("performDismissFinishedCallbacks")
         m.isAccessible = true
         m.invoke(swipe)
+    }
+
+    @Test
+    fun backFromAMenuReturnsToWhereYouWereInTheResults() {
+        val a = open()
+        search(a, "카페")
+        val rv = a.findViewById<RecyclerView>(R.id.list)
+        val lm = rv.layoutManager as androidx.recyclerview.widget.LinearLayoutManager
+        val spec = View.MeasureSpec.makeMeasureSpec(480, View.MeasureSpec.EXACTLY)
+        fun layout() {
+            rv.measure(spec, spec)
+            rv.layout(0, 0, 480, 480)
+        }
+        layout()
+        lm.scrollToPositionWithOffset(9, 0)
+        layout()
+        val looking = rows(a)[lm.findFirstVisibleItemPosition()]
+        tapPlace(a, (looking as Row.PlaceItem).place.name, long = true)
+        layout()
+        // 메뉴는 맨 위(제목)부터 — 둥근 화면 목록은 첫 줄을 가운데로 내리므로 '맨 위 줄이 그려져 있음'으로 본다
+        assertTrue("메뉴는 맨 위부터", rv.findViewHolderForAdapterPosition(0)?.itemView?.let { it.bottom > 0 } == true)
+        back(a)
+        layout()
+        // 보던 자리로: 보던 줄이 다시 화면 안에 (둥근 목록의 위아래 여백이 화면마다 달라 몇 px 은 다를 수 있다)
+        val at = rows(a).indexOf(looking)
+        val view = rv.findViewHolderForAdapterPosition(at)?.itemView
+        assertTrue("보던 줄이 화면 안에", view != null && view.bottom > 0 && view.top < 480)
+        assertTrue("맨 위로 돌아가지 않음", lm.findFirstVisibleItemPosition() >= 5)
     }
 
     @Test

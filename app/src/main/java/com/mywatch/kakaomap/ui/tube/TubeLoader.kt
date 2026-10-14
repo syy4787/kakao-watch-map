@@ -136,7 +136,7 @@ class TubeLoader(
             val next = try {
                 val r = backend.fetch(feed, token, s.source)
                 val cur = slot(feed)
-                cur.copy(page = merge(cur.page ?: r.page, r.page), loadingMore = false, extended = true)
+                cur.copy(page = cur.page?.let { TubePage.append(it, r.page) } ?: r.page, loadingMore = false, extended = true)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: YouTubeQuotaException) {
@@ -169,10 +169,4 @@ class TubeLoader(
 
     private fun isMine(key: String) = key in mineKeys
 
-    private fun merge(old: TubePage, new: TubePage): TubePage = TubePage(
-        videos = (old.videos + new.videos).distinctBy { it.id },
-        next = new.next,
-        channels = (old.channels + new.channels).distinctBy { it.id },
-        playlists = (old.playlists + new.playlists).distinctBy { it.id },
-    )
 }

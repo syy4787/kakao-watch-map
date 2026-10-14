@@ -1,0 +1,84 @@
+package com.mywatch.kakaomap
+
+import android.app.Application
+import android.os.Looper
+import android.view.View
+import android.view.Window
+import androidx.activity.ComponentActivity
+import androidx.recyclerview.widget.LinearLayoutManager
+import com.mywatch.kakaomap.tube.Queue
+import com.mywatch.kakaomap.tube.TubeVideo
+import com.mywatch.kakaomap.ui.Look
+import com.mywatch.kakaomap.ui.Row
+import com.mywatch.kakaomap.ui.WearList
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.Robolectric
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.Shadows.shadowOf
+import org.robolectric.annotation.Config
+
+/**
+ * 점검 C3: 위쪽 구역(인기 음악)이 다 받아지면 회색 자리 둘이 카드 넷 + '더 보기'로 바뀌며 아래 목록이 통째로 밀려
+ * 보던(누르려던) 동영상이 손가락 아래에서 다른 것으로 바뀌었다 — 목록은 바뀐 줄만 고치고, 보던 줄은 그 자리에
+ */
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [35], qualifiers = "w226dp-h226dp-round-340dpi", application = Application::class)
+class ListStaysPutTest {
+
+    private fun card(id: String) = Row.VideoCard(TubeVideo(id, "제목 $id", "채널"), "채널 · 조회수 1만회", Queue.Single)
+
+    private fun open(): Pair<ComponentActivity, WearList> {
+        val controller = Robolectric.buildActivity(ComponentActivity::class.java)
+        val activity = controller.get()
+        activity.requestWindowFeature(Window.FEATURE_NO_TITLE)
+        controller.setup()
+        activity.setTheme(R.style.Theme_KakaoWatchMap)
+        activity.setContentView(R.layout.activity_list)
+        return activity to WearList(activity, {}, null, Look.TUBE)
+    }
+
+    private fun layout(ui: WearList) {
+        val spec = View.MeasureSpec.makeMeasureSpec(480, View.MeasureSpec.EXACTLY)
+        ui.list.measure(spec, spec)
+        ui.list.layout(0, 0, 480, 480)
+        shadowOf(Looper.getMainLooper()).idle()
+        ui.list.measure(spec, spec)
+        ui.list.layout(0, 0, 480, 480)
+    }
+
+    private fun firstShown(ui: WearList): Row {
+        val lm = ui.list.layoutManager as LinearLayoutManager
+        return ui.rows[lm.findFirstVisibleItemPosition()]
+    }
+
+    @Test
+    fun aSectionAboveFinishingLoadingDoesNotMoveWhatYouAreLookingAt() {
+        val (_, ui) = open()
+        val below = (1..8).map { card("popular%04d".format(it)) }
+        ui.rows = listOf(Row.Header("유튜브"), Row.Header("인기 음악"), Row.Skeleton(0), Row.Skeleton(1), Row.Header("인기 동영상")) + below
+        layout(ui)
+        (ui.list.layoutManager as LinearLayoutManager).scrollToPositionWithOffset(7, 0)
+        layout(ui)
+        val looking = firstShown(ui)
+        assertEquals(card("popular0003"), looking)
+        // 위쪽 '인기 음악'이 다 받아짐: 회색 자리 둘 → 카드 넷 + 더 보기
+        val music = (1..4).map { card("musicaaa%03d".format(it)) } + Row.Action("chart_music", R.drawable.ic_expand_more, "더 보기")
+        ui.rows = listOf(Row.Header("유튜브"), Row.Header("인기 음악")) + music + Row.Header("인기 동영상") + below
+        layout(ui)
+        assertEquals("보던 동영상이 그대로 맨 위에", looking, firstShown(ui))
+    }
+
+    @Test
+    fun aRowThatChangedIsUpdatedInPlace() {
+        val (_, ui) = open()
+        ui.rows = listOf(Row.Header("→ 대전역"), Row.Note("실시간 받는 중"), Row.Note("끝"))
+        layout(ui)
+        ui.adapter.replace(1, Row.Note("106번 3분"))
+        layout(ui)
+        assertEquals(Row.Note("106번 3분"), ui.rows[1])
+        assertTrue(ui.list.itemAnimator == null)
+    }
+}

@@ -14,6 +14,7 @@ import android.widget.ImageView
 import android.widget.TextView
 import androidx.annotation.DrawableRes
 import androidx.core.content.ContextCompat
+import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.RecyclerView
 import com.mywatch.kakaomap.R
 import com.mywatch.kakaomap.data.Favorite
@@ -113,6 +114,37 @@ sealed class Row {
 /** 목록 모양: 지도(기본) · 유튜브(큰 글씨·흰 주 버튼·어두운 회색 알약·16:9 동영상 카드) */
 enum class Look { MAP, TUBE }
 
+/** 줄이 무엇인지 (내용이 바뀌어도 같은 것이면 같은 값) — 목록을 바꿀 때 달라진 줄만 고치려고 */
+internal fun keyOf(row: Row): String = when (row) {
+    is Row.Header -> "h:" + row.title
+    is Row.Action -> "a:" + row.id
+    is Row.PlaceItem -> "p:" + row.place.id + ":" + row.place.name
+    is Row.FavoriteItem -> "f:" + row.slot.kind.name
+    is Row.ModeTabs -> "tabs"
+    is Row.TransitCard -> "t:" + row.index
+    is Row.OptionCard -> "o:" + row.index
+    is Row.TransitChoice -> "choice"
+    is Row.Step -> "s:" + row.key + ":" + row.title
+    is Row.Note -> "n:" + row.text
+    is Row.VideoCard -> "v:" + row.video.id
+    is Row.ChannelItem -> "c:" + row.channel.id
+    is Row.PlaylistItem -> "l:" + row.playlist.id
+    is Row.Skeleton -> "sk"
+    is Row.Code -> "code"
+    is Row.Chips -> "chips:" + row.items.joinToString(",") { it.id }
+}
+
+/** [keyOf] 를 목록 전체에 — 같은 열쇠가 또 나오면 '#2', '#3' … (같은 동영상이 두 구역에 있을 때 등) */
+internal fun keysOf(rows: List<Row>): List<String> {
+    val seen = HashMap<String, Int>()
+    return rows.map { r ->
+        val k = keyOf(r)
+        val n = (seen[k] ?: 0) + 1
+        seen[k] = n
+        if (n == 1) k else "$k#$n"
+    }
+}
+
 /**
  * 여러 줄 종류를 한 목록에 그리는 어댑터. [onLongClick] 이 있으면 장소·집·회사 줄을 길게 눌러 메뉴를 연다.
  * [look] = 제목·버튼·안내 줄의 모양 (곡 줄은 유튜브 화면에만 있다)
@@ -123,11 +155,27 @@ class RowAdapter(
     private val look: Look = Look.MAP,
 ) : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
 
+    /**
+     * 줄들. 바꾸면 달라진 줄만 고친다 (같은 줄 = 같은 [keyOf]) — 위쪽 구역이 받아져 늘어나도 보고 있던 줄은 제자리
+     * (예전엔 통째로 다시 그려 아래 목록이 밀리고, 누르려던 동영상이 손가락 아래에서 바뀌었다)
+     */
     var rows: List<Row> = emptyList()
         set(value) {
+            val old = field
+            val oldKeys = keys
+            val newKeys = keysOf(value)
             field = value
-            notifyDataSetChanged()
+            keys = newKeys
+            DiffUtil.calculateDiff(object : DiffUtil.Callback() {
+                override fun getOldListSize() = old.size
+                override fun getNewListSize() = value.size
+                override fun areItemsTheSame(o: Int, n: Int) = oldKeys[o] == newKeys[n]
+                override fun areContentsTheSame(o: Int, n: Int) = old[o] == value[n]
+            }, false).dispatchUpdatesTo(this)
         }
+
+    /** 줄마다 '같은 줄' 열쇠 (같은 것이 여러 번 나오면 몇 번째인지 붙임) */
+    private var keys: List<String> = emptyList()
 
     fun replace(index: Int, row: Row) {
         if (index !in rows.indices) return

@@ -59,6 +59,8 @@ class WearList(activity: Activity, onClick: (Row) -> Unit, onLongClick: ((Row) -
             list.layoutManager = WearableLinearLayoutManager(activity, null)
         }
         list.adapter = adapter
+        // 줄이 바뀌면 그 자리에서 바로 (실시간 도착처럼 자주 바뀌는 줄이 깜빡이지 않게 — 움직임 효과 없음)
+        list.itemAnimator = null
         list.requestFocus()   // 베젤·크라운으로 스크롤
     }
 

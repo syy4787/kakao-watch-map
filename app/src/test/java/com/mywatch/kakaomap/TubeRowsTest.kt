@@ -162,6 +162,51 @@ class TubeRowsTest {
         assertTrue(nothing.any { it is Row.Note && it.text == c.getString(R.string.no_results) })
     }
 
+    /**
+     * 점검 C3: 검색 '더 보기'로 받은 둘째 쪽의 채널·재생목록이 맨 위 첫 쪽 채널 옆에 끼어들어 목록 전체가 밀렸다 —
+     * 받은 쪽 순서대로 아래에 붙인다
+     */
+    @Test
+    fun aSearchsNextPageGoesBelowWhatWasAlreadyShown() {
+        val ch2 = channel.copy(id = "UC00000000000000000000x2", title = "둘째 채널")
+        val pl2 = TubePlaylist("PL0000000000000000000000000000002", "둘째 모음", "멜론", null)
+        val first = TubePage(videos.take(3), "S2", channels = listOf(channel))
+        val second = TubePage(videos.drop(3), null, channels = listOf(ch2), playlists = listOf(pl2))
+        val merged = TubePage.append(first, second)
+        val rows = TubeRows.search(c, "아이유", Slot(page = merged, source = TubeSource.YOUTUBE), now)
+        val firstShown = TubeRows.search(c, "아이유", Slot(page = first, source = TubeSource.YOUTUBE), now)
+        // 첫 쪽에서 보이던 줄들은 그대로 앞에 (더 보기 자리까지) — 누르면 이어 틀 목록은 늘어난 것까지
+        fun what(r: Row) = when (r) {
+            is Row.VideoCard -> "v:" + r.video.id
+            is Row.ChannelItem -> "c:" + r.channel.id
+            is Row.PlaylistItem -> "l:" + r.playlist.id
+            is Row.Header -> "h:" + r.title
+            else -> r::class.simpleName
+        }
+        val shownBefore = firstShown.takeWhile { !(it is Row.Action && it.id == TubeRows.A_MORE) }
+        assertEquals(shownBefore.map(::what), rows.take(shownBefore.size).map(::what))
+        val rest = rows.drop(shownBefore.size)
+        assertTrue("둘째 채널은 아래에", rest.any { it is Row.ChannelItem && it.channel.id == ch2.id })
+        assertTrue(rest.any { it is Row.PlaylistItem && it.playlist.id == pl2.id })
+        assertEquals(listOf("aaaaaaaaaa4", "aaaaaaaaaa5", "aaaaaaaaaa6"), cards(rest).map { it.video.id })
+        // 같은 것은 한 번만
+        assertEquals(videos.map { it.id }, cards(TubeRows.search(c, "아이유", Slot(page = TubePage.append(merged, second.copy(next = null))), now)).map { it.video.id })
+    }
+
+    @Test
+    fun placeholdersAreAsManyAsTheCardsThatWillCome() {
+        val rows = TubeRows.home(
+            c, TubeRows.HomeData(
+                history = emptyList(), searches = emptyList(), feed = Slot(loading = true),
+                music = loading, popular = loading,
+                account = Account(configured = true, signedIn = true), update = false, now = now,
+            ),
+        )
+        fun section(title: String) = rows.dropWhile { !(it is Row.Header && it.title == title) }.drop(1).takeWhile { it !is Row.Header }
+        assertEquals("구독 새 동영상 3개 자리", 3, section(c.getString(R.string.tube_feed)).count { it is Row.Skeleton })
+        assertEquals("인기 음악 4개 자리", 4, section(c.getString(R.string.tube_chart_music)).count { it is Row.Skeleton })
+    }
+
     @Test
     fun aChannelPageShowsItsPictureVideosAndPlaylists() {
         val rows = TubeRows.channel(
