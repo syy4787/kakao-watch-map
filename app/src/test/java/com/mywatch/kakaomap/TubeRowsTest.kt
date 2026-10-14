@@ -62,12 +62,29 @@ class TubeRowsTest {
         assertFalse("동영상 미리보기는 그대로", thumb.drawable is RoundedBitmapDrawable)
     }
 
+    /**
+     * 점검 C5: 2GB 워치에서 그림을 24MB 까지 쥐고 화면을 닫아도 돌려주지 않아, 재생 화면(엔진)이 메모리를 쓸 때 길 안내가 정리되기 쉬웠다 →
+     * 12MB 까지(큰 미리보기 35개쯤 — 목록 서너 쪽), 화면을 다 닫으면 비우고 시스템이 모자라다면 반으로
+     */
     @Test
     fun picturesAreRememberedInProportionToTheAppsMemory() {
         val mb = 1L shl 20
-        assertEquals("보통 워치(앱 메모리 256MB 이상)는 24MB 까지 — 큰 미리보기 70개쯤", 24 * mb, TubeThumbs.cacheBytes(512 * mb).toLong())
-        assertEquals("1/8", 16 * mb, TubeThumbs.cacheBytes(128 * mb).toLong())
+        assertEquals("보통 워치(앱 메모리 256MB 이상)는 12MB 까지 — 큰 미리보기 35개쯤", 12 * mb, TubeThumbs.cacheBytes(512 * mb).toLong())
+        assertEquals("1/8", 8 * mb, TubeThumbs.cacheBytes(64 * mb).toLong())
         assertEquals("아무리 작아도 4MB", 4 * mb, TubeThumbs.cacheBytes(16 * mb).toLong())
+    }
+
+    @Test
+    fun picturesAreGivenBackWhenTheScreensCloseOrMemoryRunsLow() {
+        val bmp = Bitmap.createBitmap(480, 360, Bitmap.Config.RGB_565)
+        TubeThumbs.trim(android.content.ComponentCallbacks2.TRIM_MEMORY_COMPLETE)
+        val n = (TubeThumbs.maxBytes() / bmp.byteCount).coerceAtMost(40)
+        repeat(n) { TubeThumbs.preload("https://i.ytimg.com/vi/trim$it/hqdefault.jpg", bmp) }
+        assertTrue("가득 참", TubeThumbs.cachedBytes() > TubeThumbs.maxBytes() / 2)
+        TubeThumbs.trim(android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW)
+        assertTrue("모자라면 반으로", TubeThumbs.cachedBytes() <= TubeThumbs.maxBytes() / 2)
+        TubeThumbs.trim(android.content.ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN)
+        assertEquals("화면을 다 닫으면 비운다", 0, TubeThumbs.cachedBytes())
     }
 
     @Test

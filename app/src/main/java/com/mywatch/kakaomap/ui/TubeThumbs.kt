@@ -38,15 +38,32 @@ object TubeThumbs {
 
     private const val MAX_BYTES = 400 * 1024
     /**
-     * 그림 하나가 약 340KB(480×360×2) — 앱이 쓸 수 있는 메모리의 1/8 (4~24MB, 그림 12~70개)만큼 기억해
-     * 목록을 위로 되돌려도 다시 받지 않게
+     * 그림 하나가 약 340KB(480×360×2) — 앱이 쓸 수 있는 메모리의 1/8 (4~12MB, 그림 12~35개 — 목록 서너 쪽)만큼 기억해
+     * 목록을 위로 되돌려도 다시 받지 않게. 2GB 워치에선 재생 화면(엔진)·지도도 메모리를 써서 더 쥐지 않는다
      */
     private val cache = object : LruCache<String, Bitmap>(cacheBytes(Runtime.getRuntime().maxMemory())) {
         override fun sizeOf(key: String, value: Bitmap) = value.byteCount
     }
 
     @VisibleForTesting
-    internal fun cacheBytes(maxHeap: Long): Int = (maxHeap / 8).coerceIn(4L shl 20, 24L shl 20).toInt()
+    internal fun cacheBytes(maxHeap: Long): Int = (maxHeap / 8).coerceIn(4L shl 20, 12L shl 20).toInt()
+
+    @VisibleForTesting
+    internal fun cachedBytes(): Int = cache.size()
+
+    @VisibleForTesting
+    internal fun maxBytes(): Int = cache.maxSize()
+
+    /**
+     * 시스템이 메모리를 돌려 달라고 할 때 ([android.content.ComponentCallbacks2.onTrimMemory]):
+     * 화면을 다 닫았거나(UI_HIDDEN) 뒤로 갔으면 비우고, 앞에 있는데 모자라다면(RUNNING_LOW·CRITICAL) 반으로
+     */
+    fun trim(level: Int) {
+        when {
+            level >= android.content.ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN -> cache.evictAll()
+            level >= android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW -> cache.trimToSize(cache.maxSize() / 2)
+        }
+    }
     /** 없거나 깨진 그림 (앱이 살아 있는 동안 다시 받지 않음) */
     private val broken: MutableSet<String> = Collections.newSetFromMap(ConcurrentHashMap())
     /** 받는 중인 그림 → 그 그림을 기다리는 칸들과 동그랗게 넣을지 (메인 스레드에서만 만짐) */

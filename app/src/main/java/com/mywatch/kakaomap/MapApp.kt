@@ -16,6 +16,7 @@ import com.mywatch.kakaomap.data.RouteRepository
 import com.mywatch.kakaomap.tube.PlayerGuard
 import com.mywatch.kakaomap.tube.PlayerIdle
 import com.mywatch.kakaomap.tube.PlayerLifecycleShim
+import com.mywatch.kakaomap.ui.TubeThumbs
 import com.mywatch.kakaomap.update.UpdateInstallWorker
 import com.mywatch.kakaomap.update.UpdateManager
 import com.mywatch.kakaomap.update.UpdateWorker
@@ -42,6 +43,13 @@ class MapApp : Application() {
             }
             ProcessRole.MAIN -> Unit
         }
+        // 화면을 다 닫거나 메모리가 모자라면 유튜브 미리보기 그림을 돌려준다 (2GB 워치 — 길 안내가 대신 정리되지 않게)
+        registerComponentCallbacks(object : ComponentCallbacks2 {
+            override fun onTrimMemory(level: Int) = TubeThumbs.trim(level)
+            override fun onConfigurationChanged(newConfig: Configuration) = Unit
+            @Deprecated("시스템 콜백")
+            override fun onLowMemory() = TubeThumbs.trim(ComponentCallbacks2.TRIM_MEMORY_COMPLETE)
+        })
         // 오류 기록 (앱 정보 화면의 '최근 오류 기록') — 앱이 멈춘 원인도 남긴다
         ErrorLog.init(this)
         // 안내를 시작한 목적지를 기기에 적어 둔다 (앱이 꺼져 안내가 끊기면 다음에 다시 찾아 주려고)
