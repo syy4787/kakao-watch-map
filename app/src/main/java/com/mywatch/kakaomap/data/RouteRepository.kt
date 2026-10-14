@@ -117,6 +117,7 @@ object RouteRepository {
         set(value) {
             field = value
             activeRouteVersion++
+            rememberGuidance(value)
         }
     var activeRouteVersion = 0
         private set
@@ -138,6 +139,55 @@ object RouteRepository {
         lastFix?.takeIf { SystemClock.elapsedRealtime() - it.elapsedMs <= maxAgeMs }
 
     fun freshLocation(maxAgeMs: Long = 2 * 60_000L): Coord? = freshFix(maxAgeMs)?.coord
+
+    // ───────── 끊긴 안내 ─────────
+    // 안내 중에 앱 본체 프로세스가 꺼지면(2GB 워치에서 동영상 재생 화면이 메모리를 많이 쓸 때 등) 메모리의 경로·안내가
+    // 말없이 사라진다. 안내를 시작한 목적지를 적어 두고 정상으로 끝나면(도착·종료·스스로 끝냄) 지운다 —
+    // 다음에 지도를 열 때 남아 있으면 그 목적지를 다시 찾아 준다
+
+    /** 끊긴 안내 — 다시 찾을 목적지와 이동 수단 */
+    data class Interrupted(val place: Place, val mode: TravelMode)
+
+    @Volatile private var appContext: Context? = null
+    private var clock: () -> Long = System::currentTimeMillis
+
+    /** Application.onCreate 에서 한 번 (시험은 시계를 바꿔 끼운다) */
+    fun init(context: Context, clock: () -> Long = System::currentTimeMillis) {
+        appContext = context.applicationContext
+        this.clock = clock
+    }
+
+    private fun rememberGuidance(route: ActiveRoute?) {
+        val c = appContext ?: return
+        runCatching {
+            c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit {
+                if (route != null && route.startNavigation) {
+                    putString(
+                        KEY_INTERRUPTED,
+                        PlaceJson.toJson(route.place).put("mode", route.mode.name).put("at", clock()).toString(),
+                    )
+                } else {
+                    remove(KEY_INTERRUPTED)
+                }
+            }
+        }
+    }
+
+    /** 끊긴 안내가 있으면(6시간 안) 돌려주고 지운다 */
+    fun takeInterrupted(context: Context): Interrupted? {
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val raw = prefs.getString(KEY_INTERRUPTED, null) ?: return null
+        prefs.edit { remove(KEY_INTERRUPTED) }
+        return runCatching {
+            val o = org.json.JSONObject(raw)
+            if (clock() - o.optLong("at") > INTERRUPTED_MAX_AGE_MS) return null
+            val place = PlaceJson.fromJson(o) ?: return null
+            Interrupted(place, TravelMode.valueOf(o.optString("mode")))
+        }.getOrNull()
+    }
+
+    private const val KEY_INTERRUPTED = "interrupted_guidance"
+    private const val INTERRUPTED_MAX_AGE_MS = 6 * 3_600_000L
 
     // ───────── 최근 목적지 (최대 10개) ─────────
 

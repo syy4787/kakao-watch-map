@@ -21,6 +21,7 @@ import com.mywatch.kakaomap.location.PermissionHelp
 import com.mywatch.kakaomap.model.Coord
 import com.mywatch.kakaomap.model.Geo
 import com.mywatch.kakaomap.model.Place
+import com.mywatch.kakaomap.model.PlaceJson
 import com.mywatch.kakaomap.model.RouteChoice
 import com.mywatch.kakaomap.model.RouteChoices
 import com.mywatch.kakaomap.model.RouteOption
@@ -49,6 +50,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import org.json.JSONObject
 
 /**
  * 카카오맵 길찾기 결과 화면.
@@ -107,7 +109,11 @@ class DirectionsActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // 음성 입력·재생 화면을 보는 사이 앱 본체가 꺼졌다가 돌아오면 메모리의 목적지가 없다 — 저장해 둔 것으로 다시 찾는다
         val d = RouteRepository.destination
+            ?: savedInstanceState?.getString(STATE_DEST)
+                ?.let { raw -> runCatching { PlaceJson.fromJson(JSONObject(raw)) }.getOrNull() }
+                ?.also { RouteRepository.selectDestination(it) }
         if (d == null) {
             finish()
             return
@@ -154,6 +160,11 @@ class DirectionsActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        if (::dest.isInitialized) outState.putString(STATE_DEST, PlaceJson.toJson(dest).toString())
     }
 
     override fun onResume() {
@@ -655,6 +666,15 @@ class DirectionsActivity : ComponentActivity() {
 
         private fun optionKey(m: TravelMode) = "option_${m.name}"
 
+        private const val STATE_DEST = "destination"
+
         fun intent(context: Context) = Intent(context, DirectionsActivity::class.java)
+
+        /** [place] 로 길찾기를 연다 — [mode] 탭부터 (끊긴 안내 다시 찾기) */
+        fun open(context: Context, place: Place, mode: TravelMode) {
+            RouteRepository.selectDestination(place)
+            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit { putString(KEY_MODE, mode.name) }
+            context.startActivity(intent(context))
+        }
     }
 }

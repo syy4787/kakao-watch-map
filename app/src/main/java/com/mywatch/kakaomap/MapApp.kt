@@ -12,6 +12,7 @@ import android.os.SystemClock
 import android.util.Log
 import com.kakao.vectormap.KakaoMapSdk
 import com.mywatch.kakaomap.data.ErrorLog
+import com.mywatch.kakaomap.data.RouteRepository
 import com.mywatch.kakaomap.tube.PlayerGuard
 import com.mywatch.kakaomap.tube.PlayerIdle
 import com.mywatch.kakaomap.tube.PlayerLifecycleShim
@@ -43,6 +44,8 @@ class MapApp : Application() {
         }
         // 오류 기록 (앱 정보 화면의 '최근 오류 기록') — 앱이 멈춘 원인도 남긴다
         ErrorLog.init(this)
+        // 안내를 시작한 목적지를 기기에 적어 둔다 (앱이 꺼져 안내가 끊기면 다음에 다시 찾아 주려고)
+        RouteRepository.init(this)
         ErrorLog.installCrashHandler()
         Thread { ErrorLog.recordExitReasons(this) }.start()
         try {

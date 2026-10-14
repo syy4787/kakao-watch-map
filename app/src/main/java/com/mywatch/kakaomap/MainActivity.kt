@@ -23,6 +23,7 @@ import android.widget.FrameLayout
 import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.TextView
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
@@ -67,8 +68,8 @@ import com.mywatch.kakaomap.location.HeadingSensor
 import com.mywatch.kakaomap.location.Locator
 import com.mywatch.kakaomap.location.PermissionHelp
 import com.mywatch.kakaomap.location.toFix
-import com.mywatch.kakaomap.model.Coord
 import com.mywatch.kakaomap.model.Action
+import com.mywatch.kakaomap.model.Coord
 import com.mywatch.kakaomap.model.Format
 import com.mywatch.kakaomap.model.TravelMode
 import com.mywatch.kakaomap.nav.LocPlan
@@ -80,6 +81,7 @@ import com.mywatch.kakaomap.nav.NavigationService
 import com.mywatch.kakaomap.nav.Navigator
 import com.mywatch.kakaomap.ui.AmbientCover
 import com.mywatch.kakaomap.ui.AmbientRouteView
+import com.mywatch.kakaomap.ui.DirectionsActivity
 import com.mywatch.kakaomap.ui.MapBitmaps
 import com.mywatch.kakaomap.ui.NavOverlayText
 import com.mywatch.kakaomap.ui.RouteDetailActivity
@@ -88,11 +90,11 @@ import com.mywatch.kakaomap.update.UpdateActivity
 import com.mywatch.kakaomap.update.UpdateInstallWorker
 import com.mywatch.kakaomap.update.UpdateManager
 import com.mywatch.kakaomap.update.UpdateWorker
+import kotlin.math.abs
+import kotlin.math.hypot
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import kotlin.math.abs
-import kotlin.math.hypot
 
 class MainActivity : ComponentActivity() {
 
@@ -330,6 +332,13 @@ class MainActivity : ComponentActivity() {
         bumpControls()
         // 지도 인증·로딩을 기다리지 않고 안내부터 (블루투스로 느리거나 지도 인증이 실패해도 진동 안내는 되게)
         ensureNavigation()
+        // 지난번 안내가 앱이 꺼지며 끊겼으면 그 목적지를 다시 찾아 준다 (안내 시작은 사용자가 — 그 사이 버스를 탔을 수 있음)
+        if (savedInstanceState == null && RouteRepository.activeRoute == null) {
+            RouteRepository.takeInterrupted(this)?.let { lost ->
+                Toast.makeText(this, getString(R.string.guidance_interrupted, lost.place.name), Toast.LENGTH_LONG).show()
+                DirectionsActivity.open(this, lost.place, lost.mode)
+            }
+        }
 
         // 안내 상태(현재 구간·남은 거리·도착·재탐색)를 지도 배너와 저전력 화면에 반영
         lifecycleScope.launch {
