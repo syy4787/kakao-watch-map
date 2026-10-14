@@ -139,19 +139,18 @@ class DirectionsActivity : ComponentActivity() {
         // 손목을 내리면 검은 화면에 목적지만 (Wear OS 6+ 는 이 화면을 켜 둔 채 둔다).
         // 손목을 올리면(화면은 계속 '재개' 상태라 onResume 이 안 옴) 실시간 버스를 새로
         ambient = AmbientCover(this, { "→ ${dest.name}" }) { inAmbient ->
-            if (!inAmbient && mode == TravelMode.TRANSIT && RouteRepository.transitRoutes != null) {
-                fetchLiveArrivals()
-                refreshTimetableRoutes()
-            }
+            if (inAmbient) return@AmbientCover
+            if (mode == TravelMode.TRANSIT && RouteRepository.transitRoutes != null) fetchLiveArrivals()
+            refreshClocks()
         }
         load()
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.RESUMED) {
-                // 기차·버스 시간표 경로의 남은 시간을 1분마다 새로 (손목을 내린 동안은 쉼)
+                // 'HH:MM 도착'·기차·버스 시간표 경로의 남은 시간을 1분마다 새로 (손목을 내린 동안은 쉼)
                 launch {
                     while (true) {
                         delay(MINUTE_MS)
-                        if (ambient?.inAmbient != true) refreshTimetableRoutes()
+                        if (ambient?.inAmbient != true) refreshClocks()
                     }
                 }
                 // 실시간 버스 도착도 보고 있는 동안 45초마다 (카카오맵처럼 — 손목을 내린 동안은 쉼, 정류장마다 한 번만 물음)
@@ -187,7 +186,7 @@ class DirectionsActivity : ComponentActivity() {
         }
         // 상세 화면 등에서 돌아오면 실시간 버스 도착을 새로 (30초 안에 받은 것은 저장해 둔 값을 씀)
         if (mode == TravelMode.TRANSIT && liveTexts.isNotEmpty()) fetchLiveArrivals()
-        refreshTimetableRoutes()
+        refreshClocks()
     }
 
     private fun prefs() = getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -395,8 +394,17 @@ class DirectionsActivity : ComponentActivity() {
     }
 
     /**
+     * 1분마다·다른 화면에서 돌아올 때·손목을 올릴 때: 시간표 경로를 새로 보고 지금 목록을 다시 넣는다 — 경로 카드의
+     * 'HH:MM 도착'은 그릴 때 시계로 정해서(도보·자전거·시내 대중교통도) 다시 넣어야 지금 시각이 된다 (바뀐 카드만 다시 그림)
+     */
+    private fun refreshClocks() {
+        refreshTimetableRoutes()
+        render()
+    }
+
+    /**
      * 기차·버스 시간표 경로는 도착 시각이 정해져 있어 시간이 지나면 남은 시간이 줄고, 나가야 할 시각이 지나면 못 탄다.
-     * 1분마다(그리고 다른 화면에서 돌아올 때) 다시 그리고, 못 타게 된 편이 생기면 다음 편으로 다시 찾는다.
+     * 못 타게 된 편이 생기면 다음 편으로 다시 찾는다 (다시 그리기는 [refreshClocks])
      */
     private fun refreshTimetableRoutes() {
         val routes = RouteRepository.transitRoutes ?: return
@@ -421,7 +429,6 @@ class DirectionsActivity : ComponentActivity() {
             }
             TimetableRefresh.Do.Nothing -> Unit
         }
-        if (mode == TravelMode.TRANSIT) render() else refreshTabs()
     }
 
     /** 옵션별로 받은 결과: 카드 + 이번에 받지 못한 옵션(잠깐 끊김 등 — 다시 받아 볼 만한 것) */
