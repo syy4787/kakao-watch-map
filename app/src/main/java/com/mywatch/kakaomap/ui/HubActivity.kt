@@ -7,11 +7,15 @@ import android.os.Bundle
 import android.view.View
 import android.widget.TextView
 import androidx.activity.ComponentActivity
+import androidx.lifecycle.lifecycleScope
 import com.mywatch.kakaomap.MainActivity
 import com.mywatch.kakaomap.R
+import com.mywatch.kakaomap.tube.TubeAccount
 import com.mywatch.kakaomap.update.UpdateActivity
 import com.mywatch.kakaomap.update.UpdateManager
 import com.mywatch.kakaomap.update.UpdateWorker
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 /**
  * '갤럭시워치 전용앱' 첫 화면 (워치 앱 목록의 아이콘은 이것 하나): 카카오맵(길찾기) / 유튜브(노래 검색) 고르기.
@@ -30,6 +34,9 @@ class HubActivity : ComponentActivity() {
         findViewById<View>(R.id.open_tube).setOnClickListener { open(TubeActivity::class.java) }
         // 누르면 확인하고 새 버전이면 곧바로 받아 설치 (버전·오류 기록 같은 앱 정보도 그 화면에)
         updateButton.setOnClickListener { startActivity(UpdateActivity.updateNowIntent(this)) }
+        // 유튜브 로그인 토큰은 키 저장소로 풀어 읽는다 (워치에선 수십 ms) — 유튜브를 누르기 전에 미리 읽어 둔다
+        val app = applicationContext
+        lifecycleScope.launch(Dispatchers.IO) { runCatching { TubeAccount.auth(app).signedIn } }
     }
 
     /** 맡긴 확인이 첫 화면을 보는 사이에 새 버전을 찾으면 버튼을 바로 파랗게 바꾼다 */

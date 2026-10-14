@@ -35,6 +35,7 @@ import com.mywatch.kakaomap.tube.SearchHistory
 import com.mywatch.kakaomap.tube.TubeAccount
 import com.mywatch.kakaomap.tube.TubeLinks
 import com.mywatch.kakaomap.tube.TubePlay
+import com.mywatch.kakaomap.tube.TubeRevokeWorker
 import com.mywatch.kakaomap.tube.TubeState
 import com.mywatch.kakaomap.tube.TubeVideo
 import com.mywatch.kakaomap.tube.WatchPlayer
@@ -131,6 +132,9 @@ class TubeActivity : ComponentActivity() {
         // 재생 화면을 보는 사이 이 화면이 정리됐다가 다시 만들어졌으면 다녀온 화면들 그대로 (데이터는 새로 받는다)
         savedInstanceState?.getString(STATE_NAV)?.let(nav::restore)
         show()
+        // 로그아웃 직후 앱이 꺼져 철회를 못 보냈으면 이제라도 (인터넷이 되면)
+        val app = applicationContext
+        lifecycleScope.launch(Dispatchers.IO) { if (runCatching { auth.hasPendingRevokes }.getOrDefault(false)) TubeRevokeWorker.enqueue(app) }
         if (savedInstanceState == null) handleIntent(intent)
     }
 
@@ -578,9 +582,12 @@ class TubeActivity : ComponentActivity() {
         loginJob = null
     }
 
-    /** 폰에서 허용할 때까지 [DeviceCode.intervalSec] 마다 묻는다 (천천히 하라면 더 천천히). 잠깐 끊기면 계속 기다린다 */
+    /**
+     * 폰에서 허용할 때까지 [DeviceCode.intervalSec] 마다 묻는다 (천천히 하라면 더 천천히 — 화면이 꺼졌다 켜져도 늘린 간격 그대로).
+     * 잠깐 끊기거나 구글이 잠깐 안 되면 계속 기다린다
+     */
     private suspend fun waitForApproval(code: DeviceCode) {
-        var interval = code.intervalSec
+        var interval = (login as? LoginState.Waiting)?.takeIf { it.code == code }?.intervalSec ?: code.intervalSec
         while (true) {
             delay(interval * 1000L)
             // 그 사이 로그인됨 (화면이 꺼지기 직전 보낸 물음이 끝남) — 쓰인 코드로 또 묻지 않는다
@@ -595,21 +602,21 @@ class TubeActivity : ComponentActivity() {
             } catch (e: NetworkException) {
                 continue
             } catch (e: Exception) {
-                login = LoginState.Failed(e.message ?: getString(R.string.tube_phone_failed))
-                render()
+                endLogin(LoginState.Failed(e.message ?: getString(R.string.tube_phone_failed)))
                 return
             }
             when (r) {
                 Poll.Pending -> Unit
-                is Poll.SlowDown -> interval = com.mywatch.kakaomap.tube.TubeAuth.nextInterval(interval, r)
+                is Poll.SlowDown -> {
+                    interval = com.mywatch.kakaomap.tube.TubeAuth.nextInterval(interval, r)
+                    (login as? LoginState.Waiting)?.let { if (it.code == code) login = it.copy(intervalSec = interval) }
+                }
                 Poll.Denied -> {
-                    login = LoginState.Denied
-                    render()
+                    endLogin(LoginState.Denied)
                     return
                 }
                 Poll.Expired -> {
-                    login = LoginState.Expired
-                    render()
+                    endLogin(LoginState.Expired)
                     return
                 }
                 Poll.Granted -> {
@@ -618,6 +625,19 @@ class TubeActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    /**
+     * 기다리기를 끝낸다 — 그런데 그 사이 앞서 보낸 물음으로 이미 로그인됐으면(같은 코드라 다음 물음은 거절·만료로 옴)
+     * 거절·만료·오류가 아니라 로그인된 것
+     */
+    private fun endLogin(state: LoginState) {
+        if (signedIn) {
+            signedInNow()
+            return
+        }
+        login = state
+        render()
     }
 
     /** 로그인 끝: 로그인 화면은 닫고 보던 화면으로 — 이제 내 데이터도 받는다 */
@@ -638,10 +658,16 @@ class TubeActivity : ComponentActivity() {
         toast(getString(R.string.tube_login_done))
     }
 
-    /** 로그아웃: 워치에서 바로 지우고(화면도 바로), 구글에 철회는 뒤에서. 받아 둔 내 데이터·내 화면도 지운다 */
+    /**
+     * 로그아웃: 워치에서 바로 지우고(화면도 바로), 구글에 철회는 뒤에서. 받아 둔 내 데이터·내 화면도 지운다.
+     * 철회를 못 보내면(인터넷 없음) 인터넷이 될 때 다시 ([TubeRevokeWorker])
+     */
     private fun signOut() {
         val tokens = auth.forget()
-        lifecycleScope.launch(Dispatchers.IO) { auth.revoke(tokens) }
+        val app = applicationContext
+        lifecycleScope.launch(Dispatchers.IO) {
+            if (!auth.revoke(tokens) || auth.hasPendingRevokes) TubeRevokeWorker.enqueue(app)
+        }
         loader.clearMine()
         if (nav.top == Page.Account) nav.back()
         nav.dropMine()

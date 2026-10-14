@@ -66,7 +66,8 @@ object TubeRows {
     /** 로그인 화면의 상태 */
     sealed interface LoginState {
         data object Starting : LoginState
-        data class Waiting(val code: DeviceCode) : LoginState
+        /** [intervalSec] = 지금 묻는 간격 (구글이 천천히 하라면 늘어난 것 — 화면이 꺼졌다 켜져도 그대로) */
+        data class Waiting(val code: DeviceCode, val intervalSec: Int = code.intervalSec) : LoginState
         data object Denied : LoginState
         data object Expired : LoginState
         data class Failed(val message: String) : LoginState

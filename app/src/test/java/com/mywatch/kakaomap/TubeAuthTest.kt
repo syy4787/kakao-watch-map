@@ -36,9 +36,12 @@ class TubeAuthTest {
 
     private class MemoryStore : TokenStore {
         var t: Tokens? = null
+        var revokes = mutableListOf<String>()
         override fun load() = t
         override fun save(t: Tokens) { this.t = t }
         override fun clear() { t = null }
+        override fun pendingRevokes(): List<String> = revokes.toList()
+        override fun setPendingRevokes(tokens: List<String>) { revokes = tokens.toMutableList() }
     }
 
     private var now = 1_760_000_000_000L
@@ -263,6 +266,97 @@ class TubeAuthTest {
         interval = TubeAuth.nextInterval(interval, Poll.SlowDown(10))
         assertEquals(15, interval)
         assertEquals("다른 대답엔 그대로", 15, TubeAuth.nextInterval(interval, Poll.Pending))
+    }
+
+    /**
+     * 점검 C4: 인터넷이 없을 때 로그아웃하면 철회를 못 보낸 채 잊어 구글 계정엔 접근 권한이 남았다 →
+     * 못 보낸 철회는 암호화해 두었다가 인터넷이 되면 다시 ([TubeRevokeWorker]). 이미 끊긴 토큰(400)은 끝난 것으로
+     */
+    @Test
+    fun aRevokeThatCouldNotBeSentIsKeptAndSentLater() {
+        val a = auth()
+        store.t = Tokens("AT1", "RT1", now + 3_600_000)
+        g.reply = { throw IOException("offline") }
+        assertFalse("나중에 다시", a.signOut())
+        assertNull(store.t)
+        assertEquals(listOf("RT1"), store.revokes)
+        assertTrue(a.hasPendingRevokes)
+        g.reply = { Http.Response(503, "") }
+        assertFalse("구글이 잠깐 안 되면 남겨 둔다", a.retryRevokes())
+        assertEquals(listOf("RT1"), store.revokes)
+        g.reply = { Http.Response(200, "") }
+        assertTrue(a.retryRevokes())
+        assertTrue(store.revokes.isEmpty())
+        assertFalse(a.hasPendingRevokes)
+        assertEquals("RT1", g.reqs.last().form["token"])
+        store.revokes += "RT2"
+        g.reply = { err(400, "invalid_token") }
+        assertTrue("이미 끊긴 토큰은 끝난 것으로", a.retryRevokes())
+        assertTrue(store.revokes.isEmpty())
+    }
+
+    @Test
+    fun signingOutKeepsTheRevokeUntilItIsSentSoAnAppKillInBetweenLosesNothing() {
+        val a = auth()
+        store.t = Tokens("AT1", "RT1", now + 3_600_000)
+        val t = a.forget()
+        assertEquals("철회를 보내기 전에 먼저 적어 둔다", listOf("RT1"), store.revokes)
+        g.reply = { Http.Response(200, "") }
+        assertTrue(a.revoke(t))
+        assertTrue(store.revokes.isEmpty())
+    }
+
+    /** 점검 C7: 승인을 기다리는 중 구글이 잠깐 안 되면(5xx·429) '로그인 오류'로 끝났다 → 천천히 계속 기다린다 */
+    @Test
+    fun googleHiccupsWhileWaitingKeepWaitingMoreSlowly() {
+        val a = auth()
+        g.reply = { Http.Response(503, "") }
+        assertEquals(Poll.SlowDown(10), a.poll(code))
+        g.reply = { Http.Response(500, "<html>error</html>") }
+        assertEquals(Poll.SlowDown(10), a.poll(code))
+        g.reply = { Http.Response(429, """{"error":"rate_limit_exceeded"}""") }
+        assertEquals(Poll.SlowDown(10), a.poll(code))
+        assertFalse(a.signedIn)
+    }
+
+    @Test
+    fun signingInOverAnOldSignInRevokesTheOldGrant() {
+        val a = auth()
+        store.t = Tokens("AT0", "RT0", now + 3_600_000)
+        g.reply = { r ->
+            if (r.url.endsWith("/token")) Http.Response(200, """{"access_token":"AT1","expires_in":3599,"refresh_token":"RT1"}""") else Http.Response(200, "")
+        }
+        assertEquals(Poll.Granted, a.poll(code))
+        assertEquals("RT1", store.t?.refresh)
+        assertTrue("예전 로그인의 접근 권한은 철회", g.reqs.any { it.url.endsWith("/revoke") && it.form["token"] == "RT0" })
+        assertTrue(store.revokes.isEmpty())
+    }
+
+    @Test
+    fun aRenewalStartedBeforeANewSignInDoesNotOverwriteIt() {
+        val a = auth()
+        store.t = Tokens("AT0", "RT0", now + 30_000)   // 곧 끝남 → 새로 받는다
+        val inRenew = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        g.reply = { r ->
+            when {
+                r.form["grant_type"] == "refresh_token" -> {
+                    inRenew.countDown()
+                    release.await(5, TimeUnit.SECONDS)
+                    Http.Response(200, """{"access_token":"AT0b","expires_in":3599}""")
+                }
+                r.url.endsWith("/token") -> Http.Response(200, """{"access_token":"AT1","expires_in":3599,"refresh_token":"RT1"}""")
+                else -> Http.Response(200, "")
+            }
+        }
+        var got: String? = "x"
+        val t = thread { got = a.accessToken() }
+        assertTrue(inRenew.await(5, TimeUnit.SECONDS))
+        assertEquals(Poll.Granted, a.poll(code))
+        release.countDown()
+        t.join(5_000)
+        assertEquals("예전 로그인으로 새로 받은 것은 버리고 새 로그인의 것으로", "AT1", got)
+        assertEquals(Tokens("AT1", "RT1", now + 3_599_000), store.t)
     }
 
     @Test

@@ -99,6 +99,8 @@ class TubeAppTest {
     private val store = MemoryStore()
     private val posts = mutableListOf<Pair<String, Map<String, String>>>()
     private var tokenReply: Http.Response = Http.Response(428, """{"error":"authorization_pending"}""")
+    /** 구글에 토큰을 물을 때 (그 사이 다른 물음이 끝나 로그인되는 경우를 흉내) */
+    private var onTokenAsked: () -> Unit = {}
     private val phoneOpened = mutableListOf<String>()
 
     @Before
@@ -117,7 +119,7 @@ class TubeAppTest {
             posts += url to form
             when {
                 url.endsWith("/device/code") -> Http.Response(200, """{"device_code":"DC","user_code":"GQVQ-JKEC","verification_url":"https://www.google.com/device","expires_in":1800,"interval":5}""")
-                url.endsWith("/token") -> tokenReply
+                url.endsWith("/token") -> tokenReply.also { onTokenAsked() }
                 else -> Http.Response(200, "")
             }
         }, store)
@@ -527,6 +529,40 @@ class TubeAppTest {
         settle { rows(a).any { it is Row.Code } }
         assertEquals("로그인", titles(a).first())
         assertTrue(posts.any { it.first.endsWith("/device/code") })
+    }
+
+    /** 점검 C7: 기다리는 중 구글이 잠깐 안 되면(503) '로그인 오류'로 끝났다 → 천천히 계속 기다리다 승인되면 끝 */
+    @Test
+    fun aGoogleHiccupWhileWaitingDoesNotEndTheSignIn() {
+        val a = open()
+        tapAction(a, TubeRows.A_LIBRARY)
+        tapAction(a, TubeRows.A_LOGIN)
+        settle { rows(a).any { it is Row.Code } }
+        tokenReply = Http.Response(503, "")
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(6))
+        settle()
+        assertTrue("코드를 그대로 보여 주며 기다림", rows(a).any { it is Row.Code })
+        tokenReply = Http.Response(200, """{"access_token":"AT","expires_in":3599,"refresh_token":"RT","scope":"https://www.googleapis.com/auth/youtube.readonly"}""")
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(11))
+        settle { titles(a).firstOrNull() != "로그인" }
+        assertEquals("보관함", titles(a).first())
+        assertNotNull(store.t)
+    }
+
+    /** 화면이 꺼지기 직전 보낸 물음으로 이미 로그인됐는데 다음 물음이 '거절'로 오면(같은 코드) 거절이 아니라 로그인된 것 */
+    @Test
+    fun aLateAnswerAfterSigningInIsNotShownAsDenied() {
+        val a = open()
+        tapAction(a, TubeRows.A_LIBRARY)
+        tapAction(a, TubeRows.A_LOGIN)
+        settle { rows(a).any { it is Row.Code } }
+        tokenReply = Http.Response(403, """{"error":"access_denied"}""")
+        // 물음이 오가는 사이 앞서 보낸 물음이 끝나 로그인됨
+        onTokenAsked = { store.t = Tokens("AT", "RT", now + 3_600_000) }
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(6))
+        settle { titles(a).firstOrNull() != "로그인" }
+        assertFalse(rows(a).any { it is Row.Note && it.text == context.getString(R.string.tube_login_denied) })
+        assertEquals("보관함", titles(a).first())
     }
 
     @Test

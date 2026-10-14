@@ -72,6 +72,38 @@ class TubeTokenStoreTest {
         assertTrue(prefs.all.isEmpty())
     }
 
+    /**
+     * 점검 C10: 키 저장소가 잠깐 안 될 때(부팅 직후 등)도 '못 읽는 값'으로 보고 지워 로그인이 풀렸다 →
+     * 키가 바뀌었거나(AEADBadTag) 망가진 값만 지우고, 잠깐의 오류면 그대로 두었다가 다음에 다시 읽는다
+     */
+    @Test
+    fun aKeystoreHiccupDoesNotSignYouOut() {
+        val cipher = JvmCipher()
+        PrefsTokenStore(prefs, cipher).save(Tokens("A", "R", 1))
+        var hiccup = true
+        val flaky = object : TokenCipher {
+            override fun encrypt(plain: ByteArray) = cipher.encrypt(plain)
+            override fun decrypt(blob: ByteArray): ByteArray =
+                if (hiccup) throw java.security.ProviderException("Keystore operation failed") else cipher.decrypt(blob)
+        }
+        val s = PrefsTokenStore(prefs, flaky)
+        assertNull("이번엔 못 읽음", s.load())
+        assertFalse("그래도 지우지 않는다", prefs.all.isEmpty())
+        hiccup = false
+        assertEquals(Tokens("A", "R", 1), s.load())
+    }
+
+    @Test
+    fun revokesThatWaitForTheInternetAreKeptEncrypted() {
+        val cipher = JvmCipher()
+        PrefsTokenStore(prefs, cipher).setPendingRevokes(listOf("REFRESH-OLD-1", "REFRESH-OLD-2"))
+        assertFalse(prefs.all.values.joinToString().contains("REFRESH-OLD"))
+        assertEquals(listOf("REFRESH-OLD-1", "REFRESH-OLD-2"), PrefsTokenStore(prefs, cipher).pendingRevokes())
+        PrefsTokenStore(prefs, cipher).setPendingRevokes(emptyList())
+        assertTrue(PrefsTokenStore(prefs, cipher).pendingRevokes().isEmpty())
+        assertTrue(prefs.all.isEmpty())
+    }
+
     @Test
     fun withoutAWorkingKeyTokensStayOnlyInMemory() {
         val s = PrefsTokenStore(prefs, BrokenCipher())
