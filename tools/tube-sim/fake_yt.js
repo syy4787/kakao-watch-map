@@ -5,6 +5,8 @@
 //  · 마지막 곡에서 nextVideo → 그 곡을 처음부터 (실제 관찰)
 //  · 오류 곡: -1 → 3 → onError(code) → -1 (실제 관찰), 저절로 다음 곡으로 안 넘어감
 //  · 믹스(list=RD…): cfg.noMix 에 있으면 목록 없음(null), cfg.mixError 면 준비되자마자 onError
+//  · 우리가 준 목록(playlist=a,b,c): videoId 는 무시하고 그 목록만(cfg.goneIds 는 빠짐) · 재생목록(list=PL…, listType=playlist):
+//    cfg.playlists[목록] 또는 만든 목록, videoId 가 있으면 그 자리부터 (모두 실제 플레이어에서 2026-10 관찰)
 //  · 불러오는 중(-1·3)의 pauseVideo: -1 을 알리고 불러오기를 그만둠 (실제: 바로 멈추면 -1 에 머묾).
 //    cfg.pauseLate 면 -1 을 알리고도 계속 불러와 재생까지 감 (실제 관찰: 멈춤 뒤에도 3 → 계속 불러옴)
 //  · 알림(상태·오류)은 실제처럼 비동기(postMessage)로, 페이지가 읽는 값(getPlayerState·번호·목록·주소)도 알림이 갈 때 바뀜.
@@ -64,6 +66,12 @@
     for (var i = 1; i < len; i++) a.push(base + 'x' + pad(i, 5));
     return a;
   }
+  // 재생목록마다 정해진 동영상들 (시나리오가 cfg.playlists 로 정하지 않았으면)
+  function playlistFor(id) {
+    var a = [];
+    for (var i = 0; i < (cfg.listLen || 10); i++) a.push('p' + tag(id) + 'x' + pad(i, 5));
+    return a;
+  }
   function durationOf(id) { return (cfg.durations && cfg.durations[id] != null) ? cfg.durations[id] : (cfg.duration || 6); }
   function errorOf(id) { return cfg.errors ? cfg.errors[id] || (cfg.errorAll ? cfg.errorAll : 0) : (cfg.errorAll || 0); }
 
@@ -98,11 +106,23 @@
     this.tok = 0;   // 불러오기 차례 (새로 불러오면 앞의 예약은 버림)
     this.n = reg.players.length;
     this.rep = null;
-    if (this.vars.list) {
+    var listId = this.vars.list ? String(this.vars.list) : '';
+    if (this.vars.playlist) {
+      // 우리가 준 목록(playlist 변수): 실제(2026-10 관찰)는 videoId 를 무시하고 이 목록만, 없는·못 트는 번호는 뺀다
+      var gone = cfg.goneIds || [];
+      this.list = String(this.vars.playlist).split(',').filter(function (x) { return x && gone.indexOf(x) < 0; });
+      if (!this.list.length) this.list = null;
+    } else if (listId && !/^RD/.test(listId) && this.vars.listType === 'playlist') {
+      // 재생목록(list=PL…·UU…): videoId 가 목록에 있으면 그 자리부터 (실제 관찰: UU… + 셋째 곡 → idx 2)
+      this.list = cfg.playlists && cfg.playlists[listId] ? cfg.playlists[listId].slice() : playlistFor(listId);
+      var at = this.single ? this.list.indexOf(this.single) : -1;
+      if (at >= 0) this.idx = at;
+      else if (this.single) this.list.unshift(this.single);
+    } else if (listId) {
       if (cfg.mixError) this.mixErr = cfg.mixError;
-      else this.list = mixFor(String(this.vars.list).replace(/^RD/, ''));
+      else this.list = mixFor(listId.replace(/^RD/, ''));
+      if (this.list && this.single && this.list[0] !== this.single) this.list.unshift(this.single);
     }
-    if (this.list && this.single && this.list[0] !== this.single) this.list.unshift(this.single);
     this.rep = this._snap();
     reg.players.push(this);
     var self = this;

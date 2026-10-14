@@ -131,6 +131,7 @@ async function snap(page) {
       stage: document.getElementById('stageMsg')?.hidden ? '' : (document.getElementById('stageMsg')?.textContent || '').trim(),
       upnext: !document.getElementById('upnext')?.hidden, nUp: document.querySelectorAll('#list li').length,
       thumbs, navs: window.__navs.slice(), pcount: fy.players.length, errs: fy.errors || 0,
+      back: { text: (document.getElementById('back')?.textContent || '').trim(), href: document.getElementById('back')?.getAttribute('href') || '' },
       log: (fy.log || []).slice(-12),
     };
   });
@@ -263,7 +264,32 @@ const A = {
 
 // ---------- 정해 둔 시나리오 ----------
 const ID2 = 'kJQP7kiw5Fk', ID3 = '9bZkp7q19f0';
+// 앱이 고른 목록(검색 결과·재생목록·구독 피드 등)으로 틀 때
+const Q1 = 'qAAAAAAAAA1', Q2 = 'qAAAAAAAAA2', Q3 = 'qAAAAAAAAA3', Q4 = 'qAAAAAAAAA4';
+const PL = 'PLtestlist0001';
+const PLAYLISTS = { [PL]: [Q1, Q2, Q3, Q4] };
 const scripted = [
+  { name: '목록재생_ids', hash: `#v=${Q1}&ids=${Q2},${Q3},${Q4}&t=${encodeURIComponent('첫 동영상')}&n=NOW`, cfg: { autoplay: true, duration: 8, speed: 2 }, steps: [
+    ['wait', 1500], ['expect', s => s.player?.len === 4 && s.player?.idx === 0 && s.player?.id === Q1 && s.player?.state === 1, '고른 동영상부터 앱의 목록 그대로'],
+    ['scroll', 0.8], ['wait', 500], ['expect', s => s.nUp === 3, '다음 동영상 3개'],
+    ['scroll', 0], ['wait', 3500], ['expect', s => s.player?.idx >= 1, '다음 동영상으로 넘어감'] ] },
+  { name: '목록끝_믹스없이멈춤', hash: `#v=${Q1}&ids=${Q2}&n=NOW`, cfg: { autoplay: true, duration: 2, speed: 1 }, steps: [
+    ['wait', 6500], ['expect', s => s.player?.idx === 1 && s.player?.state === 0 && s.pcount === 1 && /끝났어요/.test(s.status) && s.wake.active === 0, '목록이 끝나면 멈춤 (믹스로 안 이어감)'],
+    ['expect', s => s.next?.disabled, '목록 끝에선 ⏭ 꺼짐'],
+    ['scrollToNow'], ['tap', '#play'], ['wait', 1200], ['expect', s => s.player?.idx === 0 && s.player?.state === 1, '▶ 는 처음부터'] ] },
+  { name: '목록마지막막힘_멈춤', hash: `#v=${Q1}&ids=${Q2}&n=NOW`, cfg: { autoplay: true, duration: 2, speed: 2, errors: { [Q2]: 150 } }, steps: [
+    ['wait', 6000], ['expect', s => s.player?.idx === 1 && s.player?.state !== 1 && /막아/.test(s.status) && !/이어서/.test(s.status) && s.wake.active === 0, '마지막이 막혀도 믹스로 안 감 + 알림'] ] },
+  { name: '재생목록_list', hash: `#v=${Q3}&list=${PL}&n=NOW`, cfg: { autoplay: true, duration: 30, playlists: PLAYLISTS }, steps: [
+    ['wait', 1500], ['expect', s => s.player?.len === 4 && s.player?.idx === 2 && s.player?.state === 1, '재생목록 속 고른 자리부터'],
+    ['scrollToNow'], ['tap', '#prev'], ['wait', 1500], ['expect', s => s.player?.idx === 1 && s.player?.state === 1, '⏮ 는 목록의 앞 동영상'],
+    ['scroll', 1], ['wait', 300], ['tap', '#toPhone'], ['wait', 500], ['expect', s => s.navs.length === 1 && s.navs[0].includes('&list=' + PL), '폰에서도 그 재생목록으로'] ] },
+  { name: '잘못된목록', hash: `#v=${Q1}&ids=bad,%3Cx%3E,${Q2},${Q1},${Q2}&list=bad!list&n=NOW`, cfg: { autoplay: true, duration: 30 }, steps: [
+    ['wait', 1500], ['expect', s => s.player?.len === 2 && s.player?.id === Q1 && s.player?.state === 1, '이상한 번호·같은 번호·이상한 재생목록은 빼고'] ] },
+  { name: '목록에못트는번호', hash: `#v=${Q1}&ids=${Q2},${Q3}&n=NOW`, cfg: { autoplay: true, duration: 30, goneIds: [Q2] }, steps: [
+    ['wait', 1500], ['expect', s => s.player?.len === 2 && s.player?.state === 1, '유튜브가 못 트는 번호를 빼도 그대로'] ] },
+  { name: '앱안_링크', hash: `#v=${Q1}&ids=${Q2}&app=1&t=${encodeURIComponent('앱 동영상')}&n=NOW`, cfg: { autoplay: true, duration: 30 }, steps: [
+    ['wait', 1500], ['scroll', 1], ['wait', 300], ['expect', s => s.back.text === '목록으로' && s.back.href === 'kakaowatch://tube', '앱 안에선 목록으로'],
+    ['tap', '#toPhone'], ['wait', 500], ['expect', s => s.navs.length === 1 && /^kakaowatch:\/\/tube\/phone\?v=qAAAAAAAAA1&t=\d+&title=/.test(s.navs[0]) && !/#Intent/.test(s.navs[0]), '앱 안: 폰에서 이어 보기도 kakaowatch:// 로'] ] },
   { name: '자동재생OK_믹스_기본', cfg: { autoplay: true, mixLen: 6, duration: 3, speed: 2 }, steps: [
     ['wait', 2500], ['scrollToNow'], ['wait', 600], ['tap', '#next'], ['wait', 1500], ['tap', '#prev'], ['wait', 1500],
     ['tapUpNext', 1], ['wait', 1500], ['tap', '#play'], ['wait', 700], ['tap', '#play'], ['wait', 1500],
@@ -410,7 +436,7 @@ const scripted = [
     ['wait', 1200], ['scroll', 0.4], ['tap', '#sleep'], ['tap', '#sleep'], ['tap', '#sleep'], ['tap', '#sleep'], ['wait', 300], ['expect', s => /끔/.test(s.status), '네 번 누르면 꺼짐'],
     ['scroll', 0], ['wait', 7000], ['expect', s => s.player?.state === 1, '끄면 멈추지 않음'] ] },
   { name: '곡없이열기', hash: '', cfg: { autoplay: true }, steps: [
-    ['wait', 1200], ['expect', s => !s.player && /곡이 없어요/.test(s.title) && s.play?.disabled, '안내만'] ] },
+    ['wait', 1200], ['expect', s => !s.player && /동영상이 없어요/.test(s.title) && s.play?.disabled, '안내만'] ] },
   { name: '잘못된주소', hash: '#v=<script>&mix=1', cfg: { autoplay: true }, steps: [
     ['wait', 1200], ['expect', s => !s.player, '이상한 번호는 무시'] ] },
 ];
@@ -481,7 +507,9 @@ function randomScenario(seed, steps) {
     syncEvents: r() < 0.2, lateIndex: r() < 0.25, cueStall: r() < 0.05, clock: r() < 0.3,
   };
   const vp = pick(viewports);
-  const hashes = ['#v=' + ID2 + '&mix=1', '#v=' + ID3, '#v=dQw4w9WgXcQ&mix=1', '#v=' + ID2 + '&t=' + encodeURIComponent('다른 곡')];
+  cfg.playlists = PLAYLISTS;
+  const hashes = ['#v=' + ID2 + '&mix=1', '#v=' + ID3, '#v=dQw4w9WgXcQ&mix=1', '#v=' + ID2 + '&t=' + encodeURIComponent('다른 곡'),
+    `#v=${Q1}&ids=${Q2},${Q3},${Q4}`, `#v=${Q2}&list=${PL}&app=1`, `#v=${Q4}&ids=${Q1}&app=1`];
   const list = [];
   for (let k = 0; k < steps; k++) {
     const x = r();
