@@ -79,8 +79,8 @@ object TubeParsers {
     }
 
     /**
-     * videos.list(part=snippet,contentDetails,statistics,status) → 번호별 동영상: 제목·채널·길이·조회수·올린 때·틀 수 있는지.
-     * 아직 시작 안 한 생방송·예정 영상은 뺀다
+     * videos.list(part=snippet,contentDetails,statistics,status,player) → 번호별 동영상: 제목·채널·길이·조회수·올린 때·틀 수 있는지·
+     * 분류·세로인지. 아직 시작 안 한 생방송·예정 영상은 뺀다
      */
     fun videoDetails(json: JSONObject): Map<String, TubeVideo> {
         val out = LinkedHashMap<String, TubeVideo>()
@@ -102,9 +102,21 @@ object TubeParsers {
                 views = item.optJSONObject("statistics")?.optString("viewCount")?.toLongOrNull()?.takeIf { it >= 0 },
                 publishedAt = iso8601Ms(sn.optString("publishedAt")),
                 embeddable = item.optJSONObject("status")?.optBoolean("embeddable", true) != false && !ageLimited,
+                categoryId = sn.optString("categoryId").takeIf(TubeLinks::isCategoryId),
+                portrait = portrait(item.optJSONObject("player")),
             )
         }
         return out
+    }
+
+    /**
+     * player.embedWidth/embedHeight(maxHeight 를 보낸 요청에만 옴, 글 또는 숫자) → 세로(높이 ≥ 너비)인지.
+     * 둘 다 0 보다 클 때만 — 생방송은 0×0 이라 모름(null)
+     */
+    private fun portrait(player: JSONObject?): Boolean? {
+        val w = player?.optLong("embedWidth", 0) ?: return null
+        val h = player.optLong("embedHeight", 0)
+        return if (w > 0 && h > 0) h >= w else null
     }
 
     /** videos.list 한 쪽 (인기 차트·좋아요) → 받은 순서대로 */

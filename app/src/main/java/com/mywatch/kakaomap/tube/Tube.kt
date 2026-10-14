@@ -26,7 +26,22 @@ data class TubeVideo(
     val publishedAt: Long? = null,
     /** 워치 플레이어(다른 곳에 넣은 유튜브 플레이어)로 틀 수 있음 — 올린 사람이 막았거나 나이 제한이면 false (폰 유튜브로) */
     val embeddable: Boolean = true,
-)
+    /** 유튜브 분류 번호 (10 음악 · 20 게임 · 25 뉴스 등). 모르면 null */
+    val categoryId: String? = null,
+    /** 세로 동영상(높이 ≥ 너비). 모르면 null — 생방송은 크기를 알려 주지 않는다 */
+    val portrait: Boolean? = null,
+) {
+    /** Shorts 로 볼 것: 세로 · [SHORT_MAX_SEC] 초 이하 · 생방송 아님 (유튜브가 'Shorts' 표시를 따로 주지 않아 모양으로 가린다) */
+    val isShort: Boolean get() = portrait == true && !live && durationSec != null && durationSec <= SHORT_MAX_SEC
+
+    companion object {
+        /** Shorts 의 가장 긴 길이 (3분) */
+        const val SHORT_MAX_SEC = 180
+    }
+}
+
+/** 채널의 업로드 재생목록 종류: 전체(UU) · 긴 동영상(UULF) · Shorts(UUSH) · 생방송(UULV). UU 말고는 유튜브 문서에 없는 자동 목록이다 */
+enum class Uploads(val prefix: String) { ALL("UU"), LONG("UULF"), SHORTS("UUSH"), LIVE("UULV") }
 
 /** 채널: 번호(UC…)·이름·동그란 사진 · 구독자(숨기면 null) · 동영상 수 · 업로드 재생목록(UU…, 응답에 없으면 null) */
 data class TubeChannel(
@@ -112,6 +127,7 @@ object TubeLinks {
     private val CHANNEL = Regex("UC[A-Za-z0-9_-]{22}")
     /** 재생목록 번호: PL…(34자)·UU…(업로드)·OLAK5uy_…(앨범)·LL(좋아요) 등 */
     private val PLAYLIST = Regex("[A-Za-z0-9_-]{2,64}")
+    private val CATEGORY = Regex("[0-9]{1,3}")
 
     fun isId(s: String?): Boolean = s != null && ID.matches(s)
 
@@ -119,8 +135,15 @@ object TubeLinks {
 
     fun isPlaylistId(s: String?): Boolean = s != null && PLAYLIST.matches(s)
 
+    /** 유튜브 분류 번호 (숫자 1~3자리) */
+    fun isCategoryId(s: String?): Boolean = s != null && CATEGORY.matches(s)
+
     /** 채널의 '업로드' 재생목록 = 채널 번호의 UC 를 UU 로 (채널 정보를 따로 받지 않고 최신 영상을 받을 때) */
-    fun uploadsOf(channelId: String): String? = if (isChannelId(channelId)) "UU" + channelId.substring(2) else null
+    fun uploadsOf(channelId: String): String? = uploads(channelId, Uploads.ALL)
+
+    /** 채널의 [kind] 업로드 재생목록 = 채널 번호의 UC 를 UU·UULF·UUSH·UULV 로. 이상한 채널 번호면 null */
+    fun uploads(channelId: String, kind: Uploads): String? =
+        if (isChannelId(channelId)) kind.prefix + channelId.substring(2) else null
 
     /** 유튜브 주소에서 영상 번호(11자). 유튜브 영상이 아니면 null */
     fun videoId(url: String): String? {
@@ -183,6 +206,35 @@ object TubeLinks {
         return Handoff(TubeVideo(id, title, channel), start, param(uri.rawQuery, "mix") == "1", list)
     }
 
+    /**
+     * 재생 화면(앱 안)이 받은 유튜브 믹스 kakaowatch://tube/recs?seed=<처음 동영상>&ids=<추천,…> 읽기 — [at] = 받은 때.
+     * 아무 웹 페이지나 보낼 수 있는 값이라 꼼꼼히: 씨앗이 이상하거나 남는 추천이 없으면 null.
+     * 추천은 모양이 맞는 것만 · 같은 것은 한 번 · 씨앗은 빼고 · [MixHarvests.MAX_IDS] 개까지 (순서 그대로)
+     */
+    fun recs(link: String, at: Long): Harvest? {
+        val q = noteQuery(link, "/recs") ?: return null
+        val seed = param(q, "seed")?.takeIf(::isId) ?: return null
+        val ids = MixHarvests.clean(seed, param(q, "ids").orEmpty().split(','))
+        return if (ids.isEmpty()) null else Harvest(seed, ids, at)
+    }
+
+    /** Shorts 재생 화면(앱 안)이 처음 튼 Shorts kakaowatch://tube/seen?v=<번호> 읽기. 모양이 다르면 null */
+    fun seen(link: String): String? = noteQuery(link, "/seen")?.let { param(it, "v") }?.takeIf(::isId)
+
+    /** 재생 화면의 채널 이름을 누름 kakaowatch://tube/channel?v=<지금 동영상> → 그 동영상 번호 (채널은 앱이 찾는다). 모양이 다르면 null */
+    fun channelLink(link: String): String? = noteQuery(link, "/channel")?.let { param(it, "v") }?.takeIf(::isId)
+
+    /**
+     * 재생 화면이 보낸 kakaowatch://tube<[path]>?… 의 물음 부분. 모양이 다르면(다른 곳·다른 길·사용자 이름·포트) null.
+     * 앱 안 엔진이 넘기는 kakaowatch:// 꼴만 받는다 (intent:// 꼴은 안 됨)
+     */
+    private fun noteQuery(link: String, path: String): String? {
+        val uri = runCatching { URI(link.trim()) }.getOrNull() ?: return null
+        if (!uri.scheme.equals("kakaowatch", ignoreCase = true) || uri.host != "tube" || uri.rawPath != path) return null
+        if (uri.rawUserInfo != null || uri.port != -1) return null
+        return uri.rawQuery
+    }
+
     /** 폰 유튜브 앱의 검색 결과 (워치 검색이 안 될 때) */
     fun searchUrl(query: String): String = "https://www.youtube.com/results?search_query=" + encode(query.trim())
 
@@ -238,6 +290,26 @@ object TubeLinks {
 
     /** 재생 화면이 한 번에 받는 목록 (처음 동영상 포함) */
     const val MAX_QUEUE = 50
+
+    /**
+     * Shorts 재생 화면 주소: 목록(#ids=, [MAX_QUEUE] 개까지) · 처음 볼 자리(i=) · 고른 시각(n=) · 앱 안(app=1).
+     * 이상한 번호·같은 번호는 빼고 [start] 는 다듬은 목록에서 다시 센다 (이상하면 처음부터).
+     * 고른 것이 50개 뒤에 있으면 그 자리부터 50개 — 고른 Shorts 가 빠지지 않게
+     */
+    fun shortsUrl(base: String, ids: List<String>, start: Int = 0, nonce: Long? = null, inApp: Boolean = false): String {
+        val clean = ids.filter(::isId).distinct()
+        val at = ids.getOrNull(start)?.let(clean::indexOf)?.takeIf { it >= 0 } ?: 0
+        val from = if (at < MAX_QUEUE) 0 else at
+        return buildString {
+            append(base).append("shorts.html#ids=").append(clean.drop(from).take(MAX_QUEUE).joinToString(","))
+            append("&i=").append(at - from)
+            if (nonce != null) append("&n=").append(nonce)
+            if (inApp) append("&app=1")
+        }
+    }
+
+    /** 폰 유튜브 앱의 Shorts 화면 */
+    fun phoneShortsUrl(id: String): String = "https://www.youtube.com/shorts/$id"
 
     /** 글자 수로 자르기 — 이모지(두 칸짜리 글자)를 반으로 잘라 '?'가 되지 않게 */
     private fun takeChars(s: String, max: Int): String =
@@ -384,7 +456,8 @@ data class Played(val video: TubeVideo, val atMs: Long)
 
 /**
  * 최근 본 영상 — 유튜브 API 로 받은 정보는 30일까지만 보관할 수 있어서 그보다 오래된 건 지운다.
- * 조회수·올린 때 같은 통계는 남기지 않는다 (볼 때마다 새로 받음). 채널 번호는 '채널로 가기'에 쓰려고 남긴다
+ * 조회수·올린 때 같은 통계는 남기지 않는다 (볼 때마다 새로 받음). 채널 번호는 '채널로 가기'에 쓰려고,
+ * 분류(cat)·세로인지(por, 알 때만)는 홈의 칩·Shorts 를 가리려고 남긴다
  */
 object PlayedHistory {
     const val MAX = 30
@@ -405,6 +478,8 @@ object PlayedHistory {
                 p.video.durationSec?.let { put("sec", it) }
                 if (p.video.live) put("live", true)
                 if (!p.video.embeddable) put("emb", false)
+                p.video.categoryId?.let { put("cat", it) }
+                p.video.portrait?.let { put("por", it) }
                 put("at", p.atMs)
             })
         }
@@ -432,6 +507,9 @@ object PlayedHistory {
                     live = o.optBoolean("live", false),
                     channelId = o.optString("cid").takeIf(TubeLinks::isChannelId),
                     embeddable = o.optBoolean("emb", true),
+                    // 예전 기록엔 없다 (모름). 참·거짓이 아닌 값은 모르는 것으로
+                    categoryId = o.optString("cat").takeIf(TubeLinks::isCategoryId),
+                    portrait = o.opt("por") as? Boolean,
                 ),
                 o.optLong("at"),
             )

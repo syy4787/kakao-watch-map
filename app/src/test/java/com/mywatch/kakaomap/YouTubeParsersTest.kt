@@ -67,6 +67,57 @@ class YouTubeParsersTest {
         assertFalse("나이 제한 영상은 로그인 안 된 플레이어에서 안 나온다", m.getValue("agelimitxxx").embeddable)
     }
 
+    /**
+     * 분류(snippet.categoryId)와 세로인지(player.embedWidth/embedHeight — maxHeight=360 으로 물을 때만 옴).
+     * 실제 응답(2026-10-14): Shorts 203×360 · 긴 동영상 640×360 · 생방송 0×0. 크기는 글("203")로도 숫자로도 받는다
+     */
+    @Test
+    fun videoDetailsReadTheCategoryAndWhetherTheVideoIsUpright() {
+        val json = JSONObject(
+            """
+            {"items":[
+              {"id":"shortvideo1","snippet":{"title":"쇼츠","channelTitle":"1theK","categoryId":"10","liveBroadcastContent":"none"},
+               "contentDetails":{"duration":"PT33S"},"player":{"embedWidth":"203","embedHeight":"360"}},
+              {"id":"longvideo01","snippet":{"title":"뉴스","channelTitle":"YTN","categoryId":"25","liveBroadcastContent":"none"},
+               "contentDetails":{"duration":"PT4M54S"},"player":{"embedWidth":640,"embedHeight":360}},
+              {"id":"livevideo01","snippet":{"title":"생방송","channelTitle":"YTN","categoryId":"25","liveBroadcastContent":"live"},
+               "contentDetails":{"duration":"P0D"},"player":{"embedWidth":"0","embedHeight":"0"}},
+              {"id":"noplayer001","snippet":{"title":"크기 모름","channelTitle":"x","categoryId":"abc"},"contentDetails":{"duration":"PT30S"}},
+              {"id":"bigcategory","snippet":{"title":"이상한 분류","channelTitle":"x","categoryId":"1234"},
+               "contentDetails":{"duration":"PT30S"},"player":{"embedWidth":"360"}},
+              {"id":"squarevideo","snippet":{"title":"정사각형","channelTitle":"x","categoryId":"20"},
+               "contentDetails":{"duration":"PT59S"},"player":{"embedWidth":"360","embedHeight":"360"}},
+              {"id":"badplayer01","snippet":{"title":"이상한 크기","channelTitle":"x","categoryId":" 10"},
+               "contentDetails":{"duration":"PT59S"},"player":{"embedWidth":"-203","embedHeight":"x360"}}
+            ]}
+            """.trimIndent()
+        )
+        val m = TubeParsers.videoDetails(json)
+        val short = m.getValue("shortvideo1")
+        assertEquals("10", short.categoryId)
+        assertEquals(true, short.portrait)
+        assertTrue("세로 · 33초 = Shorts", short.isShort)
+        val long = m.getValue("longvideo01")
+        assertEquals("25", long.categoryId)
+        assertEquals(false, long.portrait)
+        assertFalse(long.isShort)
+        val live = m.getValue("livevideo01")
+        assertEquals("25", live.categoryId)
+        assertNull("생방송은 0×0 — 모름", live.portrait)
+        assertFalse(live.isShort)
+        assertNull("숫자가 아닌 분류는 버린다", m.getValue("noplayer001").categoryId)
+        assertNull("player 가 없으면 모양을 모름", m.getValue("noplayer001").portrait)
+        assertFalse("모양을 모르면 Shorts 로 치지 않는다", m.getValue("noplayer001").isShort)
+        assertNull("분류 번호는 세 자리까지", m.getValue("bigcategory").categoryId)
+        assertNull("높이가 없으면 모름", m.getValue("bigcategory").portrait)
+        assertEquals("정사각형도 세로로 (높이 ≥ 너비)", true, m.getValue("squarevideo").portrait)
+        assertEquals("20", m.getValue("squarevideo").categoryId)
+        assertNull(m.getValue("badplayer01").categoryId)
+        assertNull("이상한 크기는 모름", m.getValue("badplayer01").portrait)
+        // 예전 응답(분류·player 없음)은 그대로 읽힌다
+        assertNull(TubeParsers.videoDetails(JSONObject("""{"items":[{"id":"BzYnNdJhZQw","snippet":{"title":"t"}}]}""")).getValue("BzYnNdJhZQw").categoryId)
+    }
+
     @Test
     fun searchKeepsVideosChannelsAndPlaylistsInTheirOrder() {
         val json = JSONObject(

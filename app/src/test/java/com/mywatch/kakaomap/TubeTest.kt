@@ -1,5 +1,7 @@
 package com.mywatch.kakaomap
 
+import com.mywatch.kakaomap.tube.Harvest
+import com.mywatch.kakaomap.tube.MixHarvests
 import com.mywatch.kakaomap.tube.PlayedHistory
 import com.mywatch.kakaomap.tube.Queue
 import com.mywatch.kakaomap.tube.SearchHistory
@@ -7,6 +9,8 @@ import com.mywatch.kakaomap.tube.TubeLinks
 import com.mywatch.kakaomap.tube.TubeParsers
 import com.mywatch.kakaomap.tube.TubeText
 import com.mywatch.kakaomap.tube.TubeVideo
+import com.mywatch.kakaomap.tube.Uploads
+import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -142,6 +146,168 @@ class TubeTest {
         // 잉글랜드·스코틀랜드 같은 깃발 이모지는 '태그 글자'로 이어 붙인다 — 그건 남긴다
         val england = "\uD83C\uDFF4\uDB40\uDC67\uDB40\uDC62\uDB40\uDC65\uDB40\uDC6E\uDB40\uDC67\uDB40\uDC7F"
         assertEquals("응원 $england", TubeText.clean("응원 $england", 20))
+    }
+
+    @Test
+    fun shortsAreUprightShortAndNotLive() {
+        fun v(sec: Int?, portrait: Boolean?, live: Boolean = false) =
+            TubeVideo("BzYnNdJhZQw", "t", "c", durationSec = sec, live = live, portrait = portrait)
+        assertEquals(180, TubeVideo.SHORT_MAX_SEC)
+        assertTrue(v(59, true).isShort)
+        assertTrue("3분까지", v(180, true).isShort)
+        assertFalse(v(181, true).isShort)
+        assertFalse("가로", v(59, false).isShort)
+        assertFalse("모양을 모르면 Shorts 로 치지 않는다", v(59, null).isShort)
+        assertFalse("길이를 모르면", v(null, true).isShort)
+        assertFalse("생방송", v(59, true, live = true).isShort)
+        // 새 칸은 맨 뒤에 기본값으로 — 예전처럼 만든 동영상은 분류·모양을 모름
+        val old = TubeVideo("BzYnNdJhZQw", "밤편지", "1theK", 294)
+        assertNull(old.categoryId)
+        assertNull(old.portrait)
+        assertFalse(old.isShort)
+    }
+
+    @Test
+    fun eachKindOfUploadsHasItsOwnList() {
+        val ch = "UCweOkPb1wVVH0Q0Tlj4a5Pw"
+        assertEquals("UUweOkPb1wVVH0Q0Tlj4a5Pw", TubeLinks.uploads(ch, Uploads.ALL))
+        assertEquals("UULFweOkPb1wVVH0Q0Tlj4a5Pw", TubeLinks.uploads(ch, Uploads.LONG))
+        assertEquals("UUSHweOkPb1wVVH0Q0Tlj4a5Pw", TubeLinks.uploads(ch, Uploads.SHORTS))
+        assertEquals("UULVweOkPb1wVVH0Q0Tlj4a5Pw", TubeLinks.uploads(ch, Uploads.LIVE))
+        assertEquals(TubeLinks.uploads(ch, Uploads.ALL), TubeLinks.uploadsOf(ch))
+        assertEquals(listOf("UU", "UULF", "UUSH", "UULV"), Uploads.entries.map { it.prefix })
+        Uploads.entries.forEach { kind ->
+            assertTrue(TubeLinks.isPlaylistId(TubeLinks.uploads(ch, kind)))
+            listOf("", "UCshort", "PLweOkPb1wVVH0Q0Tlj4a5Pw", "UUweOkPb1wVVH0Q0Tlj4a5Pw", "UCweOkPb1wVVH0Q0Tlj4a5P!", " $ch", ch + "x").forEach {
+                assertNull("$kind '$it'", TubeLinks.uploads(it, kind))
+            }
+        }
+    }
+
+    @Test
+    fun shortsPlayerLinkCarriesTheListAfterTheHash() {
+        val base = "https://syy4787.github.io/kakao-watch-map/tube/"
+        val a = "BzYnNdJhZQw"
+        val b = "pSUydWEqKwE"
+        val c = "jfKfPfyJRdk"
+        assertEquals(base + "shorts.html#ids=$a,$b,$c&i=1", TubeLinks.shortsUrl(base, listOf(a, b, c), start = 1))
+        assertEquals(base + "shorts.html#ids=$a,$b,$c&i=0", TubeLinks.shortsUrl(base, listOf(a, b, c)))
+        assertEquals(
+            base + "shorts.html#ids=$a,$b&i=0&n=1700000000000&app=1",
+            TubeLinks.shortsUrl(base, listOf(a, b), nonce = 1_700_000_000_000, inApp = true),
+        )
+        assertEquals(base + "shorts.html#ids=$a&i=0&app=1", TubeLinks.shortsUrl(base, listOf(a), inApp = true))
+        // 이상한 번호·같은 번호는 빼고, 시작 자리는 다듬은 목록에서 다시 센다
+        assertEquals(base + "shorts.html#ids=$a,$b,$c&i=2", TubeLinks.shortsUrl(base, listOf("bad", a, b, a, "x\"<script>", c), start = 5))
+        assertEquals("같은 번호를 골라도 처음 자리로", base + "shorts.html#ids=$a,$b&i=0", TubeLinks.shortsUrl(base, listOf(a, b, a), start = 2))
+        // 시작 자리가 목록 밖이거나 이상한 번호면 처음부터
+        listOf(-1, 3, 99).forEach { assertEquals("$it", base + "shorts.html#ids=$a,$b,$c&i=0", TubeLinks.shortsUrl(base, listOf(a, b, c), start = it)) }
+        assertEquals(base + "shorts.html#ids=$a&i=0", TubeLinks.shortsUrl(base, listOf("bad", a), start = 0))
+        // 다 이상하거나 비어도 열 수 있는 주소
+        assertEquals(base + "shorts.html#ids=&i=0", TubeLinks.shortsUrl(base, listOf("bad", "")))
+        assertEquals(base + "shorts.html#ids=&i=0", TubeLinks.shortsUrl(base, emptyList()))
+        // 한 번에 50개까지 (재생 화면이 받는 수)
+        val many = (1..70).map { "short%06d".format(it) }
+        val url = TubeLinks.shortsUrl(base, many, start = 10)
+        assertEquals(many.take(TubeLinks.MAX_QUEUE), url.substringAfter("#ids=").substringBefore('&').split(','))
+        assertTrue(url.endsWith("&i=10"))
+        // 50번째 뒤를 골라도 고른 Shorts 가 빠지지 않게 — 그 자리부터 50개
+        val late = TubeLinks.shortsUrl(base, many, start = 60)
+        assertEquals(many.drop(60), late.substringAfter("#ids=").substringBefore('&').split(','))
+        assertTrue(late.endsWith("&i=0"))
+        // 폰 유튜브 앱의 Shorts 화면
+        assertEquals("https://www.youtube.com/shorts/$a", TubeLinks.phoneShortsUrl(a))
+    }
+
+    @Test
+    fun notesFromThePlayerPageAreReadCarefully() {
+        val seed = "BzYnNdJhZQw"
+        val recs = (1..60).map { "rec%08d".format(it) }
+        // 믹스 추천: kakaowatch://tube/recs?seed=<처음>&ids=<나머지>
+        assertEquals(
+            Harvest(seed, recs.take(3), 1_234),
+            TubeLinks.recs("kakaowatch://tube/recs?seed=$seed&ids=${recs.take(3).joinToString(",")}", at = 1_234),
+        )
+        assertEquals("쉼표를 %2C 로 바꿔 보내도", recs.take(2), TubeLinks.recs("kakaowatch://tube/recs?ids=${recs[0]}%2C${recs[1]}&seed=$seed", 1)?.ids)
+        assertEquals("scheme 은 대소문자 상관없이", seed, TubeLinks.recs("KakaoWatch://tube/recs?seed=$seed&ids=${recs[0]}", 1)?.seed)
+        assertEquals(" 앞뒤 빈칸", seed, TubeLinks.recs("  kakaowatch://tube/recs?seed=$seed&ids=${recs[0]} ", 1)?.seed)
+        // 씨앗(본 동영상)·같은 번호·이상한 번호는 빼고 순서 그대로, 49개까지
+        val messy = listOf(recs[0], seed, recs[1], recs[0], "bad", "%22%3E", recs[2], "")
+        assertEquals(recs.take(3), TubeLinks.recs("kakaowatch://tube/recs?seed=$seed&ids=${messy.joinToString(",")}", 1)?.ids)
+        assertEquals(recs.take(MixHarvests.MAX_IDS), TubeLinks.recs("kakaowatch://tube/recs?seed=$seed&ids=${recs.joinToString(",")}", 1)?.ids)
+        assertEquals(49, MixHarvests.MAX_IDS)
+        // 아무 웹 페이지나 보낼 수 있는 값이라 모양이 다르면 버린다 (인터넷 앱용 intent:// 는 앱 안 엔진에서만 바뀌므로 받지 않음)
+        listOf(
+            "kakaowatch://tube/recs?seed=$seed",
+            "kakaowatch://tube/recs?seed=$seed&ids=",
+            "kakaowatch://tube/recs?seed=$seed&ids=$seed,$seed",
+            "kakaowatch://tube/recs?seed=$seed&ids=bad,worse",
+            "kakaowatch://tube/recs?seed=short&ids=${recs[0]}",
+            "kakaowatch://tube/recs?seed=$seed%22&ids=${recs[0]}",
+            "kakaowatch://tube/recs?ids=${recs[0]}",
+            "kakaowatch://tube/recs/?seed=$seed&ids=${recs[0]}",
+            "kakaowatch://tube/seen?seed=$seed&ids=${recs[0]}",
+            "kakaowatch://tube?seed=$seed&ids=${recs[0]}",
+            "kakaowatch://other/recs?seed=$seed&ids=${recs[0]}",
+            "kakaowatch://TUBE/recs?seed=$seed&ids=${recs[0]}",
+            "kakaowatch://evil@tube/recs?seed=$seed&ids=${recs[0]}",
+            "kakaowatch://tube:8080/recs?seed=$seed&ids=${recs[0]}",
+            "https://tube/recs?seed=$seed&ids=${recs[0]}",
+            "intent://tube/recs?seed=$seed&ids=${recs[0]}#Intent;scheme=kakaowatch;package=com.mywatch.kakaomap;end",
+            "not a uri ::",
+            "",
+        ).forEach { assertNull(it, TubeLinks.recs(it, 1)) }
+
+        // 본 Shorts: kakaowatch://tube/seen?v=<번호>
+        assertEquals(seed, TubeLinks.seen("kakaowatch://tube/seen?v=$seed"))
+        assertEquals(seed, TubeLinks.seen("KAKAOWATCH://tube/seen?x=1&v=$seed"))
+        // 채널 링크: kakaowatch://tube/channel?v=<지금 동영상> → 그 동영상 번호 (채널은 앱이 찾는다)
+        assertEquals(seed, TubeLinks.channelLink("kakaowatch://tube/channel?v=$seed"))
+        listOf(
+            "kakaowatch://tube/%s",
+            "kakaowatch://tube/%s?v=",
+            "kakaowatch://tube/%s?v=short",
+            "kakaowatch://tube/%s?v=$seed%%22%%3E",
+            "kakaowatch://tube/%s?id=$seed",
+            "kakaowatch://tube/%s/?v=$seed",
+            "kakaowatch://other/%s?v=$seed",
+            "kakaowatch://evil@tube/%s?v=$seed",
+            "https://tube/%s?v=$seed",
+            "intent://tube/%s?v=$seed#Intent;scheme=kakaowatch;package=com.mywatch.kakaomap;end",
+        ).forEach { pattern ->
+            assertNull(pattern, TubeLinks.seen(pattern.format("seen")))
+            assertNull(pattern, TubeLinks.channelLink(pattern.format("channel")))
+        }
+        assertNull("다른 길은 다른 뜻", TubeLinks.seen("kakaowatch://tube/channel?v=$seed"))
+        assertNull(TubeLinks.channelLink("kakaowatch://tube/seen?v=$seed"))
+        assertNull(TubeLinks.channelLink("kakaowatch://tube/phone?v=$seed"))
+        assertNull(TubeLinks.seen("not a uri ::"))
+    }
+
+    @Test
+    fun historyRemembersTheCategoryAndShape() {
+        val short = TubeVideo("BzYnNdJhZQw", "쇼츠", "1theK", 33, categoryId = "10", portrait = true)
+        val long = TubeVideo("pSUydWEqKwE", "뉴스", "YTN", 294, categoryId = "25", portrait = false)
+        val unknown = TubeVideo("jfKfPfyJRdk", "생방송", "Lofi Girl", live = true)
+        var list = PlayedHistory.add(emptyList(), short, 1_000)
+        list = PlayedHistory.add(list, long, 1_000)
+        list = PlayedHistory.add(list, unknown, 1_000)
+        val text = PlayedHistory.encode(list)
+        val back = PlayedHistory.decode(text, 1_000)
+        assertEquals(list, back)
+        assertTrue(back.last().video.isShort)
+        assertFalse("모르는 모양·분류는 남기지 않는다", JSONArray(text).getJSONObject(0).has("por"))
+        assertFalse(JSONArray(text).getJSONObject(0).has("cat"))
+        // 예전 기록(분류·모양 없음)도 읽고, 망가진 값은 모르는 것으로
+        val old = PlayedHistory.decode(
+            """[{"id":"BzYnNdJhZQw","title":"t","channel":"c","sec":33,"at":1000},
+               {"id":"pSUydWEqKwE","title":"t","channel":"c","cat":"music","por":"yes","at":1000},
+               {"id":"jfKfPfyJRdk","title":"t","channel":"c","cat":"1000","por":1,"at":1000}]""",
+            1_000,
+        )
+        assertEquals(3, old.size)
+        assertEquals(listOf(null, null, null), old.map { it.video.categoryId })
+        assertEquals(listOf(null, null, null), old.map { it.video.portrait })
     }
 
     @Test
