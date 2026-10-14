@@ -159,8 +159,11 @@ object BusArrivalService {
     /** 승차 정류장(방향까지 맞춘 것)·노선. 백그라운드 스레드에서. 키가 없으면 null, 네트워크 오류는 던진다 */
     fun boarding(step: TransitStep): BusBoarding? = if (TagoApi.isConfigured) resolver.resolve(step) else null
 
-    /** 실시간 도착. 백그라운드 스레드에서. 키가 없거나 버스 구간이 아니면 null (오류는 문구로) */
-    fun live(step: TransitStep): LiveBus? {
+    /**
+     * 실시간 도착. 백그라운드 스레드에서. 키가 없거나 버스 구간이 아니면 null (오류는 문구로).
+     * [walkSec] = 지금부터 그 정류장까지 걸리는 시간 (주면 그 전에 떠나는 버스는 '놓칠 수 있어요')
+     */
+    fun live(step: TransitStep, walkSec: Int? = null): LiveBus? {
         if (!TagoApi.isConfigured || step.type != TransitStepType.BUS) return null
         if (step.vehicles.none { it.name.isNotBlank() } || step.points.isEmpty()) return null
         val recentFail = failedText
@@ -176,7 +179,7 @@ object BusArrivalService {
                 TransitMatching.firstServingLines(b.candidates, b.lines) { board.at(it) }?.second.orEmpty()
             }
             failedText = null
-            LiveBusText.of(b.lines, arrivals)
+            LiveBusText.of(b.lines, arrivals, walkSec)
         } catch (e: ApiException) {
             ErrorLog.record("실시간 버스", e)
             val text = e.message ?: "실시간 정보 오류"
@@ -191,5 +194,5 @@ object BusArrivalService {
     }
 
     /** 목록·상세에 쓰는 문구 ("106번 3분 (2번째 전) · 다음 15분"). 키가 없거나 못 찾으면 null */
-    fun describe(step: TransitStep): String? = live(step)?.text
+    fun describe(step: TransitStep, walkSec: Int? = null): String? = live(step, walkSec)?.text
 }

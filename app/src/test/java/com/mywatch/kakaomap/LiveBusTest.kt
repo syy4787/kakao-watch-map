@@ -174,6 +174,30 @@ class LiveBusTest {
         assertNull(none.short)
     }
 
+    /**
+     * 정류장까지 걸어가는 동안 떠나는 버스는 탈 수 없다 — 길찾기 목록에서 '106번 3분'만 보고 나섰다가 놓친다.
+     * 걷는 시간보다 먼저 오는 버스면 '놓칠 수 있어요'와 함께 탈 수 있는 다음 버스를 (1분은 봐줌: 도착 예측은 대략)
+     */
+    @Test
+    fun aBusThatComesBeforeYouCanWalkToTheStopIsFlagged() {
+        val l106 = BusLine(Vehicle("일반", "106"), "R106")
+        val l617 = BusLine(Vehicle("일반", "617"))
+        val arrivals = listOf(BusArrival("106", "", 180, 2, "R106"), BusArrival("106", "", 900, 8, "R106"), BusArrival("617", "", 480, 4, "R617"))
+        val nbsp = { s: String -> s.replace(' ', ' ') }
+        // 걸어서 6분: 3분 뒤 106 은 못 탐 → 다음 15분
+        assertEquals("106번 3분 (2번째 전) · 놓칠 수 있어요 · 다음 15분", nbsp(LiveBusText.of(listOf(l106), arrivals, walkSec = 6 * 60).text))
+        // 걸어서 3분 반: 3분 뒤 버스도 탈 만함 (1분 봐줌) → 그대로
+        assertEquals("106번 3분 (2번째 전) · 다음 15분", nbsp(LiveBusText.of(listOf(l106), arrivals, walkSec = 210).text))
+        // 다음 버스도 못 타면 '놓칠 수 있어요'만
+        assertEquals("106번 3분 (2번째 전) · 놓칠 수 있어요", nbsp(LiveBusText.of(listOf(l106), arrivals, walkSec = 20 * 60).text))
+        // 노선이 여럿이면 탈 수 있는 버스만 빨리 오는 순으로 (617 8분 · 106 15분)
+        assertEquals("617 8분 · 106 15분", nbsp(LiveBusText.of(listOf(l106, l617), arrivals, walkSec = 6 * 60).text))
+        // 하나도 못 타면 원래대로 + '놓칠 수 있어요'
+        assertEquals("106 3분 · 617 8분 · 놓칠 수 있어요", nbsp(LiveBusText.of(listOf(l106, l617), arrivals.take(1) + arrivals[2], walkSec = 20 * 60).text))
+        // 배너용(안내 중)은 그대로 가장 빨리 오는 버스
+        assertEquals("106번 3분 (2번째 전)", LiveBusText.of(listOf(l106), arrivals, walkSec = 6 * 60).short)
+    }
+
     @Test
     fun oneArrivalsRequestPerStopIsSharedByTheRoutesThatBoardThere() {
         val fetched = AtomicInteger()

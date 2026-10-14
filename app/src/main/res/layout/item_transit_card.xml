@@ -50,12 +50,13 @@
         android:textColor="@color/text_primary"
         android:textSize="12sp" />
 
+    <!-- 실시간 도착 — '106번 3분 (2번째 전) · 놓칠 수 있어요 · 다음 15분' 이면 세 줄까지 -->
     <TextView
         android:id="@+id/live"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:ellipsize="end"
-        android:maxLines="2"
+        android:maxLines="3"
         android:textColor="@color/live"
         android:textSize="12sp"
         android:textStyle="bold"

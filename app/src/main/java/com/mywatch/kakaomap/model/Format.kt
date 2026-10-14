@@ -55,6 +55,12 @@ object Format {
 
     fun transfers(count: Int): String = if (count <= 0) "환승 없음" else "환승 ${count}회"
 
+    /**
+     * " · " 로 이은 항목들의 빈칸을 붙은 빈칸으로 — 좁은 화면에서 줄이 넘치면 '·' 에서만 갈라진다
+     * ('도보 / 12분', '놓칠 수 / 있어요' 처럼 한 항목이 두 줄로 갈라지지 않게)
+     */
+    fun glued(text: String): String = text.split(" · ").joinToString(" · ") { it.replace(' ', '\u00A0') }
+
     /** 버스 도착 예정 → "3분", "곧 도착" (카카오맵 표기) */
     fun arrival(seconds: Int): String = when {
         seconds < 0 -> "정보 없음"

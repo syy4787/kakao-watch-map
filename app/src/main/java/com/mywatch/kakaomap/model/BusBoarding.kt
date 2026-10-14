@@ -143,8 +143,12 @@ data class LiveBus(val text: String, val short: String? = null, val soonestSec: 
 object LiveBusText {
     const val NO_INFO = "도착 정보 없음"
 
-    /** 이 구간 노선들([lines])의 도착 정보로 문구를 만든다. '다음 버스'는 같은 노선(TAGO 노선 번호)일 때만 */
-    fun of(lines: List<BusLine>, arrivals: List<BusArrival>): LiveBus {
+    /**
+     * 이 구간 노선들([lines])의 도착 정보로 문구를 만든다. '다음 버스'는 같은 노선(TAGO 노선 번호)일 때만.
+     * [walkSec] = 지금부터 이 정류장까지 걸리는 시간 (길찾기 목록) — 그보다 먼저 오는 버스는 타기 어려우므로
+     * '놓칠 수 있어요'와 함께 탈 수 있는 다음 버스를 (도착 예측은 대략이라 [GRACE_SEC] 은 봐준다)
+     */
+    fun of(lines: List<BusLine>, arrivals: List<BusArrival>, walkSec: Int? = null): LiveBus {
         val byName = lines.groupBy { it.name }.mapNotNull { (name, group) ->
             val mine = arrivals.filter { a -> a.arrivalSec >= 0 && group.any { it.matches(a) } }
                 .distinct()
@@ -152,17 +156,33 @@ object LiveBusText {
             if (mine.isEmpty()) null else name to mine
         }.sortedBy { it.second.first().arrivalSec }
         if (byName.isEmpty()) return LiveBus(NO_INFO)
+        fun catchable(a: BusArrival) = walkSec == null || a.arrivalSec + GRACE_SEC >= walkSec
+        fun next(a: BusArrival) = "다음 ${Format.arrival(a.arrivalSec)}"
         val (name, mine) = byName.first()
         val first = mine.first()
         val short = "${name}번 ${Format.busArrival(first)}"
         val text = if (byName.size == 1) {
-            val next = mine.drop(1).firstOrNull { sameRun(first, it) }
-            short + (next?.let { " · 다음 ${Format.arrival(it.arrivalSec)}" } ?: "")
+            val later = mine.drop(1).filter { sameRun(first, it) }
+            if (catchable(first)) {
+                listOfNotNull(short, later.firstOrNull()?.let(::next)).joinToString(" · ")
+            } else {
+                listOfNotNull(short, MISS, later.firstOrNull(::catchable)?.let(::next)).joinToString(" · ")
+            }
         } else {
-            byName.take(MAX_LINES).joinToString(" · ") { (n, a) -> "$n ${Format.arrival(a.first().arrivalSec)}" }
+            // 노선이 여럿이면 탈 수 있는 버스만 빨리 오는 순으로 (하나도 없으면 그대로 + '놓칠 수 있어요')
+            val reachable = byName.mapNotNull { (n, a) -> a.firstOrNull(::catchable)?.let { n to it } }.sortedBy { it.second.arrivalSec }
+            if (reachable.isNotEmpty()) {
+                reachable.take(MAX_LINES).joinToString(" · ") { (n, a) -> "$n ${Format.arrival(a.arrivalSec)}" }
+            } else {
+                (byName.take(MAX_LINES).map { (n, a) -> "$n ${Format.arrival(a.first().arrivalSec)}" } + MISS).joinToString(" · ")
+            }
         }
         return LiveBus(text, short, first.arrivalSec)
     }
+
+    const val MISS = "놓칠 수 있어요"
+    /** 걷는 시간보다 이만큼 먼저 와도 탈 만하다고 본다 (도착 예측은 대략) */
+    private const val GRACE_SEC = 60
 
     /** 같은 노선의 다음 버스인지 (번호가 같아도 TAGO 노선 번호가 다르면 다른 노선 — 일반 607·농어촌 607) */
     private fun sameRun(a: BusArrival, b: BusArrival): Boolean =

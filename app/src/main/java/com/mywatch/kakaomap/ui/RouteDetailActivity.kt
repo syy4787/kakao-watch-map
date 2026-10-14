@@ -186,9 +186,12 @@ class RouteDetailActivity : ComponentActivity() {
     private suspend fun refreshLive() {
         val t = transit ?: return
         // 기차·고속버스 경로는 타러 가는 버스만 (내려서 탈 버스는 몇 시간 뒤라 지금 도착 정보는 엉뚱함)
+        val first = TransitGuide.listLiveIndex(t)
         TransitGuide.liveBusIndexes(t).forEach { i ->
             val s = t.steps[i]
-            val text = withContext(Dispatchers.IO) { BusArrivalService.describe(s) } ?: return@forEach
+            // 목록에서 연 경로의 첫 버스: 정류장까지 걷는 동안 떠나는 버스는 '놓칠 수 있어요' (안내 중이면 이미 가는 중이라 빼고)
+            val walkSec = if (!fromActive && i == first) t.steps.take(i).sumOf { it.timeSec } else null
+            val text = withContext(Dispatchers.IO) { BusArrivalService.describe(s, walkSec) } ?: return@forEach
             liveTexts["s$i"] = text
             val rows = ui.adapter.rows
             val pos = rows.indexOfFirst { it is Row.Step && it.key == "s$i" }

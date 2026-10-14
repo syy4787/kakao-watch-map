@@ -484,9 +484,12 @@ class DirectionsActivity : ComponentActivity() {
         if (!TagoApi.isConfigured) return
         val routes = RouteRepository.transitRoutes ?: return
         routes.forEachIndexed { i, r ->
-            val bus = TransitGuide.listLiveIndex(r)?.let { r.steps[it] } ?: return@forEachIndexed
+            val at = TransitGuide.listLiveIndex(r) ?: return@forEachIndexed
+            val bus = r.steps[at]
+            // 정류장까지 걷는 동안 떠나는 버스는 '놓칠 수 있어요' (탈 수 있는 다음 버스를 함께)
+            val walkSec = r.steps.take(at).sumOf { it.timeSec }
             lifecycleScope.launch {
-                val text = withContext(Dispatchers.IO) { BusArrivalService.describe(bus) } ?: return@launch
+                val text = withContext(Dispatchers.IO) { BusArrivalService.describe(bus, walkSec) } ?: return@launch
                 if (RouteRepository.transitRoutes !== routes || liveTexts[i] == text) return@launch
                 liveTexts[i] = text
                 val rows = ui.adapter.rows
