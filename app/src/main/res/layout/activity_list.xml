@@ -1,6 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 목록 화면 공통: 둥근 화면용 WearableRecyclerView + 가운데 상태 문구 -->
-<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<!--
+  목록 화면 공통: 둥근 화면용 WearableRecyclerView + 가운데 상태 문구.
+  맨 바깥 SwipeDismissFrameLayout: 화면 안에서 돌아갈 곳이 있을 때만(검색 결과 → 처음 화면 등) 오른쪽으로 쓸기를 받아
+  한 단계 뒤로 — 그 밖엔 꺼 두어 시스템이 화면을 닫는다 ([com.mywatch.kakaomap.ui.WearList.swipeBack])
+-->
+<androidx.wear.widget.SwipeDismissFrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/swipe"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="@android:color/black">
@@ -24,4 +29,4 @@
         android:textColor="@color/text_secondary"
         android:textSize="13sp"
         android:visibility="gone" />
-</FrameLayout>
+</androidx.wear.widget.SwipeDismissFrameLayout>

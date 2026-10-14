@@ -96,4 +96,47 @@ object Locator {
         RouteRepository.updateFix(fix)
         return fix
     }
+
+    /**
+     * 검색 중심으로 쓸 대략적 위치 (몇 백 m 틀려도 됨 — GPS 를 켜지 않는다).
+     * 저전력(Wi-Fi·기지국) 새 위치를 [waitMs] 까지 기다려 보고, 못 잡으면 [ROUGH_LAST_MAX_AGE_MS] 안의 마지막 위치.
+     * 권한이 없거나 아무것도 없으면 null (그러면 전국에서 찾는다)
+     */
+    @SuppressLint("MissingPermission")
+    suspend fun rough(context: Context, waitMs: Long = ROUGH_WAIT_MS): Coord? {
+        if (!hasPermission(context)) return null
+        val client = LocationServices.getFusedLocationProviderClient(context)
+        val cts = CancellationTokenSource()
+        val request = CurrentLocationRequest.Builder()
+            .setPriority(Priority.PRIORITY_BALANCED_POWER_ACCURACY)
+            .setMaxUpdateAgeMillis(ROUGH_FRESH_MS)
+            .setDurationMillis(waitMs)
+            .build()
+        val fresh: Location? = withTimeoutOrNull(waitMs + 500) {
+            suspendCancellableCoroutine { cont ->
+                client.getCurrentLocation(request, cts.token)
+                    .addOnSuccessListener { if (cont.isActive) cont.resume(it) }
+                    .addOnFailureListener { if (cont.isActive) cont.resume(null) }
+                cont.invokeOnCancellation { cts.cancel() }
+            }
+        }
+        cts.cancel()
+        val loc = fresh ?: withTimeoutOrNull(1_000) {
+            suspendCancellableCoroutine { cont ->
+                client.lastLocation
+                    .addOnSuccessListener { if (cont.isActive) cont.resume(it) }
+                    .addOnFailureListener { if (cont.isActive) cont.resume(null) }
+            }
+        }?.takeIf { SystemClock.elapsedRealtimeNanos() - it.elapsedRealtimeNanos <= ROUGH_LAST_MAX_AGE_MS * 1_000_000 }
+        val fix = loc?.toFix() ?: return null
+        RouteRepository.updateFix(fix)
+        return fix.coord
+    }
+
+    /** 검색 중심을 잡을 때 기다리는 시간 */
+    private const val ROUGH_WAIT_MS = 3_000L
+    /** 이만큼 안에 다른 앱·시스템이 잡아 둔 위치면 바로 받는다 */
+    private const val ROUGH_FRESH_MS = 10 * 60_000L
+    /** 새로 못 잡을 때 쓸 마지막 위치의 최대 나이 (전국에서 아무 데나 찾는 것보다는 낫다) */
+    private const val ROUGH_LAST_MAX_AGE_MS = 6 * 60 * 60_000L
 }

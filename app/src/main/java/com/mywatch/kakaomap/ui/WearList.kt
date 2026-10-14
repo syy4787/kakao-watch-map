@@ -5,6 +5,7 @@ import android.util.TypedValue
 import android.view.View
 import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
+import androidx.wear.widget.SwipeDismissFrameLayout
 import androidx.wear.widget.WearableLinearLayoutManager
 import androidx.wear.widget.WearableRecyclerView
 import com.mywatch.kakaomap.R
@@ -19,9 +20,28 @@ class WearList(activity: Activity, onClick: (Row) -> Unit, onLongClick: ((Row) -
 
     val list: WearableRecyclerView = activity.findViewById(R.id.list)
     private val status: TextView = activity.findViewById(R.id.status)
+    private val swipe: SwipeDismissFrameLayout = activity.findViewById(R.id.swipe)
     val adapter = RowAdapter(onClick, onLongClick, look)
 
+    /**
+     * 오른쪽으로 쓸었을 때 화면을 닫지 않고 할 일 (화면 안에서 한 단계 뒤로 — 옆 버튼의 '뒤로'와 같게).
+     * null 이면 쓸기를 받지 않아 시스템이 화면을 닫는다 (Wear OS 는 쓸기로 액티비티를 닫을 뿐 '뒤로' 처리를 부르지 않는다 —
+     * 예전엔 검색 결과·유튜브 채널에서 쓸면 앱 화면이 통째로 닫혔다)
+     */
+    var swipeBack: (() -> Unit)? = null
+        set(value) {
+            field = value
+            if (swipe.isSwipeable != (value != null)) swipe.isSwipeable = value != null
+        }
+
     init {
+        swipe.isSwipeable = false
+        swipe.addCallback(object : SwipeDismissFrameLayout.Callback() {
+            // 쓸려 나간 목록은 제자리로 돌아온 뒤 불린다 — 바로 앞 화면을 그린다
+            override fun onDismissed(layout: SwipeDismissFrameLayout) {
+                swipeBack?.invoke()
+            }
+        })
         val dm = activity.resources.displayMetrics
         if (look == Look.TUBE) {
             val side = (dm.widthPixels * TUBE_SIDE).toInt()

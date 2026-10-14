@@ -3,6 +3,7 @@ package com.mywatch.kakaomap.net
 import com.mywatch.kakaomap.BuildConfig
 import com.mywatch.kakaomap.model.Coord
 import com.mywatch.kakaomap.model.KakaoParsers
+import com.mywatch.kakaomap.model.NearbyKind
 import com.mywatch.kakaomap.model.Place
 import com.mywatch.kakaomap.model.RouteOption
 import com.mywatch.kakaomap.model.SimpleRoute
@@ -26,6 +27,10 @@ open class ApiException(message: String) : Exception(message)
 object KakaoApi {
     private const val BASE = "https://dapi.kakao.com"
 
+    /**
+     * 장소 검색 (정확도순). [near] 를 주면 카카오가 가까운 곳을 먼저 준다 — 실측: '스타벅스' → 내 주변 매장, '부산역' → 부산역.
+     * 거리순·반경은 쓰지 않는다 ('대전역'이 근처 렌터카 픽업존이 되고, 반경 밖의 '부산역'은 0건)
+     */
     fun searchPlaces(query: String, near: Coord?): List<Place> {
         val params = linkedMapOf("query" to query, "size" to "15")
         if (near != null) {
@@ -34,6 +39,29 @@ object KakaoApi {
         }
         return KakaoParsers.places(call("/v2/local/search/keyword.json", params))
     }
+
+    /** 내 주변 [kind] (편의점·약국·화장실·카페·지하철역) — 5km 안을 가까운 순으로 */
+    fun nearby(kind: NearbyKind, near: Coord): List<Place> {
+        val (path, params) = nearbyRequest(kind, near)
+        return KakaoParsers.places(call(path, params)).filter(kind::keeps)
+    }
+
+    /** [nearby] 의 요청 (주소, 매개변수) */
+    fun nearbyRequest(kind: NearbyKind, near: Coord): Pair<String, Map<String, String>> {
+        val around = linkedMapOf(
+            "x" to near.lng.fmt(), "y" to near.lat.fmt(),
+            "radius" to NEARBY_RADIUS_M.toString(), "sort" to "distance", "size" to "15",
+        )
+        val code = kind.code
+        return if (code != null) {
+            "/v2/local/search/category.json" to (linkedMapOf("category_group_code" to code) + around)
+        } else {
+            "/v2/local/search/keyword.json" to (linkedMapOf("query" to kind.label) + around)
+        }
+    }
+
+    /** '내 주변'을 찾는 반경 — 가까운 순이라 넓혀도 가까운 곳이 먼저 나오고, 시골에서도 빈 목록이 덜 나온다 */
+    private const val NEARBY_RADIUS_M = 5_000
 
     /** [near] 에서 [radiusM](최대 20km) 안을 가까운 순으로 — 역·터미널 찾기용 */
     fun searchNear(query: String, near: Coord, radiusM: Int): List<Place> = KakaoParsers.places(

@@ -280,6 +280,8 @@ class TubeActivity : ComponentActivity() {
 
     private fun render() {
         back.isEnabled = nav.depth > 1
+        // 오른쪽으로 쓸기도 한 화면씩 뒤로 (홈에서는 시스템이 닫는다)
+        ui.swipeBack = if (back.isEnabled) back::handleOnBackPressed else null
         if (opening) {
             ui.showStatus(getString(openingText))
             return

@@ -33,6 +33,16 @@
     <string name="clear_recents">최근 목적지 지우기</string>
     <string name="searching">검색 중…</string>
     <string name="no_results">검색 결과가 없어요</string>
+    <string name="search_nationwide">내 위치를 몰라 전국에서 찾았어요</string>
+    <string name="retry">다시 시도</string>
+    <string name="nearby_title">내 주변</string>
+    <string name="nearby_sub">가까운 순 · 5km 안</string>
+    <string name="nearby_kind_title">내 주변 %1$s</string>
+    <string name="nearby_searching">내 주변 %1$s 찾는 중…</string>
+    <string name="nearby_count">%1$d곳 · 가까운 순</string>
+    <string name="nearby_no_location">내 위치를 잡지 못했어요</string>
+    <string name="nearby_none">5km 안에서 찾지 못했어요</string>
+    <string name="nearby_failed">찾지 못했어요</string>
     <string name="app_info_update">앱 정보 · 업데이트</string>
     <string name="fav_hint">최근 목적지를 길게 누르면 집·회사로 등록돼요</string>
     <string name="fav_registered">%1$s 등록했어요</string>

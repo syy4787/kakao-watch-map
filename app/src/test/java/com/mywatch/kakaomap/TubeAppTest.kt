@@ -310,6 +310,27 @@ class TubeAppTest {
         assertTrue("홈에서 뒤로 = 닫기", a.isFinishing)
     }
 
+    /** 오른쪽으로 쓸기도 한 화면씩 뒤로 (Wear OS 는 쓸면 액티비티를 그냥 닫아 유튜브가 통째로 닫혔다). 홈에서는 시스템이 닫는다 */
+    @Test
+    fun swipingRightStepsBackOneScreenAndHomeLeavesItToTheSystem() {
+        backend.pages[Feed.ChannelInfo(channel.id).key] = { Fetched(TubePage(emptyList(), null, channels = listOf(channel))) }
+        backend.pages[Feed.ChannelVideos(channel.id).key] = { Fetched(TubePage(listOf(v("chanaaaaaa1")), null)) }
+        val a = open()
+        val swipe = a.findViewById<androidx.wear.widget.SwipeDismissFrameLayout>(R.id.swipe)
+        assertFalse(swipe.isSwipeable)
+        tapCard(a, "musicaaaaa1", long = true)
+        tapAction(a, TubeRows.A_CHANNEL)
+        assertEquals("1theK (원더케이)", titles(a).first())
+        assertTrue(swipe.isSwipeable)
+        val dismissed = androidx.wear.widget.SwipeDismissFrameLayout::class.java.getDeclaredMethod("performDismissFinishedCallbacks")
+        dismissed.isAccessible = true
+        dismissed.invoke(swipe)
+        settle()
+        assertEquals("유튜브", titles(a).first())
+        assertFalse(a.isFinishing)
+        assertFalse(swipe.isSwipeable)
+    }
+
     @Test
     fun longPressOpensTheMenuAndGoingToTheChannelReplacesIt() {
         val a = open()
