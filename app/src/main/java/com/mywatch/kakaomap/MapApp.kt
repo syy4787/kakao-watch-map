@@ -2,12 +2,19 @@ package com.mywatch.kakaomap
 
 import android.app.Activity
 import android.app.Application
+import android.content.ComponentCallbacks2
+import android.content.res.Configuration
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.os.Process
 import android.os.SystemClock
 import android.util.Log
 import com.kakao.vectormap.KakaoMapSdk
 import com.mywatch.kakaomap.data.ErrorLog
 import com.mywatch.kakaomap.tube.PlayerGuard
+import com.mywatch.kakaomap.tube.PlayerIdle
+import com.mywatch.kakaomap.tube.PlayerLifecycleShim
 import com.mywatch.kakaomap.update.UpdateInstallWorker
 import com.mywatch.kakaomap.update.UpdateManager
 import com.mywatch.kakaomap.update.UpdateWorker
@@ -25,6 +32,11 @@ class MapApp : Application() {
                 ErrorLog.installCrashHandler()
                 // 엔진이 죽으면 바로 기억 → 다음 재생은 인터넷 앱으로
                 PlayerGuard.of(this).watchCrashes()
+                // 엔진이 쓰는 프로세스 생명 주기(앞·뒤) — androidx.startup 은 본체에서만 돌아 여기선 직접 켠다
+                runCatching { PlayerLifecycleShim.init(this) }
+                    .onFailure { ErrorLog.record("유튜브·앱 안 재생", "프로세스 생명 주기를 켜지 못함 (${it.javaClass.simpleName})") }
+                // 재생 화면을 다 닫으면 잠시 뒤 이 프로세스를 끝내 엔진이 쥔 메모리를 돌려준다 (길 안내가 대신 꺼지지 않게)
+                releaseWhenIdle()
                 return
             }
             ProcessRole.MAIN -> Unit
@@ -66,6 +78,39 @@ class MapApp : Application() {
             override fun onActivityPaused(activity: Activity) = Unit
             override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) = Unit
             override fun onActivityDestroyed(activity: Activity) = Unit
+        })
+    }
+
+    /** 재생 화면 프로세스: 재생 화면이 하나도 없으면 [PlayerIdle] 이 정한 때 끝낸다 */
+    private fun releaseWhenIdle() {
+        val idle = PlayerIdle()
+        val main = Handler(Looper.getMainLooper())
+        val end = Runnable { if (idle.stillIdle()) Process.killProcess(Process.myPid()) }
+        fun act(d: PlayerIdle.Do) {
+            when (d) {
+                PlayerIdle.Do.CANCEL -> main.removeCallbacks(end)
+                PlayerIdle.Do.KILL_LATER -> {
+                    main.removeCallbacks(end)
+                    main.postDelayed(end, PlayerIdle.GRACE_MS)
+                }
+                PlayerIdle.Do.KILL_NOW -> end.run()
+                PlayerIdle.Do.NOTHING -> Unit
+            }
+        }
+        registerActivityLifecycleCallbacks(object : ActivityLifecycleCallbacks {
+            override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) = act(idle.created())
+            override fun onActivityDestroyed(activity: Activity) = act(idle.destroyed(activity.isChangingConfigurations))
+            override fun onActivityStarted(activity: Activity) = Unit
+            override fun onActivityResumed(activity: Activity) = Unit
+            override fun onActivityPaused(activity: Activity) = Unit
+            override fun onActivityStopped(activity: Activity) = Unit
+            override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) = Unit
+        })
+        registerComponentCallbacks(object : ComponentCallbacks2 {
+            override fun onTrimMemory(level: Int) = act(idle.trim(level))
+            override fun onConfigurationChanged(newConfig: Configuration) = Unit
+            @Deprecated("시스템 콜백")
+            override fun onLowMemory() = act(idle.trim(ComponentCallbacks2.TRIM_MEMORY_COMPLETE))
         })
     }
 

@@ -135,6 +135,7 @@ dependencies {
     implementation("androidx.work:work-runtime-ktx:2.10.5")                 // 자동 업데이트 (확인·내려받기·설치)
     implementation("com.google.android.gms:play-services-location:21.4.0") // 현재 위치
     implementation("org.mozilla.geckoview:geckoview:158.0.20261007201254")  // 유튜브: 앱 안 재생 화면(공식 플레이어)을 띄우는 브라우저 엔진
+    implementation("androidx.lifecycle:lifecycle-process:2.11.0")           // 재생 화면 프로세스에도 프로세스 생명 주기를 켜려고 (GeckoView 가 이미 씀 — 같은 버전)
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303")                            // 단위 테스트용 JSON 구현

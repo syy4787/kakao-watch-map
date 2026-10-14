@@ -77,7 +77,11 @@ object PlayerNav {
     private fun fromIntent(u: String): String? {
         val mark = u.indexOf("#Intent;")
         if (mark < 0 || !u.endsWith(";end")) return null
-        val extras = u.substring(mark + "#Intent;".length, u.length - ";end".length).split(';')
+        // 'intent://x#Intent;end' 처럼 추가 정보가 없으면 두 표시가 ';' 를 함께 써 범위가 거꾸로 된다 — 막기
+        val from = mark + "#Intent;".length
+        val to = u.length - ";end".length
+        if (from > to) return null
+        val extras = u.substring(from, to).split(';')
             .mapNotNull { kv -> kv.split('=', limit = 2).takeIf { it.size == 2 }?.let { it[0] to it[1] } }
             .toMap()
         if (extras["scheme"] != "kakaowatch") return null

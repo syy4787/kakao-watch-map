@@ -45,6 +45,16 @@ class PlayerNavTest {
     }
 
     @Test
+    fun malformedIntentLinksAreBlockedInsteadOfCrashingThePlayer() {
+        // 'intent://x#Intent;end' 처럼 추가 정보가 없으면 "#Intent;" 와 ";end" 가 ';' 를 함께 써서 잘라 낼 범위가 거꾸로 —
+        // 예외가 GeckoView 콜백 밖으로 나가 재생 화면 프로세스가 죽고 6시간 동안 인터넷 앱으로 틀었다
+        for (u in listOf("intent://x#Intent;end", "intent://#Intent;end", "intent://tube#Intent;;end", "intent://#Intent;scheme=kakaowatch;end")) {
+            assertEquals(u, Decision.Block, PlayerNav.top(u, base, userGesture = true))
+            assertEquals(u, Decision.Block, PlayerNav.newWindow(u, base))
+        }
+    }
+
+    @Test
     fun outsideLinksOpenOnThePhoneOnlyWhenTapped() {
         assertEquals(Decision.Phone("https://www.youtube.com/watch?v=BzYnNdJhZQw"), PlayerNav.top("https://www.youtube.com/watch?v=BzYnNdJhZQw", base, userGesture = true))
         assertEquals("광고를 누르면 폰에서", Decision.Phone("https://www.googleadservices.com/pagead/aclk?x=1"), PlayerNav.top("https://www.googleadservices.com/pagead/aclk?x=1", base, userGesture = true))

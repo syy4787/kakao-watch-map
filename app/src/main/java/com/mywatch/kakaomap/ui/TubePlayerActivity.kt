@@ -25,6 +25,7 @@ import com.mywatch.kakaomap.BuildConfig
 import com.mywatch.kakaomap.R
 import com.mywatch.kakaomap.data.ErrorLog
 import com.mywatch.kakaomap.tube.PhoneOpener
+import com.mywatch.kakaomap.tube.PlayerAudio
 import com.mywatch.kakaomap.tube.PlayerGuard
 import com.mywatch.kakaomap.tube.PlayerPresence
 import com.mywatch.kakaomap.tube.PlayerRecovery
@@ -64,6 +65,9 @@ class TubePlayerActivity : ComponentActivity() {
     private var url = ""
     private var painted = false
     private val recovery = PlayerRecovery()
+    /** 지금 재생 중인 미디어 — 이어폰이 끊기거나 전화가 오면 이것을 멈춘다 */
+    private var mediaNow: MediaSession? = null
+    private val audio by lazy { PlayerAudio(this) { mediaNow?.pause() } }
     /** 화면이 안 보일 때 엔진이 꺼졌음 — 다시 보일 때 연다 */
     private var reopenOnStart = false
 
@@ -168,6 +172,7 @@ class TubePlayerActivity : ComponentActivity() {
         session?.setFocused(false)
         session?.setActive(false)
         keepScreenOn(false)
+        audio.stopped()
         super.onStop()
     }
 
@@ -300,15 +305,22 @@ class TubePlayerActivity : ComponentActivity() {
         }
     }
 
+    /** 이동 판단 중 예상 못 한 예외가 엔진 콜백 밖으로 나가면 재생 화면 프로세스가 죽는다 — 그때는 막고 기록만 */
+    private fun decide(what: String, d: () -> PlayerNav.Decision): PlayerNav.Decision =
+        runCatching(d).getOrElse {
+            ErrorLog.record("유튜브·앱 안 재생", "$what 판단 실패 (${it.javaClass.simpleName})")
+            PlayerNav.Decision.Block
+        }
+
     private val navigation = object : GeckoSession.NavigationDelegate {
         override fun onLoadRequest(session: GeckoSession, request: GeckoSession.NavigationDelegate.LoadRequest): GeckoResult<AllowOrDeny> =
-            act(PlayerNav.top(request.uri, pageBase, request.hasUserGesture))
+            act(decide("이동") { PlayerNav.top(request.uri, pageBase, request.hasUserGesture) })
 
         override fun onSubframeLoadRequest(session: GeckoSession, request: GeckoSession.NavigationDelegate.LoadRequest): GeckoResult<AllowOrDeny> =
-            if (PlayerNav.frame(request.uri) == PlayerNav.Decision.Allow) GeckoResult.allow() else GeckoResult.deny()
+            if (decide("플레이어 안 이동") { PlayerNav.frame(request.uri) } == PlayerNav.Decision.Allow) GeckoResult.allow() else GeckoResult.deny()
 
         override fun onNewSession(session: GeckoSession, uri: String): GeckoResult<GeckoSession>? {
-            act(PlayerNav.newWindow(uri, pageBase))
+            act(decide("새 창") { PlayerNav.newWindow(uri, pageBase) })
             return null
         }
 
@@ -375,12 +387,32 @@ class TubePlayerActivity : ComponentActivity() {
         }
     }
 
-    /** 재생 중엔 화면을 켜 둔다 (멈추면 놓는다) */
+    /**
+     * 재생 중엔 화면을 켜 두고 오디오 포커스를 받는다 (다른 음악 앱과 같이 나오지 않게, 이어폰이 끊기면 멈추게 — [PlayerAudio]).
+     * 멈추면 둘 다 놓는다
+     */
     private val media = object : MediaSession.Delegate {
-        override fun onPlay(session: GeckoSession, mediaSession: MediaSession) = keepScreenOn(true)
-        override fun onPause(session: GeckoSession, mediaSession: MediaSession) = keepScreenOn(false)
-        override fun onStop(session: GeckoSession, mediaSession: MediaSession) = keepScreenOn(false)
-        override fun onDeactivated(session: GeckoSession, mediaSession: MediaSession) = keepScreenOn(false)
+        override fun onActivated(session: GeckoSession, mediaSession: MediaSession) {
+            mediaNow = mediaSession
+        }
+
+        override fun onPlay(session: GeckoSession, mediaSession: MediaSession) {
+            mediaNow = mediaSession
+            keepScreenOn(true)
+            audio.playing()
+        }
+
+        override fun onPause(session: GeckoSession, mediaSession: MediaSession) = idle()
+        override fun onStop(session: GeckoSession, mediaSession: MediaSession) = idle()
+        override fun onDeactivated(session: GeckoSession, mediaSession: MediaSession) {
+            idle()
+            if (mediaNow === mediaSession) mediaNow = null
+        }
+
+        private fun idle() {
+            keepScreenOn(false)
+            audio.stopped()
+        }
     }
 
     /** 프로세스마다 하나인 엔진 (만들기만 해 두면 다음 재생이 빠르다) */
