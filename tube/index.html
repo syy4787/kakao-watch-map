@@ -13,10 +13,11 @@
 <title>워치 유튜브</title>
 <style>
   /*
-   * 갤럭시워치(둥근 화면)용 유튜브 재생 화면 — 유튜브 뮤직처럼: 검은 바탕, 굵은 흰 제목·회색 채널, 큰 흰 재생 버튼.
-   * 첫 화면 = 유튜브 공식 플레이어(최소 200×200)만 가운데. 베젤을 돌리면 곡 이름·진행·큰 조작 버튼 → 소리·반복 → 다음 곡 → 폰으로.
+   * 갤럭시워치(둥근 화면)용 유튜브 재생 화면: 검은 바탕, 굵은 흰 제목·회색 채널, 큰 흰 재생 버튼.
+   * 첫 화면 = 유튜브 공식 플레이어(최소 200×200)만 가운데. 베젤을 돌리면 제목·진행·큰 조작 버튼 → 소리·반복 → 다음 동영상 → 폰으로.
    * 우리 것은 플레이어 위에 절대 겹치지 않는다 (유튜브 임베드 규칙).
-   * 로그인 없는 무료 플레이어라 프리미엄은 안 된다 — 프리미엄은 워치 앱의 '듣는 곳'(유튜브 뮤직 앱)으로.
+   * 워치 앱 안(GeckoView, app=1)에서도, 워치 인터넷 앱에서도 연다. 로그인 없는 플레이어라 프리미엄은 폰에서.
+   * 무엇을 틀지 (# 뒤): v=처음 동영상 · mix=1 (유튜브 믹스) · ids=다음 동영상들 (앱의 목록 그대로) · list=재생목록 번호
    */
   :root {
     --bg: #000;
@@ -143,7 +144,7 @@
       <p id="stageText"></p>
       <p class="sub" id="stageSub"></p>
       <button id="stageRetry" class="pill accent" type="button" hidden>다시 시도</button>
-      <a id="stageFind" class="pill" href="intent://tube#Intent;scheme=kakaowatch;package=com.mywatch.kakaomap;end" hidden>곡 찾기</a>
+      <a id="stageFind" class="pill" href="intent://tube#Intent;scheme=kakaowatch;package=com.mywatch.kakaomap;end" hidden>동영상 찾기</a>
     </div>
     <svg class="down" viewBox="0 0 18 10" aria-hidden="true"><path d="M2 2l7 6 7-6" stroke="#fff" stroke-width="2" fill="none" stroke-linecap="round"/></svg>
   </div>
@@ -152,9 +153,9 @@
     <p id="title" class="fit">불러오는 중…</p>
     <p id="channel" class="fit"></p>
     <div class="ctl fit">
-      <button id="prev" type="button" aria-label="이전 곡" disabled><svg viewBox="0 0 24 24"><path d="M6 6h2v12H6zm3.5 6 8.5 6V6z"/></svg></button>
+      <button id="prev" type="button" aria-label="이전 동영상" disabled><svg viewBox="0 0 24 24"><path d="M6 6h2v12H6zm3.5 6 8.5 6V6z"/></svg></button>
       <button id="play" type="button" aria-label="재생" disabled><svg viewBox="0 0 24 24"><path id="playIcon" d="M8 5v14l11-7z"/></svg></button>
-      <button id="next" type="button" aria-label="다음 곡" disabled><svg viewBox="0 0 24 24"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg></button>
+      <button id="next" type="button" aria-label="다음 동영상" disabled><svg viewBox="0 0 24 24"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg></button>
     </div>
     <div class="prog fit" id="prog" hidden>
       <div class="bar"><i id="fill"></i></div>
@@ -170,27 +171,29 @@
     <button id="volUp" type="button" aria-label="소리 크게" disabled><svg viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3A4.5 4.5 0 0 0 14 7.97v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg></button>
    </div>
    <div class="row fit">
-    <button id="repeat" type="button" aria-label="한 곡 반복" aria-pressed="false"><svg viewBox="0 0 24 24"><path d="M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v4zm-4-2V9h-1l-2 1v1h1.5v4H13z"/></svg></button>
+    <button id="repeat" type="button" aria-label="반복 재생" aria-pressed="false"><svg viewBox="0 0 24 24"><path d="M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v4zm-4-2V9h-1l-2 1v1h1.5v4H13z"/></svg></button>
     <button id="sleep" type="button" aria-label="잠자기 타이머 꺼짐" aria-pressed="false"><svg viewBox="0 0 24 24"><path d="M15 1H9v2h6V1zm-4 13h2V8h-2v6zm8.03-6.61 1.42-1.42c-.43-.51-.9-.99-1.41-1.41l-1.42 1.42A8.96 8.96 0 0 0 12 4c-4.97 0-9 4.03-9 9s4.02 9 9 9a8.994 8.994 0 0 0 7.03-14.61zM12 20c-3.87 0-7-3.13-7-7s3.13-7 7-7 7 3.13 7 7-3.13 7-7 7z"/></svg><span id="sleepTxt"></span></button>
    </div>
   </div>
 
   <section class="next" id="upnext" hidden>
-    <h2>다음 곡</h2>
+    <h2>다음 동영상</h2>
     <ol id="list"></ol>
   </section>
 
   <div class="tail">
-    <button id="toPhone" class="pill fit" type="button" disabled><svg viewBox="0 0 24 24"><path d="M17 1.01 7 1c-1.1 0-2 .9-2 2v18c0 1.1.9 2 2 2h10c1.1 0 2-.9 2-2V3c0-1.1-.9-1.99-2-1.99zM17 19H7V5h10v14z"/></svg>폰에서 이어 듣기</button>
-    <a id="back" class="pill fit" href="intent://tube#Intent;scheme=kakaowatch;package=com.mywatch.kakaomap;end"><svg viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>다른 곡 찾기</a>
-    <p class="fit">로그인 없는 무료 유튜브 플레이어예요. 화면이 켜져 있는 동안 나오고, 꺼지면 멈춰요.</p>
-    <p class="fit">프리미엄(광고 없이·화면 꺼져도)은 워치 앱의 ‘듣는 곳’을 유튜브 뮤직으로 바꾸거나 ‘폰에서 이어 듣기’로 들어요.</p>
+    <button id="toPhone" class="pill fit" type="button" disabled><svg viewBox="0 0 24 24"><path d="M17 1.01 7 1c-1.1 0-2 .9-2 2v18c0 1.1.9 2 2 2h10c1.1 0 2-.9 2-2V3c0-1.1-.9-1.99-2-1.99zM17 19H7V5h10v14z"/></svg>폰에서 이어 보기</button>
+    <a id="back" class="pill fit" href="intent://tube#Intent;scheme=kakaowatch;package=com.mywatch.kakaomap;end"><svg viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg><span id="backText">다른 동영상 찾기</span></a>
+    <p class="fit">로그인 없는 유튜브 플레이어예요. 화면이 켜져 있는 동안 나오고, 꺼지면 멈춰요.</p>
+    <p class="fit">광고 없이·화면이 꺼져도 보려면(유튜브 프리미엄) ‘폰에서 이어 보기’를 눌러요.</p>
   </div>
 
 <script>
 (function () {
   'use strict';
   var ID = /^[A-Za-z0-9_-]{11}$/;
+  var LIST = /^[A-Za-z0-9_-]{2,64}$/;   // 재생목록 번호 (PL…·UU…·OLAK5uy_… 등)
+  var MAX_IDS = 50;                     // 앱이 넘기는 목록은 처음 동영상까지 50개
   var APP = 'com.mywatch.kakaomap';
   var PLAY_D = 'M8 5v14l11-7z';
   var PAUSE_D = 'M6 19h4V5H6v14zm8-14v14h4V5h-4z';
@@ -214,8 +217,8 @@
     2: '영상 주소가 잘못됐어요',
     5: '이 워치 브라우저에서 틀 수 없는 영상이에요',
     100: '지워졌거나 비공개인 영상이에요',
-    101: '이 곡은 올린 사람이 다른 곳 재생을 막아 둬서 못 틀어요',
-    150: '이 곡은 올린 사람이 다른 곳 재생을 막아 둬서 못 틀어요'
+    101: '올린 사람이 다른 곳 재생을 막아 둔 동영상이에요',
+    150: '올린 사람이 다른 곳 재생을 막아 둔 동영상이에요'
   };
   var S = { UNSTARTED: -1, ENDED: 0, PLAYING: 1, PAUSED: 2, BUFFERING: 3, CUED: 5 };
 
@@ -270,7 +273,22 @@
     var v = q.get('v');
     if (!v || !ID.test(v)) return null;
     var n = parseInt(q.get('n') || '', 10);
-    return { v: v, mix: q.get('mix') === '1', t: clean(q.get('t'), 100), c: clean(q.get('c'), 40), n: n > 0 ? n : 0 };
+    // 앱의 목록: 처음 동영상(v) 다음에 틀 것들 — 이상한 번호·같은 번호는 빼고 v 까지 50개
+    var ids = [];
+    (q.get('ids') || '').split(',').forEach(function (x) {
+      if (ID.test(x) && x !== v && ids.indexOf(x) < 0 && ids.length < MAX_IDS - 1) ids.push(x);
+    });
+    var list = q.get('list');
+    if (!list || !LIST.test(list)) list = null;   // 이상한 재생목록 번호는 무시
+    var mode = list ? 'list' : (ids.length ? 'ids' : (q.get('mix') === '1' ? 'mix' : 'single'));
+    return {
+      v: v, mode: mode, mix: mode === 'mix', ids: mode === 'ids' ? ids : [], list: mode === 'list' ? list : null,
+      t: clean(q.get('t'), 100), c: clean(q.get('c'), 40), n: n > 0 ? n : 0, app: q.get('app') === '1'
+    };
+  }
+  // 워치 앱으로 가는 링크: 앱 안(GeckoView)에선 kakaowatch:// 를 앱이 받고, 인터넷 앱에선 intent:// 로 앱을 연다
+  function appLink(path, app) {
+    return app ? 'kakaowatch://' + path : 'intent://' + path + '#Intent;scheme=kakaowatch;package=' + APP + ';end';
   }
   // 방금 앱에서 고른 곡인지: 고른 시각(n)이 최근이고, 이 화면이 받은 것 중 가장 새로움.
   // 뒤로 가기로 예전 곡 주소가 다시 오거나, 며칠 뒤 인터넷 앱을 열어 탭이 되살아나면 저절로 틀지 않는다
@@ -437,8 +455,8 @@
     var ids = playlist(), at = index();
     $('play').disabled = !ready;
     $('prev').disabled = !ready;
-    // 목록 끝에서 ⏭ 는 비슷한 곡 믹스로 이어 간다
-    $('next').disabled = !ready || !(ids.length > 1 && at >= 0);
+    // 믹스는 목록 끝에서 ⏭ 로 비슷한 동영상 믹스를 이어 간다. 앱의 목록·재생목록은 끝에서 멈춘다
+    $('next').disabled = !ready || !(ids.length > 1 && at >= 0 && (at < ids.length - 1 || isMix()));
     $('volDown').disabled = !ready;
     $('volUp').disabled = !ready;
     $('repeat').setAttribute('aria-pressed', repeat ? 'true' : 'false');
@@ -499,7 +517,7 @@
         todo.forEach(function (w) { w.run(); });
       } else if (Date.now() - started > 1500) {
         dropWaiters();
-        if (cur && cur.resume) status('▶ 를 눌러 이어 들어요', 'info');
+        if (cur && cur.resume) status('▶ 를 눌러 이어서 재생해요', 'info');
       }
     }, 80);
   }
@@ -526,6 +544,7 @@
     }
     return cur && cur.p ? cur.p.v : null;
   }
+  function isMix() { return !!(cur && cur.p && cur.p.mode === 'mix'); }
   function playlist() {
     if (!cur || !cur.ready || !player) return [];
     try { return player.getPlaylist() || []; } catch (e) { return []; }
@@ -587,10 +606,10 @@
       img.addEventListener('error', function () { img.removeAttribute('src'); });
       var t = document.createElement('span');
       t.className = 't fit';
-      t.textContent = titles[id] ? titles[id].title : '다음 곡 ' + (k + 1);
+      t.textContent = titles[id] ? titles[id].title : '다음 동영상 ' + (k + 1);
       b.appendChild(img);
       b.appendChild(t);
-      b.setAttribute('aria-label', (titles[id] ? titles[id].title : '다음 곡 ' + (k + 1)) + ' 재생');
+      b.setAttribute('aria-label', (titles[id] ? titles[id].title : '다음 동영상 ' + (k + 1)) + ' 재생');
       b.addEventListener('click', function () {
         if (!cur) return;
         userChoice();
@@ -686,7 +705,7 @@
     timers.hint = setTimeout(function () {
       // 브라우저가 소리 자동 재생을 막았거나(그대로 멈춰 있음) 예전 주소라 저절로 안 틀면 → 플레이어 가운데 ▶ 로 시작
       if (my === session && cur && cur.ready && !cur.started && (cur.state === null || cur.state === S.UNSTARTED || cur.state === S.CUED) && !$('status').textContent) {
-        status(document.visibilityState === 'visible' ? '플레이어 가운데 ▶ 를 눌러 시작하세요' : '▶ 를 눌러 들어요', 'info');
+        status(document.visibilityState === 'visible' ? '플레이어 가운데 ▶ 를 눌러 시작하세요' : '▶ 를 눌러 재생해요', 'info');
       }
     }, 2500);
   }
@@ -699,8 +718,8 @@
     timers.slow = 0;
     bridge(false);
     if (cur.playing && cur.state !== S.PLAYING) setPlaying(false);
-    if (!cur.started) status(document.visibilityState === 'visible' ? '플레이어 가운데 ▶ 를 눌러 시작하세요' : '▶ 를 눌러 들어요', 'info');
-    else status('▶ 를 눌러 이어 들어요', 'info');
+    if (!cur.started) status(document.visibilityState === 'visible' ? '플레이어 가운데 ▶ 를 눌러 시작하세요' : '▶ 를 눌러 재생해요', 'info');
+    else status('▶ 를 눌러 이어서 재생해요', 'info');
   }
 
   function armSlow() {
@@ -715,7 +734,7 @@
       clearTimeout(timers.bridge);
       timers.bridge = 0;
       setPlaying(false);
-      status(navigator.onLine === false ? '인터넷 연결이 끊겼어요' : (loading ? '인터넷이 느려서 불러오는 중이에요…' : '▶ 를 눌러 이어 들어요'), 'info');
+      status(navigator.onLine === false ? '인터넷 연결이 끊겼어요' : (loading ? '인터넷이 느려서 불러오는 중이에요…' : '▶ 를 눌러 이어서 재생해요'), 'info');
     }, SLOW_MS);
   }
 
@@ -772,6 +791,7 @@
         return;
       }
       cur.started = true;
+      cur.listDone = false;
       cur.userJump = false;
       cur.hiddenPause = false;
       cur.autoStart = false;
@@ -810,12 +830,13 @@
           if (ids.length > 1 && idx >= 0) player.playVideoAt(idx);
           else { player.seekTo(0, true); player.playVideo(); }
         }, true);
-      } else if (ids.length > 1 && idx >= ids.length - 1) {
+      } else if (ids.length > 1 && idx >= ids.length - 1 && isMix()) {
         continueMix(false);
         setPlaying(false);
       } else {
         setPlaying(false);
-        if (ids.length <= 1) status('끝났어요 · ▶ 를 누르면 다시 들어요', 'info');
+        if (ids.length > 1 && idx >= ids.length - 1) { cur.listDone = true; status('목록이 끝났어요 · ▶ 를 누르면 처음부터', 'info'); }
+        else if (ids.length <= 1) status('끝났어요 · ▶ 를 누르면 처음부터', 'info');
       }
     } else if (s === S.BUFFERING) {
       armSlow();
@@ -833,7 +854,7 @@
         cur.shownIndex = -1;
         if (!list.length) {
           bridge(false);
-          status('비슷한 곡을 못 찾았어요 · 다른 곡을 찾아 보세요', 'info');
+          status('비슷한 동영상을 못 찾았어요 · 다른 동영상을 찾아 보세요', 'info');
         } else {
           whenVisible(function () { bridge(true); player.playVideoAt(start); }, true);
         }
@@ -861,17 +882,17 @@
       endContinue();
       bridge(false);
       setPlaying(false);
-      status('비슷한 곡을 못 찾았어요 · 다른 곡을 찾아 보세요', 'info');
+      status('비슷한 동영상을 못 찾았어요 · 다른 동영상을 찾아 보세요', 'info');
       refreshButtons();
       return;
     }
     // 믹스 설정 때문에 열리지 않은 듯하면(설정값 오류) 이 곡만으로 한 번 더. 곡 자체가 막힌 경우(100·101·150)는 그대로 알린다
-    if (cur.p && cur.p.mix && !cur.triedSingle && ids.length === 0 && (code === 2 || code === 5)) {
+    if (isMix() && !cur.triedSingle && ids.length === 0 && (code === 2 || code === 5)) {
       var p0 = cur.p, f0 = cur.fresh && !held, my = session;
       cur.triedSingle = true;
       // 플레이어 자신의 알림 안에서 그 플레이어를 없애지 않게 다음 차례에
       setTimeout(function () {
-        if (my === session) load({ v: p0.v, mix: false, t: p0.t, c: p0.c, n: p0.n }, { triedSingle: true, fresh: f0, note: '믹스를 못 불러와서 이 곡만 틀어요' });
+        if (my === session) load({ v: p0.v, mode: 'single', mix: false, ids: [], list: null, t: p0.t, c: p0.c, n: p0.n, app: p0.app }, { triedSingle: true, fresh: f0, note: '믹스를 못 불러와서 이 동영상만 틀어요' });
       }, 0);
       return;
     }
@@ -884,18 +905,18 @@
     } else if (cur.errorsInRow >= MAX_ERRORS) {
       bridge(false);
       setPlaying(false);
-      status('막힌 곡이 많아서 멈췄어요 · ⏭ 로 넘기거나 다른 곡을 찾아 보세요');
-    } else if (ids.length > 1 && at >= 0) {
-      // 다음 곡으로 (목록 끝이면 비슷한 곡 믹스로) — 그동안 화면을 켜 둔다
+      status('못 트는 동영상이 많아서 멈췄어요 · ⏭ 로 넘기거나 다른 동영상을 찾아 보세요');
+    } else if (ids.length > 1 && at >= 0 && (at < ids.length - 1 || isMix())) {
+      // 다음 동영상으로 (믹스의 끝이면 비슷한 동영상 믹스로) — 그동안 화면을 켜 둔다
       bridge(true);
       setPlaying(false);
-      status(msg + (at < ids.length - 1 ? ' · 다음 곡으로 넘어가요' : ' · 비슷한 곡을 이어서 찾아요'));
+      status(msg + (at < ids.length - 1 ? ' · 다음 동영상으로 넘어가요' : ' · 비슷한 동영상을 이어서 찾아요'));
       clearTimeout(timers.skip);
       timers.skip = setTimeout(function () { timers.skip = 0; skipBlocked(); }, SKIP_MS);
     } else {
       bridge(false);
       setPlaying(false);
-      status(msg);
+      status(msg + (ids.length > 1 && at >= ids.length - 1 ? ' · 목록이 끝났어요' : ''));
     }
     refreshButtons();
   }
@@ -906,7 +927,7 @@
     var ids = playlist(), at = index();
     cur.userJump = true;
     if (ids.length > 1 && at >= 0 && at < ids.length - 1) whenVisible(function () { status(''); bridge(true); player.nextVideo(); }, true);
-    else if (ids.length > 1) continueMix(false);
+    else if (ids.length > 1 && isMix()) continueMix(false);
   }
 
   // 믹스 끝(또는 끝에서 ⏭): 마지막으로 들은 곡으로 새 믹스를 받아 이어서 (같은 플레이어 — 받은 뒤 방금 들은 곡이 아닌 곡부터)
@@ -917,7 +938,7 @@
     var last = cur.lastId || currentId();
     if (!last || cur.continued >= 2) {
       bridge(false);
-      status('믹스를 다 들었어요 · 다른 곡을 찾아 보세요', 'info');
+      status('믹스가 끝났어요 · 다른 동영상을 찾아 보세요', 'info');
       return;
     }
     if (document.visibilityState !== 'visible') { later(function () { continueMix(true); }); return; }
@@ -925,7 +946,7 @@
     cur.continuing = last;
     cur.userJump = true;
     bridge(true);
-    status(byUser ? '비슷한 곡을 이어서 틀어요' : '믹스를 다 들었어요 · 비슷한 곡을 이어서 틀어요', 'info', true);
+    status(byUser ? '비슷한 동영상을 이어서 틀어요' : '믹스가 끝났어요 · 비슷한 동영상을 이어서 틀어요', 'info', true);
     var my = session;
     clearTimeout(timers.cont);
     timers.cont = setTimeout(function () {   // 비슷한 곡 목록이 끝내 안 옴
@@ -933,7 +954,7 @@
       if (my !== session || !cur || !cur.continuing) return;
       endContinue();
       bridge(false);
-      status('비슷한 곡을 못 찾았어요 · 다른 곡을 찾아 보세요', 'info');
+      status('비슷한 동영상을 못 찾았어요 · 다른 동영상을 찾아 보세요', 'info');
       refreshButtons();
     }, SLOW_MS);
     try { player.cuePlaylist({ list: 'RD' + last, listType: 'playlist', index: 0 }); } catch (e) { endContinue(); bridge(false); report(e); }
@@ -1002,9 +1023,9 @@
     window.scrollTo(0, 0);
     if (!p) {
       cur = null;
-      setNow('들을 곡이 없어요', '');
-      status('워치 앱 ‘유튜브 음악’에서 곡을 고르면 여기서 재생돼요', 'info');
-      stageMsg('들을 곡이 없어요', '워치 앱에서 곡을 골라 주세요', false, true);
+      setNow('볼 동영상이 없어요', '');
+      status('워치 앱 ‘유튜브’에서 고른 동영상이 여기서 재생돼요', 'info');
+      stageMsg('볼 동영상이 없어요', '워치 앱에서 동영상을 골라 주세요', false, true);
       refreshButtons();
       return;
     }
@@ -1023,8 +1044,12 @@
       iv_load_policy: 3,
       origin: location.origin
     };
-    // 믹스: 이 곡으로 시작해 유튜브가 비슷한 곡을 이어 주는 재생목록
-    if (p.mix) vars.list = 'RD' + p.v;
+    // 믹스: 이 동영상으로 시작해 유튜브가 비슷한 동영상을 이어 주는 재생목록
+    if (p.mode === 'mix') vars.list = 'RD' + p.v;
+    // 앱의 목록: 실제 플레이어는 playlist 가 있으면 videoId 를 무시하고 이 목록만 튼다(2026-10 확인) → 처음 동영상을 맨 앞에
+    else if (p.mode === 'ids') vars.playlist = [p.v].concat(p.ids).join(',');
+    // 재생목록: videoId 가 목록에 있으면 그 자리부터 (실제 확인)
+    else if (p.mode === 'list') { vars.list = p.list; vars.listType = 'playlist'; }
     var me = null;
     try {
       me = player = new YT.Player('player', {
@@ -1095,15 +1120,20 @@
     if (cur.playing) { cur.hiddenPause = false; stopAll(); return; }
     cur.hiddenPause = false;
     cur.autoStart = false;
-    if (cur.continuing) { status('비슷한 곡을 찾는 중이에요…', 'info'); return; }
+    if (cur.continuing) { status('비슷한 동영상을 찾는 중이에요…', 'info'); return; }
     if (cur.errorsInRow >= MAX_ERRORS) cur.errorsInRow = 0;
     status('');
     dropWaiters();   // 보이면 하려던 일(저절로 넘어가기)이 있으면 아래에서 그것을 이어서
     // 막힌 곡을 건너뛰려던 중·화면이 꺼져 못 한 일이 있으면 그것부터 (막힌 곡을 다시 틀지 않게)
     if (timers.skip) { clearTimeout(timers.skip); timers.skip = 0; skipBlocked(); return; }
     if (cur.resume) { var r = cur.resume; cur.resume = null; whenVisible(r); return; }
-    if (cur.blockedIdx >= 0 && index() === cur.blockedIdx && playlist().length > 1) { skipBlocked(); return; }
+    if (cur.blockedIdx >= 0 && index() === cur.blockedIdx && playlist().length > 1) {
+      if (index() >= playlist().length - 1 && !isMix()) whenVisible(function () { bridge(true); player.playVideoAt(0); });
+      else skipBlocked();
+      return;
+    }
     whenVisible(function () {
+      if (cur.state === S.ENDED && cur.listDone && playlist().length > 1) { cur.listDone = false; bridge(true); player.playVideoAt(0); return; }
       if (cur.state === S.ENDED && playlist().length <= 1) player.seekTo(0, true);
       player.playVideo();
     });
@@ -1121,7 +1151,7 @@
     if (!cur || !cur.ready) return;
     userChoice();
     var ids = playlist();
-    if (ids.length > 1 && index() === ids.length - 1) { continueMix(true); return; }   // 목록 끝 → 비슷한 곡 믹스
+    if (ids.length > 1 && index() === ids.length - 1) { if (isMix()) continueMix(true); return; }   // 믹스 끝 → 비슷한 동영상 믹스
     whenVisible(function () { bridge(true); player.nextVideo(); });
   });
   function changeVolume(d) {
@@ -1141,7 +1171,7 @@
     repeat = !repeat;
     saveRepeat();
     refreshButtons();
-    flash(repeat ? '한 곡 반복 켬' : '한 곡 반복 끔');
+    flash(repeat ? '반복 재생 켬' : '반복 재생 끔');
   });
   // 폰에서 이어 듣기: 워치 앱에 '폰 유튜브에서 이 곡을 이 시각부터' 를 맡긴다 (앱이 한 번 더 묻고 연다)
   $('toPhone').addEventListener('click', function () {
@@ -1151,11 +1181,10 @@
     if (cur.ready && player) { try { t = Math.floor(player.getCurrentTime() || 0); } catch (e) {} }
     stopAll();
     var ti = titles[id] || (id === cur.p.v ? { title: cur.p.t, author: cur.p.c } : {});
-    var url = 'intent://tube/phone?v=' + id + '&t=' + t + (cur.p.mix ? '&mix=1' : '') +
+    var path = 'tube/phone?v=' + id + '&t=' + t + (cur.p.mix ? '&mix=1' : '') + (cur.p.list ? '&list=' + cur.p.list : '') +
       (ti.title ? '&title=' + encodeURIComponent(clean(ti.title, 100)) : '') +
-      (ti.author ? '&channel=' + encodeURIComponent(clean(ti.author, 40)) : '') +
-      '#Intent;scheme=kakaowatch;package=' + APP + ';end';
-    navigate(url);
+      (ti.author ? '&channel=' + encodeURIComponent(clean(ti.author, 40)) : '');
+    navigate(appLink(path, cur.p.app));
   });
   // 잠자기 타이머: 정한 시간이 지나면 멈춘다 (곡을 바꿔도 이어짐). 화면이 켜진 채 오래 틀어 두지 않게
   function setSleep(min) {
@@ -1226,7 +1255,7 @@
         // 화면이 꺼졌거나 다른 앱으로 가서 멈춤 — 돌아와도 저절로 틀지 않는다
         cur.hiddenPause = false;
         cur.autoStart = false;
-        status('멈췄어요 · ▶ 로 이어 들어요', 'info');
+        status('멈췄어요 · ▶ 로 이어서 재생해요', 'info');
       }
       if (cur.hold) holdIdle();   // 멈춤이 먹혔는지는 켜진 뒤부터 센다
       armReady();
@@ -1243,14 +1272,22 @@
   window.addEventListener('online', function () {
     if (apiDead) { location.reload(); return; }   // 유튜브 스크립트를 못 받았던 화면 → 새로
     if (cur && cur.failed) { load(cur.p, { fresh: autoStartOk() }); return; }   // 못 불러온 플레이어 → 다시
-    if (cur && cur.ready && !cur.playing) status('다시 연결됐어요 · ▶ 로 이어 들어요', 'info');
+    if (cur && cur.ready && !cur.playing) status('다시 연결됐어요 · ▶ 로 이어서 재생해요', 'info');
     else status('');
   });
   // 워치 앱에서 다른 곡을 고르면 같은 탭의 주소(#…)만 바뀐다 (같은 곡이어도 n= 이 달라 바뀜).
   // 뒤로 가기로 예전 곡 주소가 와도 바뀌는데, 그건 저절로 틀지 않는다 (freshPick)
   window.addEventListener('hashchange', function () {
-    if (apiReady) load(params());
+    var p = params();
+    setApp(!!(p && p.app));
+    if (apiReady) load(p);
   });
+  // 워치 앱 안(GeckoView)에서 열었으면 아래 링크는 앱의 목록으로 돌아간다
+  function setApp(app) {
+    $('back').setAttribute('href', appLink('tube', app));
+    $('backText').textContent = app ? '목록으로' : '다른 동영상 찾기';
+    $('stageFind').setAttribute('href', appLink('tube', app));
+  }
 
   window.onYouTubeIframeAPIReady = function () {
     apiReady = true;
@@ -1264,7 +1301,9 @@
   window.addEventListener('load', fitSoon);
   window.addEventListener('pageshow', fitSoon);
   $('repeat').setAttribute('aria-pressed', repeat ? 'true' : 'false');
-  if (!params()) { setNow('들을 곡이 없어요', ''); stageMsg('들을 곡이 없어요', '워치 앱에서 곡을 골라 주세요', false, true); }
+  var first = params();
+  if (!first) { setNow('볼 동영상이 없어요', ''); stageMsg('볼 동영상이 없어요', '워치 앱에서 동영상을 골라 주세요', false, true); }
+  setApp(!!(first && first.app));
   fitSoon();
   var s = document.createElement('script');
   s.src = 'https://www.youtube.com/iframe_api';
