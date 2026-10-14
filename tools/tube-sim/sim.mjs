@@ -253,7 +253,15 @@ const A = {
   // 화면이 꺼진 동안: 플레이어(iframe)는 얼고, 페이지 시계는 한꺼번에 흘러 밀린 타이머가 깨어날 때 한 번씩 돈다
   async freeze(page) { await page.evaluate(() => window.__fakeYT && window.__fakeYT.freeze()); },
   async thaw(page) { await page.evaluate(() => window.__fakeYT && window.__fakeYT.thaw()); },
-  async ff(page, ms) { await page.clock.fastForward(ms); },
+  // 시계를 멈춘 채 건너뛴다 — 흐르는 시계를 그대로 건너뛰면 Playwright 시계의 실시간 따라잡기와 겹쳐
+  // 시계가 거꾸로 돌아가는 수가 있다(그러면 그 사이 걸어 둔 rAF 가 한참 안 돎 — 진짜 브라우저엔 없는 일)
+  async ff(page, ms) {
+    const now = await page.evaluate(() => Date.now());
+    await page.clock.pauseAt(now + 1000);   // (조금 앞으로 — 읽은 뒤에도 시계가 흘러서)
+    await page.waitForTimeout(30);   // 이미 돌던 따라잡기가 끝나게
+    await page.clock.fastForward(ms);
+    await page.clock.resume();
+  },
   // 손목을 내렸다 올림 (얼었다 깨어남): showFirst 면 화면이 먼저 켜지고 플레이어가 나중에 깨어남
   async lid(page, [ms, showFirst]) {
     await A.hide(page); await A.freeze(page); await A.ff(page, ms);
