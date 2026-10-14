@@ -26,6 +26,7 @@ import com.mywatch.kakaomap.model.RouteChoice
 import com.mywatch.kakaomap.model.RouteChoices
 import com.mywatch.kakaomap.model.RouteOption
 import com.mywatch.kakaomap.model.RouteStatusException
+import com.mywatch.kakaomap.model.TimetableRefresh
 import com.mywatch.kakaomap.model.TransitFilter
 import com.mywatch.kakaomap.model.TransitGuide
 import com.mywatch.kakaomap.model.TransitOptions
@@ -93,6 +94,8 @@ class DirectionsActivity : ComponentActivity() {
     private var intercityJob: Job? = null
     /** 대중교통을 마지막으로 찾기 시작한 시각 (지난 편 때문에 다시 찾는 것은 5분에 한 번까지) */
     private var transitFetchedAt = 0L
+    /** 기차·버스 시간표 경로가 지나갈 때 언제 다시 찾을지 */
+    private val timetable = TimetableRefresh()
     private var ambient: AmbientCover? = null
 
     /** 위치 권한 창을 띄운 시각 — 곧바로 거절이 오면 시스템이 창을 안 띄운 것(두 번 거절해 막힘) */
@@ -119,6 +122,7 @@ class DirectionsActivity : ComponentActivity() {
             return
         }
         dest = d
+        timetable.restore(savedInstanceState?.getBoolean(STATE_TIMETABLE_DUE) == true)
         val prefs = prefs()
         mode = runCatching { TravelMode.valueOf(prefs.getString(KEY_MODE, null) ?: "") }.getOrDefault(TravelMode.TRANSIT)
         // 정렬은 검색마다 최소시간으로 시작한다 (카카오맵처럼 가장 빠른 길이 맨 위). 예전엔 고른 정렬을 기억해서,
@@ -165,6 +169,7 @@ class DirectionsActivity : ComponentActivity() {
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
         if (::dest.isInitialized) outState.putString(STATE_DEST, PlaceJson.toJson(dest).toString())
+        outState.putBoolean(STATE_TIMETABLE_DUE, timetable.due)
     }
 
     override fun onResume() {
@@ -309,6 +314,7 @@ class DirectionsActivity : ComponentActivity() {
     private fun fetchTransit(from: Coord): Job = lifecycleScope.launch {
         val m = TravelMode.TRANSIT
         transitFetchedAt = System.currentTimeMillis()
+        timetable.reset()
         // 시간표 찾기는 이 작업과 따로 돌린다 — 막힌 연결이 끝나기를 기다리지 않고 제한 시간에 바로 넘어가려고
         val longRides = if (far(from) && TagoApi.isConfigured) {
             lifecycleScope.async(Dispatchers.IO) {
@@ -387,25 +393,26 @@ class DirectionsActivity : ComponentActivity() {
      */
     private fun refreshTimetableRoutes() {
         val routes = RouteRepository.transitRoutes ?: return
-        if (routes.none { it.arriveAtMs != null }) return
+        // 시간표 경로가 하나도 없어도, 다 지나가 다시 찾기를 기다리는 중이면 계속 본다
+        if (routes.none { it.arriveAtMs != null } && !timetable.due) return
         val from = origin ?: return
         if (fetches[TravelMode.TRANSIT]?.isActive == true) return
-        val now = System.currentTimeMillis()
-        val (kept, ranOut) = TransitOptions.dropExpired(routes, now)
-        if (kept.size != routes.size) {
-            if (ranOut && (kept.isEmpty() || now - transitFetchedAt >= REFETCH_GAP_MS)) {
+        when (val next = timetable.tick(routes, System.currentTimeMillis(), transitFetchedAt)) {
+            TimetableRefresh.Do.Refetch -> {
                 // 열차(또는 고속·시외버스) 편이 다 지나감 → 다음 편을 다시 찾는다 (5분에 한 번까지)
                 RouteRepository.transitRoutes = null
                 RouteRepository.transitNote = null
                 liveTexts.clear()
                 errors.remove(TravelMode.TRANSIT)
                 fetch(TravelMode.TRANSIT, from)
-            } else {
+            }
+            is TimetableRefresh.Do.Keep -> {
                 // 지난 편만 빼고 그대로 (번호가 바뀌므로 실시간 버스는 새로)
-                RouteRepository.transitRoutes = kept
+                RouteRepository.transitRoutes = next.routes
                 liveTexts.clear()
                 if (mode == TravelMode.TRANSIT) fetchLiveArrivals()
             }
+            TimetableRefresh.Do.Nothing -> Unit
         }
         if (mode == TravelMode.TRANSIT) render() else refreshTabs()
     }
@@ -659,7 +666,6 @@ class DirectionsActivity : ComponentActivity() {
         private const val MINUTE_MS = 60_000L
         /** 목록을 보는 동안 실시간 버스 도착을 새로 받는 간격 */
         private const val LIVE_REFRESH_MS = 45_000L
-        private const val REFETCH_GAP_MS = 5 * 60_000L
         /** 기차·버스 시간표를 이만큼 기다려도 안 오면 시내 대중교통 결과만 */
         private const val INTERCITY_TIMEOUT_MS = 20_000L
         private val SIMPLE_MODES = listOf(TravelMode.WALK, TravelMode.BIKE)
@@ -667,6 +673,7 @@ class DirectionsActivity : ComponentActivity() {
         private fun optionKey(m: TravelMode) = "option_${m.name}"
 
         private const val STATE_DEST = "destination"
+        private const val STATE_TIMETABLE_DUE = "timetable_due"
 
         fun intent(context: Context) = Intent(context, DirectionsActivity::class.java)
 

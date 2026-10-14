@@ -11,6 +11,7 @@ import com.mywatch.kakaomap.model.Place
 import com.mywatch.kakaomap.model.ScheduledRun
 import com.mywatch.kakaomap.model.StationPair
 import com.mywatch.kakaomap.model.TimetableFill
+import com.mywatch.kakaomap.model.TimetableRefresh
 import com.mywatch.kakaomap.model.TransitFilter
 import com.mywatch.kakaomap.model.TransitGuide
 import com.mywatch.kakaomap.model.TransitOptions
@@ -318,6 +319,51 @@ class IntercityRoutesTest {
             assertEquals(all, kept)
             assertFalse(ranOut)
         }
+    }
+
+    /**
+     * 점검에서 찾은 오류(A1): 찾은 지 5분 안에 열차가 다 지나가면 지난 편만 빼 두는데, 빼 둔 목록에는 열차가 없어
+     * '다 지나감'이 다시 보이지 않았고 시간표 경로가 하나도 없으니 확인 자체를 그만둬서 — 목적지를 다시 고를 때까지 열차가 안 나왔다
+     */
+    @Test
+    fun aKindThatRanOutJustAfterAFetchComesBackOnceTheGapPasses() {
+        val trains = IntercityItineraries.build(at(9, 25), cityHall, seoulCityHall, listOf(trainPair(listOf(run("105", "KTX", 9, 58, 10, 51)))))
+        val city = TransitRoute("BUS", 1, 600, 0, null, listOf(TransitStep(TransitStepType.BUS, "", 1, 1, emptyList(), listOf(Vehicle("간선", "102")), emptyList())))
+        val refresh = TimetableRefresh()
+        val fetchedAt = at(9, 30)
+        // 9:34: 105(9:33 까지 나가야 함)가 지나감 — 찾은 지 4분이라 지난 편만 빼 두고, 다시 찾을 일은 기억한다
+        val kept = (refresh.tick(listOf(city) + trains, at(9, 34), fetchedAt) as TimetableRefresh.Do.Keep).routes
+        assertEquals(listOf(city), kept)
+        assertTrue(refresh.due)
+        assertEquals(TimetableRefresh.Do.Nothing, refresh.tick(kept, at(9, 34) + 30_000, fetchedAt))
+        // 9:35: 5분이 지남 → 다음 열차를 찾는다 (한 번만)
+        assertEquals(TimetableRefresh.Do.Refetch, refresh.tick(kept, at(9, 35), fetchedAt))
+        assertFalse(refresh.due)
+        assertEquals(TimetableRefresh.Do.Nothing, refresh.tick(kept, at(9, 36), at(9, 35)))
+    }
+
+    @Test
+    fun aPassingRunIsJustDroppedAndEverythingGoneIsFetchedAtOnce() {
+        val runs = listOf(run("105", "KTX", 9, 58, 10, 51), run("107", "KTX", 10, 12, 11, 5))
+        val trains = IntercityItineraries.build(at(9, 25), cityHall, seoulCityHall, listOf(trainPair(runs)))
+        val refresh = TimetableRefresh()
+        // 9:40: 105 만 지나감 (107 이 남음) → 빼기만
+        assertEquals(TimetableRefresh.Do.Keep(listOf(trains[1])), refresh.tick(trains, at(9, 40), at(9, 38)))
+        assertFalse(refresh.due)
+        // 9:50: 남은 경로가 하나도 없음 → 5분 안이어도 바로
+        assertEquals(TimetableRefresh.Do.Refetch, refresh.tick(listOf(trains[1]), at(9, 50), at(9, 48)))
+    }
+
+    @Test
+    fun aFreshSearchForgetsAPendingRefetch() {
+        val trains = IntercityItineraries.build(at(9, 25), cityHall, seoulCityHall, listOf(trainPair(listOf(run("105", "KTX", 9, 58, 10, 51)))))
+        val city = TransitRoute("BUS", 1, 600, 0, null, listOf(TransitStep(TransitStepType.BUS, "", 1, 1, emptyList(), listOf(Vehicle("간선", "102")), emptyList())))
+        val refresh = TimetableRefresh()
+        refresh.tick(listOf(city) + trains, at(9, 34), at(9, 33))
+        assertTrue(refresh.due)
+        refresh.reset()   // 출발지가 바뀌어 처음부터 찾음
+        assertFalse(refresh.due)
+        assertEquals(TimetableRefresh.Do.Nothing, refresh.tick(listOf(city), at(9, 40), at(9, 34)))
     }
 
     // ───────── 안내 중 다시 찾기 ─────────
