@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 앱 안 유튜브 재생: 브라우저 엔진(GeckoView)이 재생 화면(web/tube)을 연다. 우리 것은 플레이어 위에 겹치지 않는다 —
+     안내(못 불러옴)는 재생 화면이 없을 때만 보인다 -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@android:color/black">
+
+    <!-- 엔진(GeckoView)은 띄울 수 있을 때만 코드로 넣는다 -->
+    <FrameLayout
+        android:id="@+id/player_host"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
+
+    <LinearLayout
+        android:id="@+id/player_error"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@android:color/black"
+        android:gravity="center"
+        android:orientation="vertical"
+        android:paddingHorizontal="28dp"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/player_error_text"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:gravity="center"
+            android:textColor="#F1F1F1"
+            android:textSize="15sp" />
+
+        <TextView
+            android:id="@+id/player_retry"
+            android:layout_width="wrap_content"
+            android:layout_height="48dp"
+            android:layout_marginTop="14dp"
+            android:background="@drawable/bg_action_accent"
+            android:gravity="center"
+            android:paddingHorizontal="22dp"
+            android:text="@string/player_retry"
+            android:textColor="@android:color/white"
+            android:textSize="15sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/player_close"
+            android:layout_width="wrap_content"
+            android:layout_height="48dp"
+            android:layout_marginTop="8dp"
+            android:background="@drawable/bg_action"
+            android:gravity="center"
+            android:paddingHorizontal="22dp"
+            android:text="@string/player_back"
+            android:textColor="@android:color/white"
+            android:textSize="15sp" />
+    </LinearLayout>
+</FrameLayout>

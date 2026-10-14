@@ -60,6 +60,9 @@ object WatchPlayer {
         failUntil = 0L
     }
 
+    /** 재생 화면 주소의 바탕 (앱 안 재생 화면이 제 주소인지 확인할 때) */
+    fun pageBase(): String? = base
+
     /** 이 곡을 워치 재생 화면으로 여는 링크. 저장소를 모르면 null */
     fun intent(context: Context, video: TubeVideo, mix: Boolean, nowMs: Long = System.currentTimeMillis()): Intent? {
         val b = base ?: return null
@@ -72,6 +75,10 @@ object WatchPlayer {
         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         // 같은 앱이 연 링크는 인터넷 앱이 같은 탭에서 연다 — 곡을 고를 때마다 탭이 쌓이지 않게
         .putExtra(Browser.EXTRA_APPLICATION_ID, context.packageName)
+
+    /** 재생 화면 주소를 그대로 인터넷 앱으로 (앱 안 엔진이 멈췄을 때 이어서). 열 앱이 없으면 null */
+    fun browserIntent(context: Context, url: String): Intent? =
+        link(context, url).takeIf { runCatching { it.resolveActivity(context.packageManager) != null }.getOrDefault(false) }
 
     /** 워치에 https 링크를 열 앱(삼성 인터넷 등)이 있고 재생 화면 주소를 안다 */
     fun available(context: Context): Boolean {

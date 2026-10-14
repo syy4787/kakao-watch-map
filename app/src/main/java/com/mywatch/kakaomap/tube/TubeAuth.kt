@@ -6,6 +6,7 @@ import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
 import androidx.annotation.VisibleForTesting
+import androidx.core.content.edit
 import com.mywatch.kakaomap.BuildConfig
 import com.mywatch.kakaomap.data.ErrorLog
 import com.mywatch.kakaomap.net.ApiException
@@ -212,7 +213,7 @@ class PrefsTokenStore(private val prefs: SharedPreferences, private val cipher: 
         } catch (e: Exception) {
             null
         }
-        if (t == null) prefs.edit().remove(KEY).apply()
+        if (t == null) prefs.edit { remove(KEY) }
         memory = t
         return t
     }
@@ -222,9 +223,9 @@ class PrefsTokenStore(private val prefs: SharedPreferences, private val cipher: 
         memory = t
         try {
             val blob = cipher.encrypt(encode(t).toByteArray(Charsets.UTF_8))
-            prefs.edit().putString(KEY, Base64.encodeToString(blob, Base64.NO_WRAP)).apply()
+            prefs.edit { putString(KEY, Base64.encodeToString(blob, Base64.NO_WRAP)) }
         } catch (e: Exception) {
-            prefs.edit().remove(KEY).apply()
+            prefs.edit { remove(KEY) }
             ErrorLog.record("유튜브·로그인 저장", "토큰을 암호화하지 못해 이번에 켠 동안만 로그인: ${e.javaClass.simpleName}")
         }
     }
@@ -232,7 +233,7 @@ class PrefsTokenStore(private val prefs: SharedPreferences, private val cipher: 
     @Synchronized
     override fun clear() {
         memory = null
-        prefs.edit().remove(KEY).apply()
+        prefs.edit { remove(KEY) }
     }
 
     private fun encode(t: Tokens) = JSONObject().put("a", t.access).put("r", t.refresh).put("e", t.expiresAtMs).toString()

@@ -1,6 +1,9 @@
 package com.mywatch.kakaomap.tube
 
+import android.content.Context
 import android.os.Build
+import android.os.SystemClock
+import com.mywatch.kakaomap.BuildConfig
 import java.io.File
 
 /** 고른 동영상 다음에 무엇을 이어 틀지 */
@@ -76,6 +79,18 @@ class PlayerGuard(private val dir: File, private val version: Int, private val n
         write(crashedFile, now())
     }
 
+    /**
+     * 재생 화면 프로세스에서: 잡히지 않은 오류로 프로세스가 죽기 직전에 [failed] 를 남긴다 (엔진은 제 스레드에서 라이브러리를 읽다 죽을 수 있다).
+     * 그러면 다음에 누를 때 1분을 기다리지 않고 바로 인터넷 앱으로. 원래 처리(오류 기록·종료)는 그대로 이어서
+     */
+    fun watchCrashes() {
+        val previous = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { t, e ->
+            runCatching { failed() }
+            previous?.uncaughtException(t, e)
+        }
+    }
+
     fun crashedRecently(): Boolean {
         val starting = read(startingFile)
         if (starting != null && now() - starting.first > STALE_MS) failed()
@@ -103,5 +118,55 @@ class PlayerGuard(private val dir: File, private val version: Int, private val n
     companion object {
         const val STALE_MS = 60_000L
         const val FALLBACK_MS = 6 * 3_600_000L
+
+        fun of(context: Context) = PlayerGuard(playerDir(context), BuildConfig.VERSION_CODE)
+    }
+}
+
+/** 재생 화면 프로세스와 앱 본체가 함께 보는 표시 파일 자리 (백업하지 않음) */
+fun playerDir(context: Context): File = File(context.noBackupFilesDir, "player_guard")
+
+/**
+ * 재생 화면(:player 프로세스)이 보이는지 — 자동 업데이트 설치가 보고 있는 동영상을 끊지 않게
+ * ([com.mywatch.kakaomap.MapApp.inUse] 는 제 프로세스의 화면만 센다).
+ * 보이는 동안 [HEARTBEAT_MS] 마다 [shown] (프로세스가 죽으면 끊겨서 [STALE_MS] 뒤엔 안 보는 것으로), 가려지면 [hidden].
+ * 시각은 부팅 후 경과 시간 — 프로세스끼리 같고 시계를 바꿔도 흔들리지 않는다
+ */
+class PlayerPresence(private val dir: File, private val elapsed: () -> Long = SystemClock::elapsedRealtime) {
+
+    fun shown() = write("shown")
+
+    fun hidden() {
+        File(dir, "shown").delete()
+        write("hidden")
+    }
+
+    /** 지금 보고 있거나, 닫은 지 [quietMs] 가 안 됨 */
+    fun busy(quietMs: Long): Boolean {
+        val now = elapsed()
+        read("shown")?.let { if (now - it in 0..STALE_MS) return true }
+        read("hidden")?.let { if (now - it in 0..quietMs) return true }
+        return false
+    }
+
+    private fun write(name: String) {
+        runCatching {
+            dir.mkdirs()
+            val tmp = File(dir, "$name.tmp")
+            tmp.writeText(elapsed().toString())
+            if (!tmp.renameTo(File(dir, name))) {
+                File(dir, name).delete()
+                tmp.renameTo(File(dir, name))
+            }
+        }
+    }
+
+    private fun read(name: String): Long? = runCatching { File(dir, name).readText().trim().toLong() }.getOrNull()
+
+    companion object {
+        const val HEARTBEAT_MS = 30_000L
+        const val STALE_MS = 90_000L
+
+        fun of(context: Context) = PlayerPresence(playerDir(context))
     }
 }

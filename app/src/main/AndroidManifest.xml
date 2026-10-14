@@ -119,6 +119,15 @@
                 <data android:scheme="kakaowatch" android:host="tube" />
             </intent-filter>
         </activity>
+        <!-- 앱 안 유튜브 재생 (브라우저 엔진 GeckoView) — 따로 된 프로세스: 엔진이 죽어도 앱 본체(길 안내 등)는 산다.
+             목록 화면과 같은 작업에 쌓여 뒤로 가면 목록으로 -->
+        <activity
+            android:name=".ui.TubePlayerActivity"
+            android:exported="false"
+            android:process=":player"
+            android:taskAffinity="com.mywatch.kakaomap.tube"
+            android:launchMode="singleTop"
+            android:configChanges="density|fontScale|keyboard|keyboardHidden|layoutDirection|locale|navigation|orientation|screenLayout|screenSize|smallestScreenSize|uiMode" />
         <activity
             android:name=".update.UpdateActivity"
             android:exported="false"

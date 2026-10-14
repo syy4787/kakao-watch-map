@@ -2,6 +2,7 @@ package com.mywatch.kakaomap
 
 import com.mywatch.kakaomap.tube.PlayRoute
 import com.mywatch.kakaomap.tube.PlayerGuard
+import com.mywatch.kakaomap.tube.PlayerPresence
 import com.mywatch.kakaomap.tube.Queue
 import com.mywatch.kakaomap.tube.TubeLinks
 import com.mywatch.kakaomap.tube.TubePlay
@@ -109,6 +110,46 @@ class TubePlayTest {
         // 그 버전에서 잘 뜨면 표시를 지운다
         guard(version = 131).started()
         assertFalse(guard().crashedRecently())
+    }
+
+    @Test
+    fun presenceTellsOtherProcessesThatAVideoIsOnScreen() {
+        var t = 5_000_000L
+        val p = PlayerPresence(tmp.root) { t }
+        assertFalse(p.busy(quietMs = 600_000))
+        p.shown()
+        assertTrue(p.busy(600_000))
+        t += 80_000
+        assertTrue("30초마다 알리므로 90초까지는 보는 중", p.busy(600_000))
+        t += 20_000
+        assertFalse("알림이 끊김 = 재생 화면 프로세스가 죽음", p.busy(600_000))
+        p.shown()
+        p.hidden()
+        assertTrue("닫은 직후 조용히 기다리는 동안", p.busy(600_000))
+        t += 600_001
+        assertFalse(p.busy(600_000))
+        // 워치를 다시 켜면(부팅 후 시간이 처음부터) 예전 기록은 무시
+        p.shown()
+        t = 1_000
+        assertFalse(p.busy(600_000))
+    }
+
+    @Test
+    fun aCrashInThePlayerProcessIsRememberedAtOnce() {
+        val before = Thread.getDefaultUncaughtExceptionHandler()
+        var passedOn: Throwable? = null
+        Thread.setDefaultUncaughtExceptionHandler { _, e -> passedOn = e }
+        try {
+            val guard = PlayerGuard(tmp.root, 130) { 1_000_000L }
+            guard.starting()
+            guard.watchCrashes()
+            val boom = UnsatisfiedLinkError("libxul.so")
+            Thread.getDefaultUncaughtExceptionHandler()!!.uncaughtException(Thread.currentThread(), boom)
+            assertTrue("1분을 기다리지 않고 바로", guard.crashedRecently())
+            assertTrue("오류 기록·종료는 원래대로", passedOn === boom)
+        } finally {
+            Thread.setDefaultUncaughtExceptionHandler(before)
+        }
     }
 
     @Test

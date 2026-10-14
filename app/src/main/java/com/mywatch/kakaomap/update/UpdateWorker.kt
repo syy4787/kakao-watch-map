@@ -15,6 +15,7 @@ import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import com.mywatch.kakaomap.MapApp
 import com.mywatch.kakaomap.nav.NavigationService
+import com.mywatch.kakaomap.tube.PlayerPresence
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.util.concurrent.TimeUnit
@@ -90,7 +91,7 @@ class UpdateInstallWorker(context: Context, params: WorkerParameters) : Coroutin
         val c = applicationContext
         if (UpdateManager.repo(c) == null || !UpdateManager.hasUpdate(c)) return@withContext Result.success()
         if (!UpdateManager.canInstall(c)) return@withContext Result.success()   // 앱 정보 화면에서 안내
-        if (busy()) return@withContext Result.retry()
+        if (busy(c)) return@withContext Result.retry()
         val info = UpdateManager.latest(c) ?: return@withContext Result.success()
         // 받을 때마다 손상된 파일이면(update.json 과 다름) 같은 릴리스를 자동으로 또 받지 않는다 — 폰 데이터 낭비
         if (!UpdateManager.autoDownloadAllowed(c, info)) return@withContext Result.success()
@@ -102,7 +103,7 @@ class UpdateInstallWorker(context: Context, params: WorkerParameters) : Coroutin
                 UpdateManager.recordFailure(c, WHERE, it)
                 return@withContext Result.success()
             }
-            if (busy()) return@withContext Result.retry()   // 받는 사이 앱을 열었거나 안내 시작
+            if (busy(c)) return@withContext Result.retry()   // 받는 사이 앱을 열었거나 안내 시작
             if (isStopped) return@withContext Result.retry()
             UpdateManager.install(c, file)
             Result.success()
@@ -117,9 +118,11 @@ class UpdateInstallWorker(context: Context, params: WorkerParameters) : Coroutin
      * 지금 설치하면 사용자가 쓰던 것이 끊기는지: 안내 중이거나, 화면을 보고 있거나, 화면이 가려진 지 얼마 안 됐을 때
      * (음성 입력·권한 창이 잠깐 덮은 것일 수 있다 — 그 사이 설치하면 돌아왔을 때 앱이 꺼져 있다).
      * 앱을 닫은 뒤 메모리에 남은 '지도에서 보기' 경로는 기다리지 않는다 — 그러면 업데이트가 한없이 밀림.
+     * 유튜브 재생 화면은 따로 된 프로세스라 그쪽이 남기는 표시로 본다 (보는 중·닫은 지 얼마 안 됨)
      */
-    private fun busy(): Boolean = NavigationService.running || MapApp.inUse ||
-        (MapApp.lastUiStoppedAt > 0 && SystemClock.elapsedRealtime() - MapApp.lastUiStoppedAt < QUIET_AFTER_UI_MS)
+    private fun busy(c: Context): Boolean = NavigationService.running || MapApp.inUse ||
+        (MapApp.lastUiStoppedAt > 0 && SystemClock.elapsedRealtime() - MapApp.lastUiStoppedAt < QUIET_AFTER_UI_MS) ||
+        PlayerPresence.of(c).busy(QUIET_AFTER_UI_MS)
 
     companion object {
         private const val NAME = "update-install"

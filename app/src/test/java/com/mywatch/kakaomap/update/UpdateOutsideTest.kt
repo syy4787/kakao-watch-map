@@ -9,8 +9,10 @@ import android.os.BatteryManager
 import android.os.Looper
 import android.view.WindowManager
 import androidx.wear.widget.WearableRecyclerView
+import androidx.work.ListenableWorker
 import androidx.work.testing.TestListenableWorkerBuilder
 import com.mywatch.kakaomap.R
+import com.mywatch.kakaomap.tube.PlayerPresence
 import com.mywatch.kakaomap.data.ErrorLog
 import com.mywatch.kakaomap.ui.Row
 import com.mywatch.kakaomap.ui.RowAdapter
@@ -29,7 +31,9 @@ import org.robolectric.RuntimeEnvironment
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import org.robolectric.shadows.ShadowNetworkCapabilities
+import org.robolectric.shadows.ShadowSystemClock
 import java.io.IOException
+import java.time.Duration
 import java.util.concurrent.CountDownLatch
 import kotlin.concurrent.thread
 
@@ -226,6 +230,24 @@ class UpdateOutsideTest {
     fun aMissingFileIsNotAskedForAgainAndAgain() {
         server.apkMissing = true
         assertThrows(IOException::class.java) { UpdateManager.download(context, info()) }
+        assertEquals(1, server.apkRequests.size)
+    }
+
+    @Test
+    fun aVideoPlayingInTheAppIsNotCutOffByAnAutomaticUpdate() {
+        // 재생 화면은 따로 된 프로세스(:player) — 이 프로세스의 '화면 수'로는 안 보인다
+        server.updateJson = server.updateJsonFor(999)
+        UpdateManager.check(context)
+        val presence = PlayerPresence.of(context)
+        presence.shown()
+        val worker = TestListenableWorkerBuilder<UpdateInstallWorker>(context).build()
+        assertEquals(ListenableWorker.Result.retry(), runBlocking { worker.doWork() })
+        assertEquals("동영상을 보는 동안은 받지도 않는다", 0, server.apkRequests.size)
+        // 재생 화면을 닫은 직전에도 (잠깐 목록을 보고 다시 틀 수 있음) 10분은 기다린다
+        presence.hidden()
+        assertEquals(ListenableWorker.Result.retry(), runBlocking { TestListenableWorkerBuilder<UpdateInstallWorker>(context).build().doWork() })
+        ShadowSystemClock.advanceBy(Duration.ofMinutes(11))
+        runBlocking { TestListenableWorkerBuilder<UpdateInstallWorker>(context).build().doWork() }
         assertEquals(1, server.apkRequests.size)
     }
 

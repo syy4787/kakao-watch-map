@@ -174,4 +174,14 @@
     <string name="tube_tile_mix">믹스 이어 듣기</string>
     <string name="tube_tile_no_recent">먼저 한 곡을 틀어 주세요</string>
     <string name="tube_tile_open">열기</string>
+    <!-- 앱 안 유튜브 재생 (GeckoView) -->
+    <string name="player_retry">다시 시도</string>
+    <string name="player_back">목록으로</string>
+    <string name="player_offline">재생 화면을 불러오지 못했어요\n인터넷 연결을 확인해 주세요</string>
+    <string name="player_load_failed">재생 화면을 불러오지 못했어요</string>
+    <string name="player_engine_to_browser">앱 안 재생이 멈춰서 인터넷 앱으로 열었어요</string>
+    <string name="player_engine_failed">앱 안 재생이 안 돼요 · 폰에서 열어 주세요</string>
+    <string name="player_opened_on_phone">폰에서 열었어요</string>
+    <string name="player_no_phone">폰과 연결되지 않았어요</string>
+    <string name="player_phone_failed">폰에서 열지 못했어요</string>
 </resources>
