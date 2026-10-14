@@ -8,8 +8,11 @@ enum class TubeSource(val label: String) { YOUTUBE("유튜브 검색"), KAKAO("�
 /** 검색 결과 + 어디서 찾았는지 + 바꿔서 찾았으면 그 이유 */
 class TubeResult(val page: TubePage, val source: TubeSource, val note: String? = null)
 
-/** 오늘(미국 서부 기준) 유튜브 검색 한도를 다 씀 */
-class YouTubeQuotaException : ApiException("오늘 유튜브 검색 한도를 다 썼어요")
+/**
+ * 오늘(미국 서부 기준) 유튜브 한도를 다 씀. 검색(하루 100번)과 나머지(하루 1만 단위)는 한도가 따로라 글이 다르다 —
+ * 검색 한도면 카카오 동영상 검색으로 대신한다
+ */
+class YouTubeQuotaException(message: String = "오늘 유튜브 검색 한도를 다 썼어요") : ApiException(message)
 
 /** 인터넷이 안 됨 — 카카오로 바꿔도 안 되므로 그대로 알린다 */
 class NetworkException : ApiException("네트워크 연결을 확인하세요")

@@ -31,9 +31,6 @@ object TubeParsers {
 
     class KakaoPage(val videos: List<TubeVideo>, val isEnd: Boolean)
 
-    /** 유튜브 검색 결과의 동영상만 (채널·재생목록 빼고) */
-    fun youtubeSearch(json: JSONObject): TubePage = youtubeSearchAll(json).let { TubePage(it.videos, it.next) }
-
     /**
      * 유튜브 검색 결과(search.list type=video,channel,playlist): 동영상·채널·재생목록을 저마다 온 순서대로.
      * 아직 시작 안 한 생방송은 틀 수 없으니 뺀다. 같은 것은 한 번
@@ -110,18 +107,8 @@ object TubeParsers {
         return out
     }
 
-    /** videos.list(contentDetails) → 영상별 길이(초, 생방송은 null) */
-    fun youtubeDurations(json: JSONObject): Map<String, Int?> {
-        val items = json.optJSONArray("items") ?: return emptyMap()
-        return (0 until items.length()).mapNotNull { i ->
-            val item = items.optJSONObject(i) ?: return@mapNotNull null
-            val id = item.optString("id").takeIf(TubeLinks::isId) ?: return@mapNotNull null
-            id to TubeText.isoSeconds(item.optJSONObject("contentDetails")?.optString("duration"))
-        }.toMap()
-    }
-
-    fun withDurations(videos: List<TubeVideo>, durations: Map<String, Int?>): List<TubeVideo> =
-        videos.map { v -> if (durations.containsKey(v.id)) v.copy(durationSec = durations[v.id]) else v }
+    /** videos.list 한 쪽 (인기 차트·좋아요) → 받은 순서대로 */
+    fun videoPage(json: JSONObject): TubePage = TubePage(videoDetails(json).values.toList(), next(json))
 
     /** channels.list(part=snippet,statistics,contentDetails): 사진·구독자(숨기면 null)·동영상 수·업로드 재생목록 */
     fun channels(json: JSONObject): List<TubeChannel> {

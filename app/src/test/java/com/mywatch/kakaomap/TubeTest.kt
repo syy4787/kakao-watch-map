@@ -189,39 +189,6 @@ class TubeTest {
     }
 
     @Test
-    fun youTubeSearchAndDurationsCombine() {
-        val search = JSONObject(
-            """
-            {"nextPageToken":"CBQQAA",
-             "items":[
-              {"id":{"kind":"youtube#video","videoId":"BzYnNdJhZQw"},
-               "snippet":{"title":"[MV] IU(아이유) _ Through the Night(밤편지)","channelTitle":"1theK (원더케이)","liveBroadcastContent":"none"}},
-              {"id":{"kind":"youtube#video","videoId":"jfKfPfyJRdk"},
-               "snippet":{"title":"lofi hip hop radio &#128218; beats to relax/study to","channelTitle":"Lofi Girl","liveBroadcastContent":"live"}},
-              {"id":{"kind":"youtube#video","videoId":"upcoming001"},
-               "snippet":{"title":"곧 시작","channelTitle":"누군가","liveBroadcastContent":"upcoming"}},
-              {"id":{"kind":"youtube#channel","channelId":"UC123"},"snippet":{"title":"채널","channelTitle":"채널"}}
-             ]}
-            """.trimIndent()
-        )
-        val page = TubeParsers.youtubeSearch(search)
-        assertEquals("CBQQAA", page.next)
-        // 아직 시작 안 한 생방송·채널은 틀 수 없으니 뺀다
-        assertEquals(listOf("BzYnNdJhZQw", "jfKfPfyJRdk"), page.videos.map { it.id })
-        assertTrue(page.videos[1].live)
-        assertEquals("lofi hip hop radio 📚 beats to relax/study to", page.videos[1].title)
-
-        val durations = TubeParsers.youtubeDurations(JSONObject(
-            """{"items":[{"id":"BzYnNdJhZQw","contentDetails":{"duration":"PT4M54S"}},{"id":"jfKfPfyJRdk","contentDetails":{"duration":"P0D"}}]}"""
-        ))
-        val withTimes = TubeParsers.withDurations(page.videos, durations)
-        assertEquals(294, withTimes[0].durationSec)
-        assertNull(withTimes[1].durationSec)
-
-        assertNull(TubeParsers.youtubeSearch(JSONObject("""{"items":[]}""")).next)
-    }
-
-    @Test
     fun youTubeErrorsBecomeSimpleReasons() {
         val quota = """{"error":{"code":403,"message":"The request cannot be completed because you have exceeded your quota.","errors":[{"message":"...","domain":"youtube.quota","reason":"quotaExceeded"}]}}"""
         assertEquals("quotaExceeded", TubeParsers.youtubeErrorReason(quota))

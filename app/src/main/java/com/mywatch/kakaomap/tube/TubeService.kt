@@ -9,7 +9,6 @@ import androidx.core.net.toUri
 import androidx.wear.remote.interactions.RemoteActivityHelper
 import com.mywatch.kakaomap.BuildConfig
 import com.mywatch.kakaomap.data.ErrorLog
-import com.mywatch.kakaomap.net.ApiException
 import com.mywatch.kakaomap.net.Http
 import com.mywatch.kakaomap.net.KakaoApi
 import kotlinx.coroutines.CancellationException
@@ -17,9 +16,6 @@ import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
-import org.json.JSONException
-import org.json.JSONObject
-import java.io.IOException
 import java.security.MessageDigest
 import java.time.Instant
 import java.time.LocalDate
@@ -149,10 +145,9 @@ class PhoneOpener(context: Context) {
 }
 
 /**
- * 노래 검색 (네트워크). 순서·대체 판단은 [TubeSearcher]. 백그라운드 스레드에서 부른다.
+ * 유튜브 데이터 (네트워크). 검색의 순서·대체 판단은 [TubeSearcher], 묻는 방법은 [YouTubeData]. 백그라운드 스레드에서 부른다.
  */
 object TubeApi {
-    private const val YT = "https://www.googleapis.com/youtube/v3"
 
     /** 테스트·시뮬레이션에서 검색 대신 (결과·오류를 마음대로) */
     @androidx.annotation.VisibleForTesting
@@ -162,68 +157,25 @@ object TubeApi {
     fun search(context: Context, query: String, next: String? = null, source: TubeSource? = null): TubeResult {
         override?.let { return it(query, next, source) }
         val state = TubeState(context)
-        val key = BuildConfig.YOUTUBE_API_KEY
+        val data = data(context)
         return TubeSearcher(
-            youtubeKey = key,
+            youtubeKey = BuildConfig.YOUTUBE_API_KEY,
             youtubeBlocked = { state.youtubeBlocked() },
             blockYoutube = { state.blockYoutube() },
-            youtube = { q, token -> youtube(context, key, q, token) },
+            youtube = { q, token -> data.search(q, token) },
             kakao = { q, page -> KakaoApi.videos(q, page) },
             log = { where, e -> ErrorLog.record(where, e) },
         ).search(query, next, source)
     }
 
-    private fun youtube(context: Context, key: String, query: String, pageToken: String?): TubePage {
-        val params = linkedMapOf(
-            "part" to "snippet", "type" to "video", "maxResults" to "20", "q" to query,
-            "regionCode" to "KR", "relevanceLanguage" to "ko",
-            // 워치는 블루투스로 폰 인터넷을 빌려 쓰므로 필요한 칸만 받는다
-            "fields" to "nextPageToken,items(id/videoId,snippet(title,channelTitle,liveBroadcastContent))",
-            "key" to key,
+    /** 유튜브 Data API — 키 + 이 앱의 서명 머리글(키를 'Android 앱'으로 제한해 둔 경우) */
+    fun data(context: Context): YouTubeData {
+        val app = context.applicationContext
+        return YouTubeData(
+            key = BuildConfig.YOUTUBE_API_KEY,
+            token = { null },
+            get = { url, headers -> Http.get(url, appHeaders(app) + headers) },
         )
-        if (pageToken != null) params["pageToken"] = pageToken
-        val page = TubeParsers.youtubeSearch(call(context, "/search", params))
-        if (page.videos.isEmpty()) return page
-        // 길이(4:54)는 영상 정보에만 있다 (1단위로 싸다). 못 받아도 결과는 보여 준다
-        val durations = try {
-            TubeParsers.youtubeDurations(call(context, "/videos", linkedMapOf(
-                "part" to "contentDetails", "id" to page.videos.joinToString(",") { it.id },
-                "fields" to "items(id,contentDetails/duration)", "key" to key,
-            )))
-        } catch (e: ApiException) {
-            emptyMap()
-        }
-        return page.copy(videos = TubeParsers.withDurations(page.videos, durations))
-    }
-
-    private fun call(context: Context, path: String, params: Map<String, String>): JSONObject {
-        val res = try {
-            Http.get("$YT$path?${Http.query(params)}", appHeaders(context))
-        } catch (e: IOException) {
-            throw NetworkException()
-        }
-        if (res.code !in 200..299) {
-            throw when (val reason = TubeParsers.youtubeErrorReason(res.body)) {
-                // 하루 한도 — 그날은 더 묻지 않는다
-                "quotaExceeded", "dailyLimitExceeded" -> YouTubeQuotaException()
-                // 잠깐 몰림 — 이번 검색만 카카오로
-                "rateLimitExceeded", "userRateLimitExceeded" -> ApiException("유튜브 검색 요청이 잠깐 몰렸어요")
-                else -> ApiException(errorMessage(res.code, reason, res.body))
-            }
-        }
-        return try {
-            JSONObject(res.body)
-        } catch (e: JSONException) {
-            throw ApiException("유튜브 응답을 읽지 못했어요")
-        }
-    }
-
-    fun errorMessage(code: Int, reason: String?, body: String): String = when {
-        body.contains("API_KEY_INVALID") || reason == "keyInvalid" -> "유튜브 API 키가 올바르지 않아요"
-        reason == "accessNotConfigured" || body.contains("SERVICE_DISABLED") -> "YouTube Data API 사용 설정이 꺼져 있어요"
-        body.contains("API_KEY_ANDROID_APP_BLOCKED") || body.contains("API_KEY_HTTP_REFERRER_BLOCKED") -> "유튜브 API 키의 앱 제한 설정을 확인하세요"
-        code >= 500 -> "유튜브 서버 오류 ($code)"
-        else -> "유튜브 검색 오류 ($code)"
     }
 
     /**
