@@ -6,6 +6,8 @@ import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.content.SharedPreferences
 import android.os.Bundle
+import android.os.PowerManager
+import android.os.SystemClock
 import android.text.InputType
 import android.widget.EditText
 import android.widget.Toast
@@ -93,10 +95,14 @@ class TubeActivity : ComponentActivity() {
     private var login: LoginState = LoginState.Starting
     private var loginJob: Job? = null
     /**
-     * 화면을 떠났음(홈·다른 앱·화면 꺼짐 — onStop). 그 사이 끝난 일(더 받기·확인)로는 재생 화면을 띄우지 않는다:
+     * 홈·다른 앱으로 떠났음 (화면이 켜진 채 가려짐). 그 사이 끝난 일(더 받기·확인)로는 재생 화면을 띄우지 않는다:
      * 안드로이드는 앱이 막 가려진 뒤 몇 초는 화면을 띄울 수 있어 안 보는 사이 저절로 틀 수 있었다
      */
     private var left = false
+    /** 손목을 내려 화면이 꺼짐(저전력 화면 포함) — 그 사이 끝난 '틀기'는 다시 볼 때 연다 ([deferred]) */
+    private var asleep = false
+    /** 화면이 꺼진 사이 끝난 '틀기'와 그 시각 (부팅 후 ms) — 다시 볼 때 [DEFERRED_PLAY_MS] 안이면 연다 */
+    private var deferred: Pair<Long, () -> Unit>? = null
     /** 지난번에 볼 때 로그인돼 있었는지 — 계정에서 앱 접근을 끊는 등으로 로그아웃되면 내 데이터·내 화면을 걷어 낸다 */
     private var wasSignedIn = false
 
@@ -142,7 +148,10 @@ class TubeActivity : ComponentActivity() {
                 if (dy > 0) autoMore()
             }
         })
-        ambient = AmbientCover(this, ::ambientSummary)
+        ambient = AmbientCover(this, ::ambientSummary) { inAmbient ->
+            asleep = inAmbient
+            if (!inAmbient) runDeferred()
+        }
         wasSignedIn = signedIn
         // 재생 화면을 보는 사이 이 화면이 정리됐다가 다시 만들어졌으면 다녀온 화면들 그대로 (데이터는 새로 받는다)
         savedInstanceState?.getString(STATE_NAV)?.let(nav::restore)
@@ -183,7 +192,15 @@ class TubeActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         left = false
+        asleep = false
         resumeLogin()
+        runDeferred()
+    }
+
+    /** 홈·최근 앱으로 (사용자가 떠남 — 화면이 꺼지는 것과 다름) */
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        left = true
     }
 
     override fun onResume() {
@@ -201,7 +218,8 @@ class TubeActivity : ComponentActivity() {
     }
 
     override fun onStop() {
-        left = true
+        // 화면이 켜진 채 가려졌으면 떠난 것, 꺼져서 안 보이면(손목을 내림) 잠깐 안 보는 것
+        if (getSystemService(PowerManager::class.java)?.isInteractive != false) left = true else asleep = true
         // 로그인 기다리기는 화면이 보일 때만 (돌아오면 같은 코드로 이어서)
         loginJob?.cancel()
         loginJob = null
@@ -781,17 +799,37 @@ class TubeActivity : ComponentActivity() {
                 opening = false
             }
             loader.offer(feed, all)
-            // 받는 사이 나갔거나 뒤로 갔으면 받은 것만 목록에 두고 틀지 않는다
-            if (!stillHere(at)) {
-                render()
-                return@launch
-            }
-            playPrivate(all, p.id)
+            // 받는 사이 나갔거나 뒤로 갔으면 받은 것만 목록에 두고 틀지 않는다 (화면만 꺼졌으면 다시 볼 때)
+            whenWatching(at) { playPrivate(all, p.id) }
         }
     }
 
-    /** 일을 시작한 화면([at])을 그대로 보고 있다 — 기다리는 사이 나가거나 뒤로 가지 않았다 */
-    private fun stillHere(at: Page) = !left && !isFinishing && nav.top == at
+    /**
+     * 기다리던 일(더 받기·확인)을 마치고 틀 때: 시작한 화면([at])을 그대로 보고 있으면 바로, 손목을 내려 화면만 꺼졌으면
+     * 다시 볼 때([DEFERRED_PLAY_MS] 안 — 보일 때만 재생), 떠났거나(홈·다른 앱) 뒤로 갔으면 틀지 않는다 (타일에서 온 일도 끝)
+     */
+    private fun whenWatching(at: Page, play: () -> Unit) {
+        when {
+            left || isFinishing || nav.top != at -> {
+                shortcut = null
+                closeJob?.cancel()
+                closeJob = null
+                render()
+            }
+            asleep -> {
+                deferred = SystemClock.elapsedRealtime() to play
+                render()
+            }
+            else -> play()
+        }
+    }
+
+    /** 화면이 꺼진 사이 끝난 '틀기'를 다시 볼 때 연다 (너무 오래 지났으면 잊는다) */
+    private fun runDeferred() {
+        val (at, play) = deferred ?: return
+        deferred = null
+        if (SystemClock.elapsedRealtime() - at <= DEFERRED_PLAY_MS) play() else shortcut = null
+    }
 
     /** 비공개 내 재생목록을 받은 동영상 번호로 (폰에선 그 재생목록으로) */
     private fun playPrivate(page: TubePage, id: String) {
@@ -833,45 +871,45 @@ class TubeActivity : ComponentActivity() {
             } finally {
                 opening = false
             }
-            // 확인하는 사이 나갔거나 뒤로 갔으면 틀지 않는다 (안 보는 사이 저절로 재생되지 않게)
-            if (!stillHere(at)) {
-                render()
-                return@launch
-            }
-            if (!reachable) {
-                render()
-                toast(getString(R.string.tube_watch_unreachable))
-                playOnPhone(req)
-                return@launch
-            }
-            val now = System.currentTimeMillis()
-            val link = if (route == PlayRoute.IN_APP) {
-                TubePlayerActivity.intent(this@TubeActivity, TubeLinks.playerUrl(base, req.video, req.queue, nonce = now, inApp = true))
-            } else {
-                WatchPlayer.intent(this@TubeActivity, req.video, req.queue, now)
-            }
-            val ok = link != null && try {
-                startActivity(link)
-                true
-            } catch (e: ActivityNotFoundException) {
-                ErrorLog.record("유튜브·워치에서 열기", e)
-                false
-            } catch (e: SecurityException) {
-                ErrorLog.record("유튜브·워치에서 열기", e)
-                false
-            }
-            if (!ok) {
-                render()
-                playOnPhone(req)
-                return@launch
-            }
-            if (route == PlayRoute.BROWSER && crashed) toast(getString(R.string.tube_engine_browser))
-            played(req.video)
-            // 인터넷 앱으로 틀었고 타일에서 바로 온 일이면 이 앱은 닫는다 (재생 화면이 앞에). 앱 안 재생 화면은 이 앱 위에 있다
-            if (shortcut != null) {
-                shortcut = null
-                if (route == PlayRoute.BROWSER) finishAndRemoveTask()
-            }
+            // 확인하는 사이 나갔거나 뒤로 갔으면 틀지 않는다 (안 보는 사이 저절로 재생되지 않게 — 화면만 꺼졌으면 다시 볼 때)
+            whenWatching(at) { startPlayer(req, route, crashed, base, reachable) }
+        }
+    }
+
+    private fun startPlayer(req: PlayRequest, route: PlayRoute, crashed: Boolean, base: String, reachable: Boolean) {
+        if (!reachable) {
+            render()
+            toast(getString(R.string.tube_watch_unreachable))
+            playOnPhone(req)
+            return
+        }
+        val now = System.currentTimeMillis()
+        val link = if (route == PlayRoute.IN_APP) {
+            TubePlayerActivity.intent(this@TubeActivity, TubeLinks.playerUrl(base, req.video, req.queue, nonce = now, inApp = true))
+        } else {
+            WatchPlayer.intent(this@TubeActivity, req.video, req.queue, now)
+        }
+        val ok = link != null && try {
+            startActivity(link)
+            true
+        } catch (e: ActivityNotFoundException) {
+            ErrorLog.record("유튜브·워치에서 열기", e)
+            false
+        } catch (e: SecurityException) {
+            ErrorLog.record("유튜브·워치에서 열기", e)
+            false
+        }
+        if (!ok) {
+            render()
+            playOnPhone(req)
+            return
+        }
+        if (route == PlayRoute.BROWSER && crashed) toast(getString(R.string.tube_engine_browser))
+        played(req.video)
+        // 인터넷 앱으로 틀었고 타일에서 바로 온 일이면 이 앱은 닫는다 (재생 화면이 앞에). 앱 안 재생 화면은 이 앱 위에 있다
+        if (shortcut != null) {
+            shortcut = null
+            if (route == PlayRoute.BROWSER) finishAndRemoveTask()
         }
     }
 
@@ -956,6 +994,8 @@ class TubeActivity : ComponentActivity() {
         private const val PLAY_ALL_MORE_PAGES = 2
         /** '모두 재생' 전에 저절로 받던 다음 쪽을 기다리는 최대 시간 */
         private const val MORE_WAIT_MS = 15_000L
+        /** 손목을 내린 사이 끝난 '틀기'를 다시 볼 때 여는 최대 시간 (그보다 오래면 잊는다) */
+        private const val DEFERRED_PLAY_MS = 60_000L
         /** 타일에서 바로 온 일을 마치고 닫기까지 ('폰에서 열림' 애니메이션 길이쯤) */
         private const val SHORTCUT_CLOSE_MS = 1_800L
 

@@ -10,6 +10,7 @@ import android.content.IntentFilter
 import android.net.Uri
 import android.os.Bundle
 import android.os.Looper
+import android.os.PowerManager
 import android.view.View
 import androidx.recyclerview.widget.RecyclerView
 import com.mywatch.kakaomap.net.ApiException
@@ -381,14 +382,84 @@ class TubeAppTest {
         val a = controller.get()
         tapAction(a, TubeRows.A_PLAY_ALL, wait = false)
         assertTrue("더 받는 중", opening(a))
-        controller.pause().stop()   // 홈으로
+        controller.userLeaving().pause().stop()   // 홈으로
         hold.complete(Unit)
         idle()
         assertNull("나갔으면 틀지 않는다", started(a))
         controller.start().resume()
         settle { !opening(a) }
         assertEquals("받은 것은 목록에", 30, rows(a).filterIsInstance<Row.VideoCard>().size)
-        assertNull(started(a))
+        assertNull("돌아와도 저절로 틀지 않는다", started(a))
+    }
+
+    private val power get() = shadowOf(context.getSystemService(PowerManager::class.java))
+
+    /**
+     * 재검토에서 찾음: 손목을 내려 화면만 꺼져도(항상 켜짐 화면을 끈 워치) '나감'으로 보아 기다리던 '모두 재생'을 버렸다 →
+     * 화면이 꺼진 동안엔 틀지 않고(보일 때만 재생), 다시 볼 때(1분 안) 연다
+     */
+    @Test
+    fun turningTheScreenOffWhileMyPlaylistIsGatheredOpensThePlayerWhenYouLookAgain() {
+        val hold = CompletableDeferred<Unit>()
+        backend.holds[myPlaylist.key + "@M2"] = hold
+        val controller = openMyPrivatePlaylist()
+        val a = controller.get()
+        tapAction(a, TubeRows.A_PLAY_ALL, wait = false)
+        power.setIsInteractive(false)   // 손목을 내림
+        controller.pause().stop()
+        hold.complete(Unit)
+        idle()
+        assertNull("화면이 꺼진 동안엔 틀지 않는다", started(a))
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(20))
+        power.setIsInteractive(true)    // 다시 봄
+        controller.start().resume()
+        settle { shadowOf(a).peekNextStartedActivity() != null }
+        val s = started(a)
+        assertEquals(TubePlayerActivity::class.java.name, s?.component?.className)
+        val ids = Uri.parse(s?.getStringExtra(TubePlayerActivity.EXTRA_URL)?.replace("#", "?")).getQueryParameter("ids").orEmpty().split(',')
+        assertEquals((2..30).map { "mine%07d".format(it) }, ids)
+    }
+
+    @Test
+    fun aPlayWaitingWhileTheScreenWasOffForMoreThanAMinuteIsForgotten() {
+        val hold = CompletableDeferred<Unit>()
+        backend.holds[myPlaylist.key + "@M2"] = hold
+        val controller = openMyPrivatePlaylist()
+        val a = controller.get()
+        tapAction(a, TubeRows.A_PLAY_ALL, wait = false)
+        power.setIsInteractive(false)
+        controller.pause().stop()
+        hold.complete(Unit)
+        idle()
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMinutes(5))
+        power.setIsInteractive(true)
+        controller.start().resume()
+        settle { !opening(a) }
+        assertNull("한참 뒤에 다시 보면 저절로 틀지 않는다", started(a))
+    }
+
+    /**
+     * 재검토에서 찾음: 타일의 '믹스'로 열고 재생 화면을 확인하는 사이 나가면 '타일에서 온 일'이 남아, 나중에 폰에서 여는 동영상을 고르면
+     * 앱이 저절로 닫혔다
+     */
+    @Test
+    fun aTileMixAbandonedByLeavingDoesNotCloseTheAppLater() {
+        TubeState(context).addPlayed(v("lastaaaaaa1"))
+        val checking = CompletableDeferred<Unit>()
+        WatchPlayer.probe = { checking.await(); true }
+        val controller = Robolectric.buildActivity(TubeActivity::class.java, Intent(context, TubeActivity::class.java).putExtra(TubeActivity.EXTRA_MIX, true)).setup()
+        val a = controller.get()
+        idle()
+        controller.userLeaving().pause().stop()   // 확인하는 사이 홈으로
+        checking.complete(Unit)
+        idle()
+        assertNull("나갔으면 틀지 않는다", started(a))
+        controller.start().resume()
+        settle { !opening(a) }
+        tapCard(a, "musicaaaaa3")                  // 폰에서만 열리는 동영상
+        assertEquals(listOf(TubeLinks.watchUrl("musicaaaaa3", mix = false)), phoneOpened)
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(3))
+        assertFalse("앱이 저절로 닫히지 않는다", a.isFinishing)
     }
 
     @Test
