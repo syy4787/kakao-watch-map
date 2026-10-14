@@ -304,7 +304,7 @@ class ScreensRenderTest {
         tube("tube_library", TubeRows.library(tubeApp, 3, signedIn), pages = 2)
         tube("tube_library_out", TubeRows.library(tubeApp, 0, TubeRows.Account(configured = true, signedIn = false)), pages = 2)
         tube("tube_subscriptions", TubeRows.subscriptions(tubeApp, signedIn, ready(tubeVideos.take(2)), Slot(page = TubePage(emptyList(), null, channels = listOf(tubeChannel))), tubeNow), pages = 4)
-        val code = com.mywatch.kakaomap.tube.DeviceCode("dc", "GQVQ-JKEC", "https://www.google.com/device", tubeNow + 1_800_000, 5)
+        val code = com.mywatch.kakaomap.tube.DeviceCode("dc", "PSQ-RWD-XKZ", "https://www.google.com/device", tubeNow + 1_800_000, 5)   // 실제 코드 길이(11자)
         tube("tube_login", TubeRows.login(tubeApp, TubeRows.LoginState.Waiting(code)), pages = 3)
         tube("tube_login_font130", TubeRows.login(tubeApp, TubeRows.LoginState.Waiting(code)), pages = 3, fontScale = 1.3f)
         tube("tube_login_denied", TubeRows.login(tubeApp, TubeRows.LoginState.Denied), pages = 1)

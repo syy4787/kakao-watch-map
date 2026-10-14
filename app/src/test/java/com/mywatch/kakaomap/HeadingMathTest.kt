@@ -2,6 +2,7 @@ package com.mywatch.kakaomap
 
 import android.view.Surface
 import com.mywatch.kakaomap.location.HeadingMath
+import com.mywatch.kakaomap.location.WearSide
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
@@ -86,6 +87,84 @@ class HeadingMathTest {
         val a = Math.toRadians(60.0)
         val raised = matrix(y = -(north * cos(a) + up * sin(a)), z = -north * sin(a) + up * cos(a))
         assertHeading(0.0, HeadingMath.screenHeadingDeg(raised, Surface.ROTATION_180))
+    }
+
+    /**
+     * 오른손목에 버튼이 손 쪽으로 오게(화면 180°) 찼는데 시스템이 화면 회전을 알려 주지 않는 경우(갤럭시워치 실제 증상:
+     * "정면을 보면 뒤를 본다고 뜸"). 기기의 12시(Y)는 몸 쪽, 화면의 위쪽은 앞. [tiltDeg] 만큼 얼굴 쪽으로 세움
+     */
+    private fun lookingFlipped(forward: V, tiltDeg: Double): FloatArray {
+        val a = Math.toRadians(tiltDeg)
+        return matrix(y = -(forward * cos(a) + up * sin(a)), z = -forward * sin(a) + up * cos(a))
+    }
+
+    /** 손목을 들어 화면을 보는 동안 센서가 보내는 표본들 (각도는 조금씩 흔들림) */
+    private fun glances(n: Int, sample: (Double) -> FloatArray) = List(n) { k -> sample(25.0 + (k % 7) * 5.0) }
+
+    @Test
+    fun flippedWristTheSystemDoesNotReportIsLearnedAndPointsForward() {
+        val side = WearSide()
+        assertEquals(false, side.flipped)
+        // 아직 모를 때: 수평에 가까우면 12시 쪽(뒤)을 가리킨다 — 지금까지 사용자가 본 증상
+        assertHeading(180.0, HeadingMath.screenHeadingDeg(lookingFlipped(north, 5.0), Surface.ROTATION_0, side.flipped))
+        // 화면을 2초쯤 보면(초당 16번) 뒤집어 찬 것을 알아챈다
+        glances(40) { lookingFlipped(north, it) }.forEach { side.observe(it, Surface.ROTATION_0) }
+        assertEquals(true, side.flipped)
+        for (tilt in listOf(0.0, 5.0, 20.0, 45.0, 70.0, 90.0)) {
+            assertHeading(0.0, HeadingMath.screenHeadingDeg(lookingFlipped(north, tilt), Surface.ROTATION_0, side.flipped))
+            assertHeading(90.0, HeadingMath.screenHeadingDeg(lookingFlipped(east, tilt), Surface.ROTATION_0, side.flipped))
+        }
+    }
+
+    @Test
+    fun flippedWristTheSystemDoesReportIsNotFlippedTwice() {
+        val side = WearSide()
+        glances(200) { lookingFlipped(north, it) }.forEach { side.observe(it, Surface.ROTATION_180) }
+        assertEquals(false, side.flipped)
+        assertHeading(0.0, HeadingMath.screenHeadingDeg(lookingFlipped(north, 10.0), Surface.ROTATION_180, side.flipped))
+    }
+
+    @Test
+    fun normalWearStaysNormal() {
+        val side = WearSide()
+        glances(300) { looking(-east, it) }.forEach { side.observe(it, Surface.ROTATION_0) }
+        assertEquals(false, side.flipped)
+        assertHeading(270.0, HeadingMath.screenHeadingDeg(looking(-east, 10.0), Surface.ROTATION_0, side.flipped))
+    }
+
+    @Test
+    fun relearnsWhenIPutTheWatchOnTheOtherWay() {
+        val side = WearSide(flipped = true)
+        glances(60) { looking(north, it) }.forEach { side.observe(it, Surface.ROTATION_0) }
+        assertEquals(false, side.flipped)
+    }
+
+    @Test
+    fun aFewOddMomentsDoNotFlipIt() {
+        // 10번 중 3번은 화면을 바깥으로 젖힌 자세(반대 신호)여도 그대로
+        val side = WearSide()
+        repeat(60) { k ->
+            val m = if (k % 10 < 3) lookingFlipped(north, 30.0) else looking(north, 30.0)
+            side.observe(m, Surface.ROTATION_0)
+        }
+        assertEquals(false, side.flipped)
+    }
+
+    @Test
+    fun postureThatSaysNothingDoesNotTeach() {
+        val side = WearSide()
+        val s = sin(Math.toRadians(40.0))
+        val c = cos(Math.toRadians(40.0))
+        repeat(200) {
+            // 화면을 옆으로 굴림(12시 축은 수평 그대로, 화면은 동쪽으로 기울어짐) — 앞뒤를 알 수 없음
+            side.observe(matrix(y = -north, z = east * s + up * c), Surface.ROTATION_0)
+            // 팔을 늘어뜨려 화면이 옆을 봄 / 화면이 땅을 봄
+            side.observe(matrix(y = -up, z = east), Surface.ROTATION_0)
+            side.observe(matrix(y = -north, z = -up), Surface.ROTATION_0)
+            // 바닥에 수평으로 둠(기울기 없음)
+            side.observe(matrix(y = -north, z = up), Surface.ROTATION_0)
+        }
+        assertEquals(false, side.flipped)
     }
 
     @Test
