@@ -95,4 +95,85 @@ class YouTubeDataLiveTest {
             File("build/youtube-live.md").writeText(report.toString().replace(key, "***"))
         }
     }
+
+    /**
+     * 새 홈(칩·알고리즘·Shorts)이 기대는 것이 실제로 되는지 — 앱 코드 없이 그대로 물어본다 (결과는 요약에만, 실패로 치지 않는다).
+     *  · 채널의 자동 재생목록 UUSH(Shorts)·UULF(긴 동영상)·UULV(생방송) — 문서에 없는 것이라 실제로 확인
+     *  · videos.list part=player + maxHeight → embedWidth/embedHeight (세로면 Shorts) · snippet.categoryId
+     *  · 인기 차트 분류 20(게임)·25(뉴스) · 검색 eventType=live · videoCategoryId=25 · videoDuration=short
+     * 쓰는 한도: 약 10단위 + 검색 3번
+     */
+    @Test
+    fun theApiHasWhatTheNewHomeNeeds() {
+        val home = StringBuilder("## 새 홈에 필요한 것 (실제 API)\n\n| 확인 | 결과 |\n|---|---|\n")
+        fun row(what: String, result: String) {
+            home.append("| ").append(what).append(" | ").append(result.replace("|", "/").replace("\n", " ")).append(" |\n")
+        }
+        fun ask(path: String, params: Map<String, String>): Pair<Int, JSONObject?> {
+            val res = Http.get("${YouTubeData.BASE}$path?" + Http.query(params + ("key" to key)))
+            return res.code to runCatching { JSONObject(res.body) }.getOrNull()
+        }
+        fun reason(j: JSONObject?) = j?.optJSONObject("error")?.optJSONArray("errors")?.optJSONObject(0)?.optString("reason").orEmpty()
+        fun items(j: JSONObject?) = j?.optJSONArray("items")?.let { a -> (0 until a.length()).map { a.getJSONObject(it) } }.orEmpty()
+        try {
+            val channels = linkedMapOf("1theK" to "UCweOkPb1wVVH0Q0Tlj4a5Pw", "YTN" to "UChlgI3UHCOnwUGzWzbJ3H5w")
+            val firsts = mutableMapOf<String, String>()
+            for ((name, id) in channels) {
+                for (prefix in listOf("UU", "UUSH", "UULF", "UULV")) {
+                    val (code, j) = ask("/playlistItems", mapOf(
+                        "part" to "contentDetails", "playlistId" to prefix + id.substring(2), "maxResults" to "5",
+                        "fields" to "pageInfo/totalResults,items/contentDetails/videoId",
+                    ))
+                    val ids = items(j).map { it.optJSONObject("contentDetails")?.optString("videoId").orEmpty() }
+                    ids.firstOrNull()?.let { firsts["$name/$prefix"] = it }
+                    row("$name $prefix", "$code ${reason(j)} · ${ids.size}개 (전체 ${j?.optJSONObject("pageInfo")?.optInt("totalResults")}) · 첫 ${ids.firstOrNull()}")
+                }
+            }
+            val probe = listOfNotNull(firsts["1theK/UUSH"], firsts["1theK/UULF"], firsts["YTN/UUSH"], firsts["YTN/UULV"]).distinct()
+            if (probe.isNotEmpty()) {
+                val (code, j) = ask("/videos", mapOf(
+                    "part" to "snippet,contentDetails,player", "id" to probe.joinToString(","), "maxHeight" to "360",
+                    "fields" to "items(id,snippet(categoryId,liveBroadcastContent),contentDetails/duration,player(embedWidth,embedHeight))",
+                ))
+                items(j).forEach { v ->
+                    val p = v.optJSONObject("player")
+                    val sn = v.optJSONObject("snippet")
+                    val from = firsts.entries.filter { it.value == v.optString("id") }.joinToString(",") { it.key }
+                    row(
+                        "모양 $from",
+                        "$code · ${p?.optInt("embedWidth")}×${p?.optInt("embedHeight")} · 길이 ${v.optJSONObject("contentDetails")?.optString("duration")} · " +
+                            "분류 ${sn?.optString("categoryId")} · ${sn?.optString("liveBroadcastContent")}",
+                    )
+                }
+            }
+            for (cat in listOf("10", "20", "1", "17", "25")) {
+                val (code, j) = ask("/videos", mapOf(
+                    "part" to "snippet", "chart" to "mostPopular", "regionCode" to "KR", "videoCategoryId" to cat, "maxResults" to "10",
+                    "fields" to "items(id,snippet/categoryId)",
+                ))
+                val cats = items(j).map { it.optJSONObject("snippet")?.optString("categoryId") }.groupingBy { it }.eachCount()
+                row("인기 분류 $cat", "$code ${reason(j)} · ${items(j).size}개 · 받은 분류 $cats")
+            }
+            val (allCode, all) = ask("/videos", mapOf(
+                "part" to "snippet", "chart" to "mostPopular", "regionCode" to "KR", "maxResults" to "20", "fields" to "items(id,snippet/categoryId)",
+            ))
+            row("인기 전체", "$allCode · 받은 분류 ${items(all).map { it.optJSONObject("snippet")?.optString("categoryId") }.groupingBy { it }.eachCount()}")
+            val searches = linkedMapOf(
+                "실시간" to mapOf("eventType" to "live"),
+                "뉴스" to mapOf("videoCategoryId" to "25", "publishedAfter" to java.time.Instant.now().minusSeconds(48 * 3600).toString()),
+                "Shorts" to mapOf("videoDuration" to "short", "q" to "#shorts"),
+            )
+            for ((name, extra) in searches) {
+                val (code, j) = ask("/search", mapOf(
+                    "part" to "snippet", "type" to "video", "regionCode" to "KR", "relevanceLanguage" to "ko", "maxResults" to "10",
+                    "fields" to "items(id/videoId,snippet(title,liveBroadcastContent))",
+                ) + extra)
+                row("검색 $name", "$code ${reason(j)} · ${items(j).size}개 · 예: ${items(j).firstOrNull()?.optJSONObject("snippet")?.optString("title")}")
+            }
+        } catch (e: Throwable) {
+            row("오류", "${e.javaClass.simpleName} ${e.message}")
+        } finally {
+            File("build/youtube-live-home.md").writeText(home.toString().replace(key, "***"))
+        }
+    }
 }

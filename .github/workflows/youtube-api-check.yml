@@ -86,10 +86,12 @@ jobs:
       - name: Summary
         if: always()
         run: |
-          if [ -f app/build/youtube-live.md ]; then
-            cat app/build/youtube-live.md >> "$GITHUB_STEP_SUMMARY"
-            cat app/build/youtube-live.md
-          fi
+          for f in app/build/youtube-live*.md; do
+            if [ -f "$f" ]; then
+              cat "$f" >> "$GITHUB_STEP_SUMMARY"
+              cat "$f"
+            fi
+          done
 
       - name: Clean up secrets
         if: always()
