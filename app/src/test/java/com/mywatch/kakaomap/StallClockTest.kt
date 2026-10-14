@@ -149,6 +149,27 @@ class StallClockTest {
         }
     }
 
+    /**
+     * 리뷰에서 찾음: 다시 찾은 경로는 구간 0 부터 세고 남은 거리도 보통 더 긴데, 지난 경로의 구간·최소 남은 거리가 기준으로 남아
+     * 새 경로를 따라 걸어도 진척으로 치지 않았다 → 10분 뒤 저전력, 목적지 근처면 3분 뒤 '도착'으로 안내를 일찍 끝냄
+     */
+    @Test
+    fun aNewRouteAfterARerouteStartsItsOwnBaseline() {
+        val c = StallClock()
+        c.start(0)
+        c.update(walking(300, step = 4), 0)
+        c.update(walking(300, step = 4).copy(offRoute = true), 1 * min)
+        // 다시 찾은 새 경로 (구간 0, 남은 900m)를 따라 걸음
+        fun rerouted(remaining: Int) = walking(remaining, step = 0).copy(routeVersion = 2)
+        c.update(rerouted(900), 2 * min)
+        c.update(rerouted(860), 5 * min)
+        c.update(rerouted(820), 8 * min)
+        assertEquals("새 경로를 따라 걷는 건 진척", 0L, c.stalledMs(8 * min))
+        // 새 경로에서 멈춰 있으면 그때부터 센다
+        c.update(rerouted(815), 18 * min)
+        assertEquals(10 * min, c.stalledMs(18 * min))
+    }
+
     @Test
     fun offTheRouteIsLeftToTheOffRouteClock() {
         // 벗어남·지나침·놓침은 재탐색과 LostClock(벗어난 채 30분) 몫

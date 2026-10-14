@@ -39,7 +39,8 @@ class StallClock {
     }
 
     fun update(s: NavState, now: Long) {
-        val first = last == null
+        // 시작 뒤 처음이거나 다시 찾아 경로가 바뀜(구간 0 부터, 남은 거리도 새로) — 지난 경로의 기준과 비교하지 않는다
+        val first = last?.routeVersion != s.routeVersion
         last = s
         waitingSince = if (s.waitingToBoard) waitingSince ?: now else null
         if (riding(s) || outOfRoute(s) || s.arrived) {
