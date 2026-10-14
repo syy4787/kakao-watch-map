@@ -5,6 +5,7 @@ import android.content.Context
 import androidx.work.ListenableWorker
 import androidx.work.testing.TestListenableWorkerBuilder
 import com.mywatch.kakaomap.net.Http
+import com.mywatch.kakaomap.tube.PendingRevokes
 import com.mywatch.kakaomap.tube.TokenStore
 import com.mywatch.kakaomap.tube.Tokens
 import com.mywatch.kakaomap.tube.TubeAccount
@@ -34,7 +35,7 @@ class TubeRevokeWorkerTest {
         override fun load(): Tokens? = null
         override fun save(t: Tokens) = Unit
         override fun clear() = Unit
-        override fun pendingRevokes(): List<String> = if (unreadable) throw TokenStore.Unreadable() else revokes.toList()
+        override fun pendingRevokes() = PendingRevokes(if (unreadable) emptyList() else revokes.toList(), complete = !unreadable)
         override fun addRevoke(token: String) { revokes += token }
         override fun removeRevoke(token: String) { revokes -= token }
     }

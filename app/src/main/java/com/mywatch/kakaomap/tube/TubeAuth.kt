@@ -2,6 +2,7 @@ package com.mywatch.kakaomap.tube
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.os.Build
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
@@ -52,17 +53,17 @@ interface TokenStore {
 
     /**
      * 로그아웃했지만 아직 구글에 철회를 보내지 못한 refresh 토큰들 (인터넷이 없었을 때 등).
-     * 적어 둔 것을 잠깐 못 읽으면(키 저장소) [Unreadable] — 빈 목록이 아니다 (적어 둔 것은 그대로 남는다)
+     * 키 저장소가 잠깐 안 돼 못 읽은 것이 있으면 [PendingRevokes.complete] 가 false — 그것들은 그대로 남는다
      */
-    fun pendingRevokes(): List<String> = emptyList()
+    fun pendingRevokes(): PendingRevokes = PendingRevokes(emptyList())
     /** 철회할 토큰 하나를 적어 둔다 (다른 것은 건드리지 않는다 — 읽고 고쳐 쓰지 않으므로 못 읽을 때도 잃지 않음) */
     fun addRevoke(token: String) {}
     /** 철회를 보냈다 — 그 토큰만 지운다 */
     fun removeRevoke(token: String) {}
-
-    /** 적어 둔 철회를 지금은 못 읽음 — 다음에 다시 */
-    class Unreadable : Exception()
 }
+
+/** 적어 둔 철회: 읽은 것들([tokens])과 다 읽었는지 ([complete] = false 면 지금 못 읽은 것이 남아 있다 — 다음에 다시) */
+data class PendingRevokes(val tokens: List<String>, val complete: Boolean = true)
 
 /**
  * 유튜브 로그인 — 구글 OAuth 2.0 기기 흐름('TV 및 입력 제한 기기' 클라이언트). 비밀번호는 워치에 넣지 않는다:
@@ -206,41 +207,45 @@ class TubeAuth(
         }
     }
 
-    /** 철회를 못 보낸 토큰이 남아 있음 (적어 둔 것을 지금 못 읽으면 남은 것으로) */
-    val hasPendingRevokes: Boolean get() = synchronized(lock) { pendingOrNull()?.isNotEmpty() ?: true }
+    /** 철회를 못 보낸 토큰이 남아 있음 (적어 둔 것을 지금 못 읽었으면 남은 것으로) */
+    val hasPendingRevokes: Boolean
+        get() = synchronized(lock) { store.pendingRevokes().let { it.tokens.isNotEmpty() || !it.complete } }
+
+    /**
+     * 철회를 보내는 일은 한 번에 하나 (로그아웃·다시 보내기 작업·로그인 시작). 다시 보내기 작업이 느린 연결로 철회를 보내는 중에
+     * 로그인을 시작하면, 그 철회가 승인 뒤에 구글에 닿아 새 로그인을 끊을 수 있다 — 끝날 때까지 기다렸다가 코드를 받는다
+     */
+    private val sending = Any()
 
     /**
      * 구글에 접근 권한 철회 (네트워크 — 백그라운드에서). 보냈거나 더 보낼 필요가 없으면(이미 끊긴 토큰 등 구글의 4xx) true,
      * 끊겼거나 구글이 잠깐 안 되면(5xx·429, 프록시 407·408) false — 적어 둔 것은 남는다
      */
-    fun revoke(t: Tokens?): Boolean = t == null || revokeRefresh(t.refresh) == Sent.DONE
+    fun revoke(t: Tokens?): Boolean = t == null || synchronized(sending) { revokeRefresh(t.refresh) } == Sent.DONE
 
     /**
-     * 철회를 못 보낸 것들을 다시 보낸다. 다 끝났으면 true — 적어 둔 것을 지금 못 읽거나, 보내는 사이 또 로그아웃해
-     * 새로 적힌 것이 있으면 false (작업이 다시 돌아 그것도 보낸다)
+     * 철회를 못 보낸 것들을 다시 보낸다(읽은 것은 다). 다 끝났으면 true — 적어 둔 것을 지금 다 못 읽었거나, 보내는 사이 또
+     * 로그아웃해 새로 적힌 것이 있으면 false (작업이 다시 돌아 그것도 보낸다)
      */
-    fun retryRevokes(): Boolean {
-        val pending = synchronized(lock) { pendingOrNull() } ?: return false
-        val sent = pending.map(::revokeRefresh).all { it == Sent.DONE }
-        return sent && !hasPendingRevokes
+    fun retryRevokes(): Boolean = synchronized(sending) {
+        val pending = synchronized(lock) { store.pendingRevokes() }
+        val sent = pending.tokens.map(::revokeRefresh).all { it == Sent.DONE }
+        sent && pending.complete && !hasPendingRevokes
     }
 
-    /** [start] 전에: 남은 철회를 보낸다. 못 보내면 로그인도 잠시 뒤에 (적어 둔 것을 지금 못 읽으면 막지 않는다 — 드묾) */
-    private fun sendRevokesFirst() {
-        val pending = synchronized(lock) { pendingOrNull() } ?: return
-        for (token in pending) {
+    /**
+     * [start] 전에: 남은 철회를 보낸다. 못 보내면 로그인도 잠시 뒤에. 지금 못 읽은 것 때문에 막지는 않는다
+     * (드묾 — 키 저장소가 계속 안 되는 워치에서 영영 로그인을 못 하지 않게)
+     */
+    private fun sendRevokesFirst() = synchronized(sending) {
+        val pending = synchronized(lock) { store.pendingRevokes() }
+        for (token in pending.tokens) {
             when (revokeRefresh(token)) {
                 Sent.DONE -> Unit
                 Sent.OFFLINE -> throw NetworkException()
                 Sent.LATER -> throw ApiException("구글이 잠깐 응답하지 않아요 — 잠시 뒤 다시 해 주세요")
             }
         }
-    }
-
-    private fun pendingOrNull(): List<String>? = try {
-        store.pendingRevokes()
-    } catch (e: TokenStore.Unreadable) {
-        null
     }
 
     private enum class Sent { DONE, OFFLINE, LATER }
@@ -339,9 +344,9 @@ class PrefsTokenStore(private val prefs: SharedPreferences, private val cipher: 
      * 키 저장소가 잠깐 안 돼 못 읽을 때 새로 적어도 예전 것을 덮어쓰지 않는다
      */
     @Synchronized
-    override fun pendingRevokes(): List<String> {
+    override fun pendingRevokes(): PendingRevokes {
         val out = LinkedHashSet<String>(memoryRevokes)
-        var unreadable = false
+        var complete = true
         for ((key, value) in prefs.all) {
             if (!key.startsWith(REVOKE_PREFIX)) continue
             try {
@@ -349,12 +354,11 @@ class PrefsTokenStore(private val prefs: SharedPreferences, private val cipher: 
                 require(token.isNotBlank())
                 out += token
             } catch (e: Exception) {
-                // 영영 못 읽는 값(다른 키·망가짐)은 지우고, 잠깐 못 읽는 것은 남겨 두고 '못 읽음'으로
-                if (permanent(e) || e is ClassCastException) prefs.edit { remove(key) } else unreadable = true
+                // 영영 못 읽는 값(다른 키·망가짐)은 지우고, 잠깐 못 읽는 것은 남겨 두고 '다 못 읽음'으로 (읽은 것은 돌려준다)
+                if (permanent(e) || e is ClassCastException) prefs.edit { remove(key) } else complete = false
             }
         }
-        if (unreadable) throw TokenStore.Unreadable()
-        return out.toList()
+        return PendingRevokes(out.toList(), complete)
     }
 
     @Synchronized
@@ -383,12 +387,30 @@ class PrefsTokenStore(private val prefs: SharedPreferences, private val cipher: 
 
     /** 다시 해도 안 되는 오류 (값을 지워야 함) */
     private fun permanent(e: Exception): Boolean =
-        e is javax.crypto.BadPaddingException ||                     // AEADBadTagException: 다른 키·망가진 값
-            e is java.security.UnrecoverableKeyException ||
-            e is java.security.InvalidKeyException ||                 // KeyPermanentlyInvalidatedException 포함
-            e is IllegalArgumentException ||                          // Base64 가 아님
-            e is org.json.JSONException ||
-            e is IndexOutOfBoundsException                            // 너무 짧은 값
+        !transientKeystore(e) && (
+            e is javax.crypto.BadPaddingException ||                     // AEADBadTagException: 다른 키·망가진 값
+                e is java.security.UnrecoverableKeyException ||
+                e is java.security.InvalidKeyException ||                 // KeyPermanentlyInvalidatedException 포함
+                e is IllegalArgumentException ||                          // Base64 가 아님
+                e is org.json.JSONException ||
+                e is IndexOutOfBoundsException                            // 너무 짧은 값
+            )
+
+    /**
+     * 안드로이드 키 저장소가 '잠깐 안 됨'이라고 알려 준 오류 (Android 13+). 키 저장소가 바쁘거나 연산이 너무 많을 때는
+     * 보통 InvalidKeyException·UnrecoverableKeyException 으로 오고 원인에 android.security.KeyStoreException 이 붙는다 —
+     * 그 원인이 isTransientFailure 면 다시 하면 될 수 있으니 지우지 않는다
+     */
+    private fun transientKeystore(e: Throwable): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return false
+        var c: Throwable? = e
+        repeat(MAX_CAUSES) {
+            val cur = c ?: return false
+            if (cur is android.security.KeyStoreException) return cur.isTransientFailure
+            c = cur.cause
+        }
+        return false
+    }
 
     @Synchronized
     override fun save(t: Tokens) {
@@ -420,6 +442,8 @@ class PrefsTokenStore(private val prefs: SharedPreferences, private val cipher: 
     private companion object {
         const val KEY = "tokens"
         const val REVOKE_PREFIX = "revoke_"
+        /** 원인 사슬을 이만큼만 따라간다 */
+        const val MAX_CAUSES = 5
     }
 }
 

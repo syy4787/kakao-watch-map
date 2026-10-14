@@ -4,6 +4,7 @@ import com.mywatch.kakaomap.net.ApiException
 import com.mywatch.kakaomap.net.Http
 import com.mywatch.kakaomap.tube.DeviceCode
 import com.mywatch.kakaomap.tube.NetworkException
+import com.mywatch.kakaomap.tube.PendingRevokes
 import com.mywatch.kakaomap.tube.Poll
 import com.mywatch.kakaomap.tube.TokenStore
 import com.mywatch.kakaomap.tube.Tokens
@@ -37,12 +38,12 @@ class TubeAuthTest {
     private class MemoryStore : TokenStore {
         var t: Tokens? = null
         var revokes = mutableListOf<String>()
-        /** 키 저장소가 잠깐 안 됨 — 적어 둔 철회를 못 읽는다 */
-        var unreadable = false
+        /** 키 저장소가 잠깐 안 돼 지금 못 읽는 철회 (적혀 있지만 목록에 안 나옴) */
+        var unreadable = mutableListOf<String>()
         override fun load() = t
         override fun save(t: Tokens) { this.t = t }
         override fun clear() { t = null }
-        override fun pendingRevokes(): List<String> = if (unreadable) throw TokenStore.Unreadable() else revokes.toList()
+        override fun pendingRevokes() = PendingRevokes(revokes.toList(), complete = unreadable.isEmpty())
         override fun addRevoke(token: String) { if (token !in revokes) revokes += token }
         override fun removeRevoke(token: String) { revokes -= token }
     }
@@ -381,13 +382,16 @@ class TubeAuthTest {
     }
 
     @Test
-    fun aNewSignInIsNotBlockedWhenLeftoverRevokesCannotBeReadRightNow() {
-        // 키 저장소가 잠깐 안 돼 적어 둔 것을 못 읽으면 막지 않는다 (계속 안 되는 워치에서 영영 로그인을 못 하지 않게) — 드문 일
-        store.revokes += "RT0"
-        store.unreadable = true
-        g.reply = { deviceCodeReply }
+    fun aNewSignInIsNotBlockedWhenALeftoverRevokeCannotBeReadRightNow() {
+        // 키 저장소가 잠깐 안 돼 못 읽은 것 때문에 막지는 않는다 (계속 안 되는 워치에서 영영 로그인을 못 하지 않게 — 드문 일).
+        // 읽은 것은 먼저 보낸다 (재검토에서 찾음: 하나라도 못 읽으면 읽은 것까지 안 보내, 같은 계정이면 나중에 새 로그인을 끊었다)
+        store.revokes += "RT1"
+        store.unreadable += "RT0"
+        g.reply = { r -> if (r.url == TubeAuth.DEVICE_CODE) deviceCodeReply else Http.Response(200, "") }
         assertEquals("GQVQ-JKEC", auth().start().userCode)
-        assertEquals(listOf("RT0"), store.revokes)
+        assertEquals(listOf(TubeAuth.REVOKE, TubeAuth.DEVICE_CODE), g.reqs.map { it.url })
+        assertEquals("RT1", g.reqs.first().form["token"])
+        assertTrue(store.revokes.isEmpty())
     }
 
     @Test
@@ -404,19 +408,60 @@ class TubeAuthTest {
         }
     }
 
-    /** 리뷰에서 찾음: 적어 둔 철회를 잠깐 못 읽으면 '없음'으로 보아 작업이 '다 보냄'으로 끝났다 → 다음에 다시 */
+    /**
+     * 리뷰에서 찾음: 적어 둔 철회를 잠깐 못 읽으면 '없음'으로 보아 작업이 '다 보냄'으로 끝났다 → 다음에 다시.
+     * 재검토에서 찾음: 하나라도 못 읽으면 읽은 것까지 보내지 않았다 → 읽은 것은 보낸다
+     */
     @Test
-    fun revokesThatCannotBeReadRightNowAreNotReportedAsSent() {
-        store.revokes += "RT0"
-        store.unreadable = true
+    fun revokesThatCannotBeReadRightNowAreNotReportedAsSentButTheRestGo() {
+        store.revokes += "RT1"
+        store.unreadable += "RT0"
+        g.reply = { Http.Response(200, "") }
         val a = auth()
         assertFalse(a.retryRevokes())
+        assertEquals("읽은 것은 보냄", listOf("RT1"), g.reqs.map { it.form["token"] })
         assertTrue(a.hasPendingRevokes)
-        assertTrue(g.reqs.isEmpty())
-        store.unreadable = false
-        g.reply = { Http.Response(200, "") }
+        store.unreadable.clear()
+        store.revokes += "RT0"
         assertTrue(a.retryRevokes())
         assertFalse(a.hasPendingRevokes)
+    }
+
+    /**
+     * 재검토에서 찾음: 다시 보내기 작업이 철회를 보내는 중(연결이 느림)에 로그인을 시작하면 그 철회가 승인 뒤에 구글에 닿아
+     * 새 로그인을 끊을 수 있었다 → 보내는 중이면 끝날 때까지 기다렸다가 코드를 받는다
+     */
+    @Test
+    fun aSignInStartedWhileARevokeIsOnItsWayWaitsForIt() {
+        store.revokes += "RT0"
+        val inFlight = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val revokeDone = java.util.concurrent.atomic.AtomicBoolean(false)
+        var codeAfterRevoke: Boolean? = null
+        g.reply = { r ->
+            when (r.url) {
+                TubeAuth.REVOKE -> {
+                    inFlight.countDown()
+                    release.await(5, TimeUnit.SECONDS)
+                    revokeDone.set(true)
+                    Http.Response(200, "")
+                }
+                else -> {
+                    codeAfterRevoke = revokeDone.get()
+                    deviceCodeReply
+                }
+            }
+        }
+        val a = auth()
+        val worker = thread { a.retryRevokes() }
+        assertTrue(inFlight.await(5, TimeUnit.SECONDS))
+        val login = thread { a.start() }
+        Thread.sleep(200)
+        release.countDown()
+        worker.join(5_000)
+        login.join(5_000)
+        assertEquals("철회가 끝난 뒤에 코드를 받는다", true, codeAfterRevoke)
+        assertEquals("같은 철회를 두 번 보내지 않는다", 1, g.reqs.count { it.url == TubeAuth.REVOKE })
     }
 
     @Test
