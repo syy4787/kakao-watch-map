@@ -319,6 +319,12 @@ class MainActivity : ComponentActivity() {
         statusText.setOnClickListener { if (mapFailed) recreate() }
         statusText.isClickable = false
 
+        // 지난번 안내가 앱이 꺼지며 끊겼으면 그 목적지를 다시 찾아 준다 (안내 시작은 사용자가 — 그 사이 버스를 탔을 수 있음).
+        // 앱이 정리된 뒤 최근 앱·허브로 돌아오면 Android 가 저장해 둔 상태와 함께 이 화면을 다시 만드므로 그것과 상관없이 본다
+        // (같은 프로세스 안에서 다시 만들어지면 경로가 그대로 있거나 이미 꺼내 간 뒤라 다시 뜨지 않는다).
+        // 지도 엔진이 안 떠도 진동 안내는 되므로 아래에서 일찍 끝나기 전에
+        offerInterruptedGuidance()
+
         val initError = MapApp.initError
         if (initError != null) {
             showStatus(getString(R.string.error_sdk_init, initError.javaClass.simpleName), isError = true)
@@ -332,13 +338,6 @@ class MainActivity : ComponentActivity() {
         bumpControls()
         // 지도 인증·로딩을 기다리지 않고 안내부터 (블루투스로 느리거나 지도 인증이 실패해도 진동 안내는 되게)
         ensureNavigation()
-        // 지난번 안내가 앱이 꺼지며 끊겼으면 그 목적지를 다시 찾아 준다 (안내 시작은 사용자가 — 그 사이 버스를 탔을 수 있음)
-        if (savedInstanceState == null && RouteRepository.activeRoute == null) {
-            RouteRepository.takeInterrupted(this)?.let { lost ->
-                Toast.makeText(this, getString(R.string.guidance_interrupted, lost.place.name), Toast.LENGTH_LONG).show()
-                DirectionsActivity.open(this, lost.place, lost.mode)
-            }
-        }
 
         // 안내 상태(현재 구간·남은 거리·도착·재탐색)를 지도 배너와 저전력 화면에 반영
         lifecycleScope.launch {
@@ -760,6 +759,14 @@ class MainActivity : ComponentActivity() {
      * '안내 시작'한 경로면 지도 준비와 상관없이 안내 서비스를 켠다 — 지도 인증이 늦거나(폰 블루투스로 연결) 실패해도
      * 진동 안내·진행 중 아이콘은 되게. 지도에 경로를 그리는 건 지도가 준비된 뒤 syncRoute 가 한다.
      */
+    /** 끊긴 안내가 있으면 알리고 그 목적지 길찾기를 연다 (한 번만 — 꺼내면 지워진다) */
+    private fun offerInterruptedGuidance() {
+        if (RouteRepository.activeRoute != null) return
+        val lost = RouteRepository.takeInterrupted(this) ?: return
+        Toast.makeText(this, getString(R.string.guidance_interrupted, lost.place.name), Toast.LENGTH_LONG).show()
+        DirectionsActivity.open(this, lost.place, lost.mode)
+    }
+
     private fun ensureNavigation() {
         val active = RouteRepository.activeRoute ?: return
         if (!active.startNavigation || NavigationService.running || !Locator.hasPermission(this)) return

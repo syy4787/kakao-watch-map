@@ -179,6 +179,15 @@ object RouteRepository {
         }
     }
 
+    /**
+     * 도착함 — 경로는 몇 분 더 보여 주지만(목적지까지 직선거리) 여정은 끝났으니, 그 사이 앱이 꺼져도
+     * 다음에 '끊긴 안내'로 다시 찾지 않는다
+     */
+    fun forgetInterrupted() {
+        val c = appContext ?: return
+        runCatching { c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit { remove(KEY_INTERRUPTED) } }
+    }
+
     /** 끊긴 안내가 있으면(6시간 안) 돌려주고 지운다 */
     fun takeInterrupted(context: Context): Interrupted? {
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)

@@ -62,6 +62,8 @@ object Navigator {
         val events = eng.update(fix.coord, fix.accuracyM, fix.elapsedMs)
         _state.value = eng.state
         if (active.startNavigation) events.forEach { vibrate(context, it) }
+        // 도착: 경로는 몇 분 더 보이지만 그 사이 앱이 꺼져도 다 끝난 여정을 '끊긴 안내'로 다시 찾지 않게
+        if (active.startNavigation && NavEvent.ARRIVED in events) RouteRepository.forgetInterrupted()
         // 안내 중 시내 버스를 타러 가거나 기다리면 실시간 도착을 붙인다 (위치가 올 때 함께 판단 — 따로 깨우지 않음)
         LiveBusTracker.onState(context.applicationContext, active, eng.routeVersion, eng.state)
     }

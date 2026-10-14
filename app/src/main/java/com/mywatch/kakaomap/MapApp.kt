@@ -10,6 +10,7 @@ import android.os.Looper
 import android.os.Process
 import android.os.SystemClock
 import android.util.Log
+import androidx.annotation.VisibleForTesting
 import com.kakao.vectormap.KakaoMapSdk
 import com.mywatch.kakaomap.data.ErrorLog
 import com.mywatch.kakaomap.data.RouteRepository
@@ -156,6 +157,6 @@ class MapApp : Application() {
         /** SDK 초기화 실패 원인 (정상이면 null) */
         @Volatile
         var initError: Throwable? = null
-            private set
+            @VisibleForTesting internal set
     }
 }
