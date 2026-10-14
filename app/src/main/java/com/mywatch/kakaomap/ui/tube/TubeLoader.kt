@@ -1,0 +1,154 @@
+package com.mywatch.kakaomap.ui.tube
+
+import com.mywatch.kakaomap.tube.SignInNeededException
+import com.mywatch.kakaomap.tube.TubePage
+import com.mywatch.kakaomap.tube.TubeSource
+import com.mywatch.kakaomap.tube.YouTubeQuotaException
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
+
+/** 받을 거리 — [key] 로 기억한다. [mine] = 내 계정 데이터 (로그아웃하면 지움), [ttlMs] = 이만큼은 다시 받지 않는다 */
+sealed class Feed(val key: String, val mine: Boolean, val ttlMs: Long) {
+    class Popular(val category: String?) : Feed("popular/${category ?: "all"}", false, LONG)
+    class Search(val query: String) : Feed("search/$query", false, SHORT)
+    data object SubsFeed : Feed("subs/feed", true, SHORT)
+    data object SubsChannels : Feed("subs/channels", true, SHORT)
+    data object Liked : Feed("liked", true, SHORT)
+    data object MyPlaylists : Feed("myplaylists", true, SHORT)
+    data object Account : Feed("account", true, LONG)
+    class ChannelInfo(val id: String) : Feed("channel/$id", false, LONG)
+    class ChannelVideos(val id: String) : Feed("channel/$id/videos", false, SHORT)
+    class ChannelPlaylists(val id: String) : Feed("channel/$id/playlists", false, LONG)
+    class PlaylistVideos(val id: String, val own: Boolean) : Feed("playlist/$id", own, SHORT)
+
+    override fun equals(other: Any?) = other is Feed && other.key == key
+    override fun hashCode() = key.hashCode()
+    override fun toString() = key
+
+    companion object {
+        /** 받은 데이터는 메모리에만 잠깐 (유튜브 정책: 받은 것을 오래 두지 않기) */
+        const val SHORT = 15 * 60_000L
+        const val LONG = 30 * 60_000L
+    }
+}
+
+/** 받은 한 쪽 (+ 검색이면 어디서 찾았는지·바꿔 찾은 이유) */
+data class Fetched(val page: TubePage, val source: TubeSource? = null, val note: String? = null)
+
+/** 데이터를 받는 곳 (워치에선 유튜브 Data API + 카카오 검색, 시험에선 가짜) */
+interface TubeBackend {
+    /** [feed] 의 한 쪽. [token] = 더 보기면 다음 쪽 값, [source] = 검색 '더 보기'는 처음 찾은 곳에서 */
+    suspend fun fetch(feed: Feed, token: String?, source: TubeSource?): Fetched
+}
+
+/**
+ * 화면 하나가 보여 줄 데이터의 상태. [page] 가 있으면 보여 준다 (새로 고치는 동안에도 그대로),
+ * 없으면 [loading] 이면 회색 자리, [error] 면 이유 + 다시 시도 ([signIn] 이면 로그인 안내)
+ */
+data class Slot(
+    val page: TubePage? = null,
+    val loading: Boolean = false,
+    val loadingMore: Boolean = false,
+    val error: String? = null,
+    val signIn: Boolean = false,
+    val source: TubeSource? = null,
+    val note: String? = null,
+    val loadedAt: Long = 0,
+)
+
+/**
+ * 화면들의 데이터를 받아 메모리에 잠깐 기억한다 (메인 스레드에서 쓴다). 받으면 [changed] 로 알린다.
+ *  · 없거나 오래됐을 때만 받는다 (15~30분), 받는 중엔 또 묻지 않는다
+ *  · 더 보기는 아래에 붙인다 (같은 것은 한 번). 더 보기가 실패하면 보던 것은 그대로, 알림은 [takeMoreError] 로 한 번
+ *  · 로그아웃하면 내 계정 데이터는 지운다 ([clearMine]) — 받는 중이던 것도 버린다
+ */
+class TubeLoader(
+    private val scope: CoroutineScope,
+    private val backend: TubeBackend,
+    private val now: () -> Long = System::currentTimeMillis,
+    private val changed: (Feed) -> Unit,
+) {
+    private val slots = HashMap<String, Slot>()
+    private val jobs = HashMap<String, Job>()
+    private val moreErrors = HashMap<String, String>()
+
+    fun slot(feed: Feed): Slot = slots[feed.key] ?: Slot()
+
+    /** 화면을 열 때: 없거나 오래됐거나 실패했으면 받는다. [force] = 새로 고침·다시 시도 */
+    fun load(feed: Feed, force: Boolean = false) {
+        if (feed.mine) mineKeys += feed.key
+        val s = slot(feed)
+        val running = jobs[feed.key]?.isActive == true
+        if (running && !force) return
+        if (!force && s.page != null && s.error == null && now() - s.loadedAt < feed.ttlMs) return
+        jobs[feed.key]?.cancel()
+        slots[feed.key] = s.copy(loading = true, loadingMore = false, error = null, signIn = false)
+        changed(feed)
+        jobs[feed.key] = scope.launch {
+            val next = try {
+                val r = backend.fetch(feed, null, null)
+                Slot(page = r.page, source = r.source, note = r.note, loadedAt = now())
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: SignInNeededException) {
+                slot(feed).copy(loading = false, error = e.message, signIn = true, page = null)
+            } catch (e: Exception) {
+                slot(feed).copy(loading = false, error = e.message ?: "불러오지 못했어요")
+            }
+            slots[feed.key] = next
+            changed(feed)
+        }
+    }
+
+    /** 더 보기: 다음 쪽을 아래에 붙인다 */
+    fun more(feed: Feed) {
+        val s = slot(feed)
+        val token = s.page?.next ?: return
+        if (s.loadingMore || jobs[feed.key]?.isActive == true) return
+        slots[feed.key] = s.copy(loadingMore = true)
+        changed(feed)
+        jobs[feed.key] = scope.launch {
+            val next = try {
+                val r = backend.fetch(feed, token, s.source)
+                val cur = slot(feed)
+                cur.copy(page = merge(cur.page ?: r.page, r.page), loadingMore = false)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: YouTubeQuotaException) {
+                moreErrors[feed.key] = e.message.orEmpty()
+                slot(feed).let { it.copy(loadingMore = false, page = it.page?.copy(next = null)) }
+            } catch (e: Exception) {
+                moreErrors[feed.key] = e.message ?: "더 불러오지 못했어요"
+                slot(feed).copy(loadingMore = false)
+            }
+            slots[feed.key] = next
+            changed(feed)
+        }
+    }
+
+    /** 더 보기 실패 알림 (한 번만) */
+    fun takeMoreError(feed: Feed): String? = moreErrors.remove(feed.key)
+
+    /** 로그아웃: 내 계정 데이터를 지운다 (받는 중이던 것도 버림) */
+    fun clearMine() {
+        (slots.keys + jobs.keys).filter(::isMine).toSet().forEach { key ->
+            jobs.remove(key)?.cancel()
+            slots.remove(key)
+            moreErrors.remove(key)
+        }
+    }
+
+    /** 내 계정 데이터의 키 (받을 때 기억해 둔다 — 로그아웃하면 이것들을 지움) */
+    private val mineKeys = HashSet<String>()
+
+    private fun isMine(key: String) = key in mineKeys
+
+    private fun merge(old: TubePage, new: TubePage): TubePage = TubePage(
+        videos = (old.videos + new.videos).distinctBy { it.id },
+        next = new.next,
+        channels = (old.channels + new.channels).distinctBy { it.id },
+        playlists = (old.playlists + new.playlists).distinctBy { it.id },
+    )
+}
