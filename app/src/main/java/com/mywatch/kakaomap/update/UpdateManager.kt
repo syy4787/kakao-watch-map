@@ -140,7 +140,8 @@ object UpdateManager {
             val info = UpdateInfo.parse(conn.inputStream.bufferedReader().use { it.readText() })
             prefs(c).edit { putString(KEY_LATEST, info.toJson()).remove(KEY_ERROR) }
             if (info.versionCode > currentVersionCode(c)) return info
-            // 이미 최신 → 설치하고 남은 APK(십수 MB)는 워치 저장공간만 차지하므로 지운다
+            // 이미 최신 → 설치하고 남은 APK(십수 MB)는 워치 저장공간만 차지하므로 지우고, 큰 업데이트 기다림도 끝
+            prefs(c).edit { remove(KEY_WAITING) }
             synchronized(downloadLock) { cacheDir(c).listFiles()?.forEach { it.delete() } }
             return null
         } finally {
@@ -180,18 +181,22 @@ object UpdateManager {
     /** 크기를 모르면(예전 update.json) 크다고 본다 */
     fun isBig(info: UpdateInfo): Boolean = (info.sizeBytes ?: Long.MAX_VALUE) > BIG_BYTES
 
-    /** 자동 업데이트가 이 릴리스를 처음 기다리기 시작한 때 */
-    private fun waitingSince(c: Context, info: UpdateInfo, now: Long): Long {
+    /**
+     * 자동 업데이트가 큰 업데이트를 처음 기다리기 시작한 때 — 버전과 상관없이 (새 버전이 하루에도 여러 번 나오므로
+     * 버전마다 새로 세면 Wi-Fi 없는 워치는 영영 못 받는다). 최신이 되면 [check] 가 지운다.
+     * 예전 앱이 남긴 "버전:시각" 도 시각만 쓰고, 미래 시각(시계 변경 등)은 믿지 않는다
+     */
+    private fun waitingSince(c: Context, now: Long): Long {
         val p = prefs(c)
-        val saved = p.getString(KEY_WAITING, null)?.split(':')
-        if (saved != null && saved.size == 2 && saved[0] == info.versionCode.toString()) saved[1].toLongOrNull()?.let { return it }
-        p.edit { putString(KEY_WAITING, "${info.versionCode}:$now") }
+        val saved = p.getString(KEY_WAITING, null)?.substringAfterLast(':')?.toLongOrNull()
+        if (saved != null && saved <= now) return saved
+        p.edit { putString(KEY_WAITING, now.toString()) }
         return now
     }
 
     /** 자동 업데이트가 Wi-Fi 에서만 받아야 하는지: 큰 업데이트이고 아직 이틀이 안 됨 ('지금 업데이트'는 언제나 어디서든) */
     fun autoNeedsWifi(c: Context, info: UpdateInfo, now: Long = clock()): Boolean =
-        isBig(info) && now - waitingSince(c, info, now) < WIFI_PATIENCE_MS
+        isBig(info) && now - waitingSince(c, now) < WIFI_PATIENCE_MS
 
     /** 지금 시각 (시험에선 바꿔 끼운다) */
     @VisibleForTesting

@@ -343,6 +343,69 @@ class UpdateOutsideTest {
         assertEquals(1, server.apkRequests.size)
     }
 
+    private fun autoInstallOnce() = runBlocking { TestListenableWorkerBuilder<UpdateInstallWorker>(context).build().doWork() }
+
+    @Test
+    fun newReleasesDoNotRestartTheTwoDayWifiWait() {
+        // 새 버전은 하루에도 여러 번 나온다 — '이틀 기다림'이 새 버전마다 처음부터면 Wi-Fi 없는 워치는 영영 업데이트를 못 받는다
+        val start = System.currentTimeMillis()
+        UpdateManager.clock = { start }
+        server.updateJson = server.updateJsonFor(999, size = 105_000_000)
+        UpdateManager.check(context)
+        autoInstallOnce()
+        assertEquals(0, server.apkRequests.size)
+        // 하루 뒤 또 새 버전
+        UpdateManager.clock = { start + Duration.ofDays(1).toMillis() }
+        server.apk = ByteArray(310_000) { (it * 7 % 251).toByte() }
+        server.updateJson = server.updateJsonFor(1000, size = 105_000_000)
+        UpdateManager.check(context)
+        autoInstallOnce()
+        assertEquals("아직 이틀이 안 됨", 0, server.apkRequests.size)
+        // 처음 기다리기 시작한 때부터 이틀이 지나면 폰으로라도
+        UpdateManager.clock = { start + Duration.ofDays(2).plusMinutes(1).toMillis() }
+        autoInstallOnce()
+        assertEquals(1, server.apkRequests.size)
+    }
+
+    @Test
+    fun onceUpToDateTheNextBigUpdateWaitsAFreshTwoDays() {
+        val start = System.currentTimeMillis()
+        UpdateManager.clock = { start }
+        server.updateJson = server.updateJsonFor(999, size = 105_000_000)
+        UpdateManager.check(context)
+        autoInstallOnce()
+        // '지금 업데이트' 등으로 최신이 됨 (update.json 이 지금 버전 이하)
+        server.updateJson = server.updateJsonFor(0, size = 105_000_000)
+        UpdateManager.check(context)
+        // 사흘 뒤 나온 큰 새 버전은 다시 Wi-Fi 부터 기다린다
+        UpdateManager.clock = { start + Duration.ofDays(3).toMillis() }
+        server.updateJson = server.updateJsonFor(999, size = 105_000_000)
+        UpdateManager.check(context)
+        autoInstallOnce()
+        assertEquals(0, server.apkRequests.size)
+    }
+
+    @Test
+    fun theWaitStoredByTheOldVersionStillCounts() {
+        // 예전 앱은 "버전:시각" 으로 저장했다 — 버전이 달라도 그 시각부터 센다
+        val start = System.currentTimeMillis()
+        context.getSharedPreferences("updates", Context.MODE_PRIVATE).edit().putString("waiting_since", "998:$start").commit()
+        val big = UpdateInfo(999, "2.899", server.apkUrl, "aa", "", sizeBytes = 105_000_000)
+        assertTrue(UpdateManager.autoNeedsWifi(context, big, now = start + Duration.ofDays(1).toMillis()))
+        assertFalse(UpdateManager.autoNeedsWifi(context, big, now = start + Duration.ofDays(2).plusMinutes(1).toMillis()))
+    }
+
+    @Test
+    fun aWaitStartTimeInTheFutureIsNotTrusted() {
+        // 시계를 바꿨거나 잘못 저장된 미래 시각이면 지금부터 센다 (이틀 + 엉뚱한 만큼 밀리지 않게)
+        val now = System.currentTimeMillis()
+        context.getSharedPreferences("updates", Context.MODE_PRIVATE).edit()
+            .putString("waiting_since", (now + Duration.ofDays(30).toMillis()).toString()).commit()
+        val big = UpdateInfo(999, "2.899", server.apkUrl, "aa", "", sizeBytes = 105_000_000)
+        assertTrue(UpdateManager.autoNeedsWifi(context, big, now = now))
+        assertFalse(UpdateManager.autoNeedsWifi(context, big, now = now + Duration.ofDays(2).plusMinutes(1).toMillis()))
+    }
+
     @Test
     fun aBigUpdateWhoseWifiDropsMidwayWaitsInsteadOfFinishingOverThePhone() {
         server.updateJson = server.updateJsonFor(999, size = 105_000_000)
