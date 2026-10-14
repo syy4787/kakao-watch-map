@@ -458,4 +458,106 @@ class ScreensRenderTest {
         },
         pages = 3,
     )
+
+    // ───────── 이번에 바뀐 화면 (watch-polish) ─────────
+
+    @Test
+    fun transitCardsMissAndLongMeta() = shoot(
+        "transit_miss",
+        head(TravelMode.TRANSIT, times) +
+            Row.TransitCard(1, transit[1], "106번 3분 (2번째 전) · 놓칠 수 있어요 · 다음 15분", fastest = true) +
+            Row.TransitCard(2, transit[2], "105 곧 도착 · 115 7분 · 912 12분", fastest = false),
+        fontScale = 1.3f,
+    )
+
+    @Test
+    fun tubeLoginPhoneSteps() {
+        TubeThumbs.enabled = false
+        val code = com.mywatch.kakaomap.tube.DeviceCode("dc", "PSQ-RWD-XKZ", "https://www.google.com/device", tubeNow + 1_800_000, 5)
+        tube("tube_login_sending", TubeRows.login(tubeApp, TubeRows.LoginState.Waiting(code, phone = TubeRows.PhoneStep.SENDING)), pages = 3)
+        tube("tube_login_opened", TubeRows.login(tubeApp, TubeRows.LoginState.Waiting(code, phone = TubeRows.PhoneStep.OPENED)), pages = 3, fontScale = 1.3f)
+    }
+
+    /** 실제 길찾기 검색 화면 (가짜 위치·검색): 첫 화면의 '내 주변' → 종류 고르기 → 화장실 결과 */
+    @Test
+    fun searchNearby() {
+        val app = org.robolectric.RuntimeEnvironment.getApplication()
+        com.mywatch.kakaomap.data.RouteRepository.init(app)
+        com.mywatch.kakaomap.data.RouteRepository.clearRecents(app)
+        com.mywatch.kakaomap.data.RouteRepository.addRecent(app, place("한밭수목원", "식물원,수목원", "대전 서구 둔산대로 169", 7300))
+        com.mywatch.kakaomap.data.Favorites.set(app, com.mywatch.kakaomap.data.Favorite.HOME, place("우리 집", "아파트", "대전", null))
+        val toilets = listOf(
+            place("보라매공원 공중화장실", "화장실", "대전 서구 둔산동 1488", 140),
+            place("대전시청 1층 개방화장실", "화장실", "대전 서구 둔산로 100", 260),
+            place("둔산대공원 화장실", "화장실", "대전 서구 만년동 396", 870),
+        )
+        val here = Coord(36.3504, 127.3849)
+        com.mywatch.kakaomap.ui.SearchActivity.finderFor = {
+            com.mywatch.kakaomap.net.PlaceSearch(
+                recent = { here }, locate = { null }, keyword = { _, _ -> emptyList() }, nearby = { _, _ -> toilets },
+            )
+        }
+        try {
+            val controller = Robolectric.buildActivity(com.mywatch.kakaomap.ui.SearchActivity::class.java)
+            val activity = controller.get()
+            activity.requestWindowFeature(Window.FEATURE_NO_TITLE)
+            controller.setup()
+            shadowOf(Looper.getMainLooper()).idle()
+            capture(activity, "search_home_nearby", pages = 2)
+            tapRow(activity) { it is Row.Action && it.text == activity.getString(R.string.nearby_title) }
+            capture(activity, "nearby_kinds", pages = 2)
+            tapRow(activity) { it is Row.Action && it.text == "화장실" }
+            val deadline = System.currentTimeMillis() + 3_000
+            while (System.currentTimeMillis() < deadline && rowsOf(activity).none { it is Row.PlaceItem }) {
+                Thread.sleep(10)
+                shadowOf(Looper.getMainLooper()).idle()
+            }
+            capture(activity, "nearby_toilets", pages = 2)
+            controller.pause().stop().destroy()
+        } finally {
+            com.mywatch.kakaomap.ui.SearchActivity.finderFor = com.mywatch.kakaomap.ui.SearchActivity.liveFinder
+            com.mywatch.kakaomap.data.Favorites.clear(app, com.mywatch.kakaomap.data.Favorite.HOME)
+        }
+    }
+
+    private fun rowsOf(activity: android.app.Activity): List<Row> =
+        (activity.findViewById<androidx.recyclerview.widget.RecyclerView>(R.id.list).adapter as com.mywatch.kakaomap.ui.RowAdapter).rows
+
+    private fun tapRow(activity: android.app.Activity, which: (Row) -> Boolean) {
+        val rv = activity.findViewById<androidx.recyclerview.widget.RecyclerView>(R.id.list)
+        val i = rowsOf(activity).indexOfFirst(which)
+        check(i >= 0) { "누를 줄이 없음: ${rowsOf(activity)}" }
+        val size = activity.resources.displayMetrics.widthPixels
+        val spec = android.view.View.MeasureSpec.makeMeasureSpec(size, android.view.View.MeasureSpec.EXACTLY)
+        rv.scrollToPosition(i)
+        rv.measure(spec, spec)
+        rv.layout(0, 0, size, size)
+        rv.findViewHolderForAdapterPosition(i)!!.itemView.performClick()
+        shadowOf(Looper.getMainLooper()).idle()
+    }
+
+    /** 실제 화면(액티비티)을 둥근 워치 크기로 — [shoot] 와 같은 모양 */
+    private fun capture(activity: android.app.Activity, name: String, pages: Int) {
+        val list = activity.findViewById<androidx.recyclerview.widget.RecyclerView>(R.id.list)
+        list.scrollToPosition(0)
+        shadowOf(Looper.getMainLooper()).idle()
+        val root = activity.window.decorView
+        val size = activity.resources.displayMetrics.widthPixels
+        for (page in 0 until pages) {
+            if (page > 0) {
+                list.scrollBy(0, (size * 0.8f).toInt())
+                shadowOf(Looper.getMainLooper()).idle()
+            }
+            val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+            val c = Canvas(bmp)
+            c.drawColor(Color.BLACK)
+            root.draw(c)
+            val mask = Path().apply {
+                addRect(0f, 0f, size.toFloat(), size.toFloat(), Path.Direction.CW)
+                addCircle(size / 2f, size / 2f, size / 2f, Path.Direction.CCW)
+            }
+            c.drawPath(mask, Paint().apply { color = Color.rgb(40, 40, 40) })
+            FileOutputStream(File(out, "${name}_$page.png")).use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        }
+    }
 }
