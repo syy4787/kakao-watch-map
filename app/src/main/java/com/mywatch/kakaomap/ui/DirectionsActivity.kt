@@ -40,6 +40,7 @@ import com.mywatch.kakaomap.net.IntercityPlanner
 import com.mywatch.kakaomap.net.KakaoApi
 import com.mywatch.kakaomap.net.LiveIntercitySource
 import com.mywatch.kakaomap.net.TagoApi
+import com.mywatch.kakaomap.net.TransitAnswers
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -355,27 +356,33 @@ class DirectionsActivity : ComponentActivity() {
             if (e is CancellationException) throw e
             ErrorLog.record("길찾기·기차·버스", e)
         }
-        val found = got?.getOrNull()
-        found?.problems?.firstOrNull()?.let { ErrorLog.record("길찾기·기차·버스", it) }
-        val routes = cityRoutes.orEmpty() + found?.routes.orEmpty()
-        if (routes.isEmpty()) {
-            // 둘 다 경로가 없으면 카카오의 답(대중교통 길 없음·끊김)을 그대로
-            val e = city.exceptionOrNull()
-            errors[m] = e?.message ?: getString(R.string.no_transit)
-            if (e != null && e !is RouteStatusException) ErrorLog.record("길찾기·${modeName(m)}", e)
+        got?.getOrNull()?.problems?.firstOrNull()?.let { ErrorLog.record("길찾기·기차·버스", it) }
+        city.exceptionOrNull()?.let { e -> if (e !is RouteStatusException) ErrorLog.record("길찾기·${modeName(m)}", e) }
+        // 둘 다 경로가 없으면 받지 못한 것(끊김·시간표)과 '길이 없다'는 답을 가려 말하고, 경로가 있으면 받지 못한 쪽을 아래에
+        val answer = TransitAnswers.combine(city, got)
+        val error = answer.error
+        if (error != null) {
+            errors[m] = when (error) {
+                is TransitAnswers.Error.City -> error.message
+                is TransitAnswers.Error.Intercity -> getString(if (error.partial) R.string.intercity_partial else R.string.intercity_failed)
+                is TransitAnswers.Error.None -> error.message ?: getString(R.string.no_transit)
+            }
             RouteRepository.transitRoutes = null
             RouteRepository.transitNote = null
         } else {
             if (RouteRepository.transitRoutes !== cityRoutes) liveTexts.clear()
-            RouteRepository.transitRoutes = routes
-            RouteRepository.transitNote = when {
-                got?.isFailure == true -> getString(R.string.intercity_failed)
-                found != null && found.problems.isNotEmpty() -> getString(R.string.intercity_partial)
-                found?.weekly == true -> getString(R.string.intercity_weekly)
-                else -> null
-            }
+            RouteRepository.transitRoutes = answer.routes
+            RouteRepository.transitNote = answer.notes.joinToString("\n") { getString(noteText(it)) }.ifBlank { null }
+            RouteRepository.transitIncomplete = answer.incomplete
         }
         showTransit()
+    }
+
+    private fun noteText(n: TransitAnswers.Note): Int = when (n) {
+        TransitAnswers.Note.CITY_FAILED -> R.string.city_transit_failed
+        TransitAnswers.Note.INTERCITY_FAILED -> R.string.intercity_failed
+        TransitAnswers.Note.INTERCITY_PARTIAL -> R.string.intercity_partial
+        TransitAnswers.Note.INTERCITY_WEEKLY -> R.string.intercity_weekly
     }
 
     private fun showTransit() {
@@ -557,6 +564,10 @@ class DirectionsActivity : ComponentActivity() {
             body += shown.map { Row.TransitCard(it.index, it.value, liveTexts[it.index], fastest = it.index == fastest) }
         }
         RouteRepository.transitNote?.let { body += Row.Note(it) }
+        // 받지 못한 것이 있으면(시간표·시내 길) 한 번에 다시 찾기
+        if (RouteRepository.transitIncomplete && fetches[TravelMode.TRANSIT]?.isActive != true) {
+            body += Row.Action(ACTION_RETRY_TRANSIT, R.drawable.ic_refresh, getString(R.string.transit_retry))
+        }
         if (!TagoApi.isConfigured) {
             val far = origin?.let(::far) == true
             body += Row.Note(getString(if (far) R.string.intercity_tago_missing else R.string.tago_missing))
@@ -629,6 +640,15 @@ class DirectionsActivity : ComponentActivity() {
                     }
                 }
                 ACTION_RETRY_OPTIONS -> origin?.let { retryMissing(mode, it) }
+                ACTION_RETRY_TRANSIT -> origin?.let { from ->
+                    if (fetches[TravelMode.TRANSIT]?.isActive == true) return
+                    RouteRepository.transitRoutes = null
+                    RouteRepository.transitNote = null
+                    liveTexts.clear()
+                    errors.remove(TravelMode.TRANSIT)
+                    fetch(TravelMode.TRANSIT, from)
+                    render()
+                }
                 ACTION_PERMISSION -> if (permissionBlocked) {
                     PermissionHelp.openAppSettings(this)   // 돌아오면 onResume 에서 다시 찾는다
                 } else {
@@ -662,6 +682,7 @@ class DirectionsActivity : ComponentActivity() {
         private const val ACTION_NAVIGATE = "navigate"
         private const val ACTION_MAP = "map"
         private const val ACTION_RETRY_OPTIONS = "retry_options"
+        private const val ACTION_RETRY_TRANSIT = "retry_transit"
         private const val RETRY_DELAY_MS = 400L
         private const val MINUTE_MS = 60_000L
         /** 목록을 보는 동안 실시간 버스 도착을 새로 받는 간격 */

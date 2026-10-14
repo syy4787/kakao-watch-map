@@ -85,6 +85,12 @@ object RouteRepository {
 
     /** 대중교통 목록 아래에 붙일 말 (기차·버스 시간표를 받지 못함 · 지난 시간표로 채움 등) */
     var transitNote: String? = null
+        set(value) {
+            field = value
+            if (value == null) transitIncomplete = false
+        }
+    /** 대중교통 결과에 받지 못한 것이 있음 (목록 아래 '다시 찾기') — [transitNote] 를 지우면 함께 */
+    var transitIncomplete: Boolean = false
     /** 도보·자전거 경로 카드 (카카오맵의 경로 옵션별 결과, 같은 길은 한 카드) */
     var walkChoices: List<RouteChoice>? = null
     var bikeChoices: List<RouteChoice>? = null

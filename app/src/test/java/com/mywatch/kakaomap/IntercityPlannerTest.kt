@@ -165,6 +165,52 @@ class IntercityPlannerTest {
         assertFalse(result.weekly)
     }
 
+    /** 점검 A3: 역까지 길을 받다 잠깐 끊기면 그 역(대전역 KTX)이 말없이 빠졌다 → 한 번 더 묻는다 */
+    @Test
+    fun aBlipOnTheWayToTheStationIsAskedOnceMore() = runBlocking {
+        val fake = object : Fake() {
+            var failed = false
+            override fun transit(from: Coord, to: Coord, toName: String): TransitRoute? {
+                val route = super.transit(from, to, toName)
+                if (toName == "대전역" && !failed) {
+                    failed = true
+                    throw ApiException("네트워크 연결을 확인하세요")
+                }
+                return route
+            }
+        }
+        val result = IntercityPlanner(fake).plan(origin, dest, at(9, 25))
+        assertTrue(result.problems.isEmpty())
+        assertEquals(3, result.routes.count { it.type == "TRAIN" })
+        assertEquals(2, fake.transitCalls.count { it == "출발>대전역" })
+    }
+
+    @Test
+    fun aStationWhoseWayStaysUnreachableIsReportedNotSilentlyDropped() = runBlocking {
+        val fake = object : Fake() {
+            override fun transit(from: Coord, to: Coord, toName: String): TransitRoute? {
+                val route = super.transit(from, to, toName)
+                if (toName == "대전역") throw ApiException("네트워크 연결을 확인하세요")
+                return route
+            }
+        }
+        val result = IntercityPlanner(fake).plan(origin, dest, at(9, 25))
+        assertTrue("열차는 빠지지만", result.routes.none { it.type == "TRAIN" })
+        assertTrue("버스는 그대로", result.routes.any { it.type == "EXPRESS" })
+        assertEquals(listOf("대전역까지 길: 네트워크 연결을 확인하세요"), result.problems)
+    }
+
+    @Test
+    fun noTransitToAFarStationIsAnAnswerNotAProblem() = runBlocking {
+        val fake = object : Fake() {
+            override fun transit(from: Coord, to: Coord, toName: String): TransitRoute? =
+                super.transit(from, to, toName).takeIf { toName != "대전역" }
+        }
+        val result = IntercityPlanner(fake).plan(origin, dest, at(9, 25))
+        assertTrue(result.problems.isEmpty())
+        assertEquals(1, fake.transitCalls.count { it == "출발>대전역" })
+    }
+
     @Test
     fun nothingNearbyMeansNoRoutesAndNoComplaints() = runBlocking {
         val fake = object : Fake() {

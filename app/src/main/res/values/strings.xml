@@ -69,6 +69,8 @@
     <string name="no_transit">대중교통 경로가 없어요</string>
     <string name="intercity_failed">기차·고속·시외버스 시간표를 받지 못했어요</string>
     <string name="intercity_partial">기차·버스 시간표 일부를 받지 못했어요</string>
+    <string name="city_transit_failed">시내 버스·지하철 길을 받지 못했어요</string>
+    <string name="transit_retry">다시 찾기</string>
     <string name="intercity_weekly">오늘 열차 시간표에 빠진 KTX가 있어 다음 주 같은 요일 시간표로 채웠어요</string>
     <string name="intercity_tago_missing">기차·고속·시외버스는 공공데이터 키를 넣으면 보여요</string>
     <string name="tago_missing">실시간 버스 도착은 공공데이터 키를 넣으면 보여요</string>

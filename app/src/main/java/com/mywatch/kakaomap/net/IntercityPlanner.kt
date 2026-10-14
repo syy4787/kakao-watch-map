@@ -19,6 +19,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -124,8 +125,8 @@ class IntercityPlanner(private val source: IntercitySource) {
         val live = pairs.indices.filter { i -> runs[i].any { it.depAtMs >= soon } }
         val depPlaces = live.map { pairs[it].dep.place }.distinctBy { it.name }
         val arrPlaces = live.map { pairs[it].arr.place }.distinctBy { it.name }
-        val depLegs = depPlaces.map { pl -> async(Dispatchers.IO) { leg(origin, pl.coord, pl, pl.name) } }
-        val arrLegs = arrPlaces.map { pl -> async(Dispatchers.IO) { leg(pl.coord, destination.coord, pl, destination.name) } }
+        val depLegs = depPlaces.map { pl -> async(Dispatchers.IO) { leg(origin, pl.coord, pl, pl.name, problems) } }
+        val arrLegs = arrPlaces.map { pl -> async(Dispatchers.IO) { leg(pl.coord, destination.coord, pl, destination.name, problems) } }
         val depBy = depPlaces.zip(depLegs.awaitAll()).toMap()
         val arrBy = arrPlaces.zip(arrLegs.awaitAll()).toMap()
 
@@ -166,21 +167,31 @@ class IntercityPlanner(private val source: IntercitySource) {
 
     /**
      * [from] → [to] 의 실제 길: 700m 안이면 걸어서, 아니면 카카오 대중교통 (가장 빠른 것).
-     * 대중교통 길이 없거나 받지 못하면 2.5km 안은 걸어서, 그보다 멀면 이 역은 쓰지 않는다(null).
+     * 대중교통 길이 없으면(답) 2.5km 안은 걸어서, 그보다 멀면 이 역은 쓰지 않는다(null).
+     * 받지 못하면(끊김 등) 한 번 더 묻고, 그래도 못 받으면 걸어서 갈 거리가 아닌 역은 빼되 [problems] 에 남긴다 —
+     * 예전엔 말없이 빠져 'KTX 가 없다'로 보였다
      */
-    private fun leg(from: Coord, to: Coord, place: Place, toName: String): AccessLeg? {
+    private suspend fun leg(from: Coord, to: Coord, place: Place, toName: String, problems: MutableList<String>): AccessLeg? {
         val d = Geo.distanceM(from, to)
         val walk = AccessLeg(place, null, IntercityItineraries.walkSec(from, to), 0)
         if (d <= IntercityItineraries.WALK_ONLY_M) return walk
-        val route = try {
-            source.transit(from, to, toName)
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            null
+        var failure: Exception? = null
+        for (attempt in 0 until LEG_ATTEMPTS) {
+            if (attempt > 0) delay(LEG_RETRY_DELAY_MS)
+            val route = try {
+                source.transit(from, to, toName)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                failure = e
+                continue
+            }
+            if (route != null) return AccessLeg(place, route, route.totalTimeSec, route.fare)
+            return if (d <= WALK_FALLBACK_M) walk else null
         }
-        if (route != null) return AccessLeg(place, route, route.totalTimeSec, route.fare)
-        return if (d <= WALK_FALLBACK_M) walk else null
+        if (d <= WALK_FALLBACK_M) return walk
+        problems += "${place.name}까지 길: ${failure?.message ?: "받지 못했어요"}"
+        return null
     }
 
     private fun highSpeed(p: Place) = p.category.contains("KTX") || p.category.contains("SRT")
@@ -209,6 +220,9 @@ class IntercityPlanner(private val source: IntercitySource) {
         /** 지금부터 이 안에 떠나는 편만 남은 역은 길을 받지 않는다 (어차피 못 탐) */
         private const val MIN_LEAD_SEC = 5 * 60
         private const val WALK_FALLBACK_M = 2_500.0
+        /** 역까지 길은 끊기면 한 번 더 */
+        private const val LEG_ATTEMPTS = 2
+        private const val LEG_RETRY_DELAY_MS = 600L
         private val SEOUL: ZoneId = ZoneId.of("Asia/Seoul")
     }
 }
