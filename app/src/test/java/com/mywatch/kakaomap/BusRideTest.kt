@@ -190,6 +190,36 @@ class BusRideTest {
         assertEquals("5번 승차", e.state.bannerTitle)
     }
 
+    /**
+     * 리뷰에서 찾음: 정류장에서 기다리다 위치가 정류장 바로 앞(걸어온 길 끝)에 찍히면 '기다리는 중'이 꺼졌다 —
+     * 그러면 서 있을 땐 위치가 거의 안 오는 간격(3m 움직여야)으로 바뀌어 실시간 버스 도착을 묻지 못하고(위치가 올 때 함께 물음),
+     * '버스 곧 도착' 진동이 늦거나 오지 않았다
+     */
+    @Test
+    fun waitingJustBeforeTheStopStaysWaiting() {
+        val dest = east(2_000.0, 40.0)
+        val route = busRoute(dest)
+        val e = NavEngine(route, dest, 1)
+        val rnd = Random(7)
+        val toStop = move(route[0].points, 1.3, 1_000, 3.0, rnd, 0)
+        toStop.forEach { e.update(it.c, it.acc, it.t) }
+        val walkPts = route[0].points
+        // 정류장 8m 앞(걸어온 길 위)에서 12분 서 있음
+        val wait = stay(pointAt(walkPts, length(walkPts) - 8.0), 12 * 60, 5_000, 2.0, rnd, toStop.last().t)
+        var notWaiting = 0
+        wait.forEach { f ->
+            e.update(f.c, f.acc, f.t)
+            if (!e.state.waitingBus) notWaiting++
+        }
+        assertEquals("기다리는 동안 내내 '기다리는 중'", 0, notWaiting)
+        assertEquals("5번 승차", e.state.bannerTitle)
+        assertEquals(1, e.state.boardingStep)
+        val plan = LocationPolicy.navigation(e.state, false, 0f, 0)
+        assertEquals("서 있어도 5초마다 위치 (그때마다 실시간 도착을 물을 수 있게)", LocPower.HIGH, plan.power)
+        assertEquals(5_000L, plan.intervalMs)
+        assertEquals(0f, plan.minDistanceM)
+    }
+
     @Test
     fun aBusLeavingBackAlongTheWalkedStreetIsBoardedSoon() {
         // 걸어온 길(실제 걷는 길처럼 점 여러 개)을 따라 정류장에 왔는데, 버스는 길 건너(11m 북쪽)에서 그 길을 되짚어 감 —

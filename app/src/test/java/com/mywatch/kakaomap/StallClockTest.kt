@@ -62,17 +62,90 @@ class StallClockTest {
 
     @Test
     fun ridingOrWaitingForARideIsNeverAStall() {
-        val c = StallClock()
-        c.start(0)
         for (s in listOf(
             walking(5_000).copy(onRide = true),
             walking(5_000).copy(waitingBus = true),
             walking(5_000).copy(waitingLongRide = true),
             walking(5_000).copy(onRide = true, onSubway = true),
         )) {
+            val c = StallClock()
+            c.start(0)
             c.update(s, 50 * min)
             assertEquals(0L, c.stalledMs(50 * min))
-            assertFalse(c.shouldGiveUp(s, 200 * min))
+            assertFalse(c.shouldGiveUp(s, 100 * min))
+            if (s.onRide) assertFalse("타는 중엔 몇 시간이어도", c.shouldGiveUp(s, 300 * min))
+        }
+    }
+
+    /** 지하철 승강장(지하)에서 기다림: 타는 중도 버스 기다림도 아닌 상태 — 지하라 쓸 만한 위치가 거의 안 온다 */
+    private val platform = NavState(
+        routeVersion = 1, stepIndex = 0, matched = true, remainingM = 4_000, toStepEndM = 0, toActionM = 0,
+        onSubway = true, boardingStep = 1,
+    )
+
+    /**
+     * 리뷰에서 찾음: 지하철을 기다리는 동안은 진척 없는 시간으로 셌다 — 지하에선 쓸 만한 위치(50m 이내)가 안 오고 탄 것도
+     * 늦게 확인돼서, 30분 뒤 '위치를 못 받아' 안내를 끝냈다 (지하철을 타고 가는 중에)
+     */
+    @Test
+    fun waitingForTheSubwayUndergroundIsNotAStall() {
+        val c = StallClock()
+        c.start(0)
+        c.update(platform, 0)
+        c.update(platform, 45 * min)
+        assertEquals(0L, c.stalledMs(45 * min))
+        assertFalse(c.shouldGiveUp(platform, 45 * min))
+        assertFalse(c.arrivedNearby(platform, dest, dest, 45 * min))
+    }
+
+    /**
+     * 리뷰에서 찾음: 시내 버스 정류장에서 기다리다 위치가 정류장 바로 앞(걸어온 길 끝)에 찍히면 '기다림'이 아닌 '멈춤'으로 셌다 —
+     * 10분 뒤 저전력 위치(10m 움직여야 옴)로 내려가 실시간 도착을 더 묻지 못했다 (위치가 올 때 함께 묻는다)
+     */
+    @Test
+    fun standingWithinThirtyMetresOfTheStopToBoardIsWaiting() {
+        val c = StallClock()
+        c.start(0)
+        val atStop = walking(4_000, step = 0).copy(toStepEndM = 12, toActionM = 12, boardingStep = 1)
+        c.update(atStop, 0)
+        c.update(atStop, 20 * min)
+        assertEquals(0L, c.stalledMs(20 * min))
+        val plan = LocationPolicy.navigation(atStop, false, 0f, 0, stalledMs = 20 * min)
+        assertEquals(LocPower.HIGH, plan.power)
+        // 정류장에서 먼 곳(걸어가는 길 위)에 멈춰 있는 건 그대로 멈춤
+        val c2 = StallClock()
+        c2.start(0)
+        val before = walking(4_000, step = 0).copy(toStepEndM = 200, toActionM = 200, boardingStep = 1)
+        c2.update(before, 0)
+        c2.update(before, 20 * min)
+        assertEquals(20 * min, c2.stalledMs(20 * min))
+    }
+
+    @Test
+    fun waitingForARideIsGivenUpOnlyAfterTwoHours() {
+        // 정류장 옆 집에서 '안내 시작'만 누르고 잊어버린 경우 — GPS 를 5초마다 끝없이 쓰지 않게 (버스 간격이 길어도 2시간이면 충분)
+        val c = StallClock()
+        c.start(0)
+        val waiting = walking(4_000, step = 0).copy(toStepEndM = 0, toActionM = 0, boardingStep = 1, waitingBus = true)
+        c.update(waiting, 0)
+        c.update(waiting, 100 * min)
+        assertFalse(c.shouldGiveUp(waiting, 100 * min))
+        assertEquals("위치가 안 와도 그때 깨워서 본다", 120 * min + 1_000, c.nextDeadline(100 * min))
+        assertTrue(c.shouldGiveUp(waiting, 121 * min))
+        assertFalse("알림은 '위치를 못 받음'이 아니라 '나아가지 않음' 문구", c.noFix(waiting, 121 * min))
+        // 타면 처음부터
+        c.update(waiting.copy(onRide = true, waitingBus = false, boardingStep = null), 122 * min)
+        assertFalse(c.shouldGiveUp(waiting.copy(onRide = true, waitingBus = false, boardingStep = null), 300 * min))
+    }
+
+    @Test
+    fun waitingForTheSubwayUsesCellAndWifiInsteadOfGps() {
+        // 승강장(지하)에선 GPS 가 위성을 찾느라 전기만 쓴다 — 타는 중처럼 기지국·Wi-Fi 위치 10초 (코드 설명엔 그렇게 적혀 있었지만
+        // 실제로는 타는 중에만 그랬고 기다리는 동안엔 GPS 1초였다)
+        for (speed in listOf(null, 0f, 1.2f)) {
+            val plan = LocationPolicy.navigation(platform, false, speed, 0)
+            assertEquals("속도 $speed", LocPower.BALANCED, plan.power)
+            assertEquals(10_000L, plan.intervalMs)
         }
     }
 
@@ -106,6 +179,7 @@ class StallClockTest {
         c.update(s, 1 * min)
         assertFalse(c.shouldGiveUp(s, 30 * min))
         assertTrue(c.shouldGiveUp(s, 32 * min))
+        assertTrue("알림은 '위치를 못 받음' 문구", c.noFix(s, 32 * min))
         // 위치가 다시 오면 처음부터
         c.onUsableFix(32 * min)
         c.update(walking(450), 32 * min)

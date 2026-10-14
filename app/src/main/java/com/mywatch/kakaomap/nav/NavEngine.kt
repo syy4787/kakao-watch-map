@@ -65,7 +65,7 @@ data class NavState(
     /** 다음에 할 일 (배너 화살표) */
     val action: Action? = null,
     val icon: NavIcon = NavIcon.WALK,
-    /** 지금 지하철을 타고 가는 중 (지하라 GPS 가 거의 안 잡힘) */
+    /** 지금 지하철을 타고 가거나 승강장에서 기다리는 중 (지하라 GPS 가 거의 안 잡힘) */
     val onSubway: Boolean = false,
     /** 기차·고속·시외버스를 타고 가는 중 (내릴 역이 멀면 저전력 위치로) */
     val onLongRide: Boolean = false,
@@ -93,7 +93,15 @@ data class NavState(
     val boardingStep: Int? = null,
     /** 시내 버스 정류장에서 기다리는 중 (위치는 5초 간격이면 충분 — 탔는지는 노선을 따라 60m 넘게 가야 안다) */
     val waitingBus: Boolean = false,
-)
+) {
+    /**
+     * 타려고 기다리는 중 — 시내 버스 정류장·지하철 승강장·기차역(터미널)에서, 또는 탈 곳 30m 안에 서 있음
+     * (정류장에서 GPS 가 흔들려 걸어온 길 끝에 찍혀도). 오래 서 있어도 '멈춤'이 아니다 ([StallClock]·[LocationPolicy])
+     */
+    val waitingToBoard: Boolean
+        get() = !onRide && (waitingBus || waitingLongRide || onSubway ||
+            (boardingStep != null && (toStepEndM ?: Int.MAX_VALUE) <= NavEngine.BOARD_SOON_M))
+}
 
 /**
  * 경로 안내 판단 — 안드로이드와 무관한 순수 계산이라 시뮬레이션 테스트(가짜 GPS 재생)로 검증한다.
@@ -634,7 +642,9 @@ class NavEngine(
             icon = if (state.rerouting) NavIcon.WARNING else icon,
             passedStop = false,
             boardingStep = if (!cur.ride && steps.getOrNull(p.stepIndex + 1)?.ride == true) p.stepIndex + 1 else null,
-            waitingBus = false,
+            // 정류장에서 기다리다 GPS 가 흔들려 걸어온 길 끝(정류장 바로 앞)에 찍혀도 '기다리는 중' — 안 그러면 위치 간격이
+            // 서 있을 땐 거의 안 오는 쪽으로 바뀌어 실시간 버스 도착을 못 묻는다 (위치가 올 때 함께 물음)
+            waitingBus = !cur.ride && isCityBus(p.stepIndex + 1) && p.toStepEndM <= BOARD_SOON_M,
         ).with(say)
         return events
     }

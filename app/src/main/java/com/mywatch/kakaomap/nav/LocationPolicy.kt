@@ -29,7 +29,7 @@ data class LocPlan(
  *      버스에서 내릴 곳이 3km 넘게 → 15초, 1.5km 넘게 → 10초(모아 받기), 그 안 → 3초
  *      기차·고속버스에서 내릴 역이 10km 넘게(도착 10분 넘게 남음) → GPS 끄고 기지국·Wi-Fi 위치 1분, 4km 넘게 → 10초, 그 안 → 3초
  *      기차·고속버스 역에서 기다리는 중 → 출발 3분 전까지 Wi-Fi·기지국 위치 30초
- *      지하철(지하) → GPS 대신 기지국·Wi-Fi 위치 10초 (지하에선 GPS 가 위성을 찾느라 전기만 씀)
+ *      지하철(지하, 승강장에서 기다리는 중도) → GPS 대신 기지국·Wi-Fi 위치 10초 (지하에선 GPS 가 위성을 찾느라 전기만 씀)
  *      실내 출발 등으로 1분 넘게 경로에 못 오름 → 3초 / 도착 → 2분간 저전력 10초, 그 뒤엔 추가 전력 0 인 '얻어 쓰기'
  *      경로 밖에 멈춰 있음 → 5초, 10분 넘게 → GPS 끄고 Wi-Fi·기지국 15초, 벗어난 채 30분 → 안내를 스스로 끝냄
  *      배터리 15% 이하(충전 중 아님) → 간격 두 배 (회전 앞도 2초)
@@ -103,8 +103,8 @@ object LocationPolicy {
         // 재탐색 중에는 정확히 따라간다 (잠깐)
         if (s.rerouting) return LocPlan(LocPower.HIGH, 1_000)
         // 경로 위에서 10분 넘게 진척 없이 멈춰 있음(목적지 건물 안·경로 위 카페 등): GPS 대신 Wi-Fi·기지국 위치 —
-        // 몇 분마다 GPS 로 확인해 걷기 시작하면 바로 다시 GPS (타거나 기다리는 중은 제외)
-        if (stalledMs >= STALL_LOW_POWER_MS && still && !s.onRide && !s.waitingBus && !s.waitingLongRide) {
+        // 몇 분마다 GPS 로 확인해 걷기 시작하면 바로 다시 GPS (타거나 기다리는 중은 제외 — 정류장에선 실시간 도착을 계속 물어야 함)
+        if (stalledMs >= STALL_LOW_POWER_MS && still && !s.onRide && !s.waitingToBoard) {
             return LocPlan(LocPower.BALANCED, 15_000, minDistanceM = 10f)
         }
         // 기차가 내릴 역을 지나침: 다음 역에 설 때까지는 내릴 수 없고 다시 찾기도 그때 하므로 저전력으로 기다린다
@@ -129,8 +129,9 @@ object LocationPolicy {
         if (s.waitingLongRide && !s.onRide && minutesLeft != null && minutesLeft > WAIT_GPS_MINUTES) {
             return LocPlan(LocPower.BALANCED, 30_000)
         }
+        // 지하철(지하): 타는 중이든 승강장에서 기다리는 중이든 GPS 대신 기지국·Wi-Fi 위치 (지하에선 GPS 가 위성을 찾느라 전기만 씀)
+        if (s.onSubway) return LocPlan(LocPower.BALANCED, 10_000)
         if (s.onRide) {
-            if (s.onSubway) return LocPlan(LocPower.BALANCED, 10_000)                   // 지하: 기지국·Wi-Fi 위치
             if (s.onLongRide) {
                 // 기차·고속버스: 내릴 역이 10km 넘게, 도착까지 10분 넘게 → GPS 끄고 기지국·Wi-Fi 위치 1분 (KTX 안은 GPS 도 잘 안 잡힘).
                 // 중간 역에 서 있어도(멈춤) 그대로 — 1시간 넘게 타도 GPS 를 거의 안 씀. 모아 받기는 안 함(오래된 위치는 버려지므로).

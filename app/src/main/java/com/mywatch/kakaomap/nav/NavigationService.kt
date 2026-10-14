@@ -368,8 +368,7 @@ class NavigationService : Service() {
             return true
         }
         if (stall.shouldGiveUp(s, now)) {
-            val noFix = s.matched && stall.stalledMs(now) < StallClock.GIVE_UP_MS
-            notifyGaveUp(active, if (noFix) R.string.nav_no_fix_text else R.string.nav_stalled_text)
+            notifyGaveUp(active, if (stall.noFix(s, now)) R.string.nav_no_fix_text else R.string.nav_stalled_text)
             finishRoute()
             return true
         }
