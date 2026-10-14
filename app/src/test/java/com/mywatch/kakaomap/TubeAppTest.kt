@@ -39,6 +39,7 @@ import com.mywatch.kakaomap.ui.TubeThumbs
 import com.mywatch.kakaomap.ui.tube.Feed
 import com.mywatch.kakaomap.ui.tube.Fetched
 import com.mywatch.kakaomap.ui.tube.TubeBackend
+import kotlinx.coroutines.CompletableDeferred
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -52,6 +53,7 @@ import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.Shadows.shadowOf
+import org.robolectric.android.controller.ActivityController
 import org.robolectric.annotation.Config
 import org.robolectric.shadows.ShadowToast
 import java.time.Duration
@@ -76,13 +78,16 @@ class TubeAppTest {
     private val popular = listOf(v("popularaaa1"), v("popularaaa2"))
     private val channel = TubeChannel("UCweOkPb1wVVH0Q0Tlj4a5Pw", "1theK (원더케이)", "https://yt3.ggpht.com/k=s240", 25_300_000, 13_000, "UUweOkPb1wVVH0Q0Tlj4a5Pw")
 
-    /** 가짜 유튜브 (바로 대답) */
+    /** 가짜 유튜브 (바로 대답 — [holds] 에 있는 물음은 풀어 줄 때까지 기다림: 느린 연결) */
     private class FakeBackend : TubeBackend {
         val pages = HashMap<String, (String?) -> Fetched>()
         val asked = mutableListOf<String>()
+        val holds = HashMap<String, CompletableDeferred<Unit>>()
         var fail: Exception? = null
         override suspend fun fetch(feed: Feed, token: String?, source: TubeSource?): Fetched {
-            asked += feed.key + (token?.let { "@$it" } ?: "")
+            val key = feed.key + (token?.let { "@$it" } ?: "")
+            asked += key
+            holds[key]?.await()
             fail?.let { throw it }
             return pages[feed.key]?.invoke(token) ?: Fetched(TubePage(emptyList(), null))
         }
@@ -164,7 +169,7 @@ class TubeAppTest {
 
     private fun titles(a: TubeActivity) = rows(a).filterIsInstance<Row.Header>().map { it.title }
 
-    private fun tap(a: TubeActivity, long: Boolean = false, which: (Row) -> Boolean) {
+    private fun tap(a: TubeActivity, long: Boolean = false, wait: Boolean = true, which: (Row) -> Boolean) {
         val rv = a.findViewById<RecyclerView>(R.id.list)
         val i = rows(a).indexOfFirst(which)
         assertTrue("누를 줄이 있다: ${rows(a).map { it::class.simpleName + ":" + ((it as? Row.Action)?.id ?: (it as? Row.Header)?.title ?: "") }}", i >= 0)
@@ -180,10 +185,11 @@ class TubeAppTest {
             (holder.itemView as android.view.ViewGroup).getChildAt(chips.items.indexOfFirst { which(Row.Action(it.id, it.icon, it.text)) }.coerceAtLeast(0))
         } else holder.itemView
         if (long) target.performLongClick() else target.performClick()
-        settle { !opening(a) }
+        if (wait) settle { !opening(a) } else idle()
     }
 
-    private fun tapAction(a: TubeActivity, id: String) = tap(a) { it is Row.Action && it.id == id || it is Row.Chips && it.items.any { c -> c.id == id } }
+    private fun tapAction(a: TubeActivity, id: String, wait: Boolean = true) =
+        tap(a, wait = wait) { it is Row.Action && it.id == id || it is Row.Chips && it.items.any { c -> c.id == id } }
 
     private fun tapCard(a: TubeActivity, id: String, long: Boolean = false) = tap(a, long) { it is Row.VideoCard && it.video.id == id }
 
@@ -338,6 +344,88 @@ class TubeAppTest {
         val ids = Uri.parse(s?.getStringExtra(TubePlayerActivity.EXTRA_URL)?.replace("#", "?")).getQueryParameter("ids").orEmpty().split(',')
         assertEquals("처음 것 다음 29개 (둘째 쪽까지)", (2..30).map { "mine%07d".format(it) }, ids)
         assertTrue(backend.asked.contains(Feed.PlaylistVideos("PLmine0000001", own = true).key + "@M2"))
+    }
+
+    private val myPlaylist = Feed.PlaylistVideos("PLmine0000001", own = true)
+
+    /** 비공개 내 재생목록(30개 — 첫 쪽 20개, 둘째 쪽 10개)을 열어 둔다 */
+    private fun openMyPrivatePlaylist(): ActivityController<TubeActivity> {
+        signIn()
+        backend.pages[Feed.Account.key] = { Fetched(TubePage(emptyList(), null, channels = listOf(channel))) }
+        backend.pages[Feed.MyPlaylists.key] = {
+            Fetched(TubePage(emptyList(), null, playlists = listOf(TubePlaylist("PLmine0000001", "드라이브", "나", null, 30, privacy = "private"))))
+        }
+        backend.pages[myPlaylist.key] = { token ->
+            if (token == null) Fetched(TubePage((1..20).map { v("mine%07d".format(it)) }, "M2"))
+            else Fetched(TubePage((21..30).map { v("mine%07d".format(it)) }, null))
+        }
+        val controller = Robolectric.buildActivity(TubeActivity::class.java).setup()
+        val a = controller.get()
+        settle { !opening(a) }
+        tapAction(a, TubeRows.A_LIBRARY)
+        tapAction(a, TubeRows.A_MY_PLAYLISTS)
+        tap(a) { it is Row.PlaylistItem }
+        assertEquals("드라이브", titles(a).first())
+        return controller
+    }
+
+    /**
+     * 리뷰에서 찾음: 비공개 내 재생목록의 '모두 재생'은 더 받는 사이 홈으로 나가도 다 받으면 재생 화면을 띄워 저절로 틀었다
+     * (안드로이드는 앱이 막 가려진 뒤 몇 초는 화면을 띄울 수 있다) → 나갔으면 받은 것만 목록에 두고 틀지 않는다
+     */
+    @Test
+    fun leavingWhileMyPlaylistIsGatheredDoesNotStartThePlayer() {
+        val hold = CompletableDeferred<Unit>()
+        backend.holds[myPlaylist.key + "@M2"] = hold
+        val controller = openMyPrivatePlaylist()
+        val a = controller.get()
+        tapAction(a, TubeRows.A_PLAY_ALL, wait = false)
+        assertTrue("더 받는 중", opening(a))
+        controller.pause().stop()   // 홈으로
+        hold.complete(Unit)
+        idle()
+        assertNull("나갔으면 틀지 않는다", started(a))
+        controller.start().resume()
+        settle { !opening(a) }
+        assertEquals("받은 것은 목록에", 30, rows(a).filterIsInstance<Row.VideoCard>().size)
+        assertNull(started(a))
+    }
+
+    @Test
+    fun goingBackWhileMyPlaylistIsGatheredDoesNotStartThePlayer() {
+        val hold = CompletableDeferred<Unit>()
+        backend.holds[myPlaylist.key + "@M2"] = hold
+        val a = openMyPrivatePlaylist().get()
+        tapAction(a, TubeRows.A_PLAY_ALL, wait = false)
+        a.onBackPressedDispatcher.onBackPressed()   // 마음을 바꿈
+        idle()
+        hold.complete(Unit)
+        idle()
+        assertNull("돌아갔으면 틀지 않는다", started(a))
+        assertEquals("내 재생목록", titles(a).first())
+    }
+
+    /** 리뷰에서 찾음: 끝까지 내려 다음 쪽을 저절로 받는 중에 '모두 재생'을 누르면 같은 쪽을 또 받았다 (사용량) */
+    @Test
+    fun playAllWaitsForThePageAlreadyComingInsteadOfAskingForItAgain() {
+        val hold = CompletableDeferred<Unit>()
+        backend.holds[myPlaylist.key + "@M2"] = hold
+        val a = openMyPrivatePlaylist().get()
+        val rv = a.findViewById<RecyclerView>(R.id.list)
+        val spec = View.MeasureSpec.makeMeasureSpec(480, View.MeasureSpec.EXACTLY)
+        repeat(30) {
+            rv.measure(spec, spec)
+            rv.layout(0, 0, 480, 480)
+            rv.scrollBy(0, 400)
+            idle()
+        }
+        assertTrue("끝까지 내려 다음 쪽을 받는 중", backend.asked.contains(myPlaylist.key + "@M2"))
+        tapAction(a, TubeRows.A_PLAY_ALL, wait = false)
+        hold.complete(Unit)
+        settle { shadowOf(a).peekNextStartedActivity() != null }
+        val ids = Uri.parse(started(a)?.getStringExtra(TubePlayerActivity.EXTRA_URL)?.replace("#", "?")).getQueryParameter("ids").orEmpty().split(',')
+        assertEquals((2..30).map { "mine%07d".format(it) }, ids)
+        assertEquals("같은 쪽은 한 번만", 1, backend.asked.count { it == myPlaylist.key + "@M2" })
     }
 
     @Test

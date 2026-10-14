@@ -57,6 +57,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * 워치용 유튜브 앱 (워치 앱 목록의 '유튜브'): 유튜브 앱처럼 홈(이어서 보기·구독 새 동영상·인기 음악·인기 동영상) · 검색(동영상·채널·재생목록) ·
@@ -91,7 +92,11 @@ class TubeActivity : ComponentActivity() {
 
     private var login: LoginState = LoginState.Starting
     private var loginJob: Job? = null
-    private var visible = false
+    /**
+     * 화면을 떠났음(홈·다른 앱·화면 꺼짐 — onStop). 그 사이 끝난 일(더 받기·확인)로는 재생 화면을 띄우지 않는다:
+     * 안드로이드는 앱이 막 가려진 뒤 몇 초는 화면을 띄울 수 있어 안 보는 사이 저절로 틀 수 있었다
+     */
+    private var left = false
     /** 지난번에 볼 때 로그인돼 있었는지 — 계정에서 앱 접근을 끊는 등으로 로그아웃되면 내 데이터·내 화면을 걷어 낸다 */
     private var wasSignedIn = false
 
@@ -177,7 +182,7 @@ class TubeActivity : ComponentActivity() {
 
     override fun onStart() {
         super.onStart()
-        visible = true
+        left = false
         resumeLogin()
     }
 
@@ -196,7 +201,7 @@ class TubeActivity : ComponentActivity() {
     }
 
     override fun onStop() {
-        visible = false
+        left = true
         // 로그인 기다리기는 화면이 보일 때만 (돌아오면 같은 코드로 이어서)
         loginJob?.cancel()
         loginJob = null
@@ -756,9 +761,13 @@ class TubeActivity : ComponentActivity() {
         opening = true
         openingText = R.string.tube_opening_list
         render()
+        val at = nav.top
         lifecycleScope.launch {
             var all: TubePage = page
             try {
+                // 끝까지 내려 다음 쪽을 저절로 받는 중이면 그것부터 기다린다 (같은 쪽을 또 받지 않게 — 사용량)
+                withTimeoutOrNull(MORE_WAIT_MS) { loader.settled(feed) }
+                all = loader.slot(feed).page ?: page
                 for (k in 0 until PLAY_ALL_MORE_PAGES) {
                     val token = all.next ?: break
                     if (all.videos.count { it.embeddable } >= TubeLinks.MAX_QUEUE) break
@@ -772,9 +781,17 @@ class TubeActivity : ComponentActivity() {
                 opening = false
             }
             loader.offer(feed, all)
+            // 받는 사이 나갔거나 뒤로 갔으면 받은 것만 목록에 두고 틀지 않는다
+            if (!stillHere(at)) {
+                render()
+                return@launch
+            }
             playPrivate(all, p.id)
         }
     }
+
+    /** 일을 시작한 화면([at])을 그대로 보고 있다 — 기다리는 사이 나가거나 뒤로 가지 않았다 */
+    private fun stillHere(at: Page) = !left && !isFinishing && nav.top == at
 
     /** 비공개 내 재생목록을 받은 동영상 번호로 (폰에선 그 재생목록으로) */
     private fun playPrivate(page: TubePage, id: String) {
@@ -809,11 +826,17 @@ class TubeActivity : ComponentActivity() {
         opening = true
         openingText = R.string.tube_opening
         render()
+        val at = nav.top
         lifecycleScope.launch {
             val reachable = try {
                 WatchPlayer.reachable()
             } finally {
                 opening = false
+            }
+            // 확인하는 사이 나갔거나 뒤로 갔으면 틀지 않는다 (안 보는 사이 저절로 재생되지 않게)
+            if (!stillHere(at)) {
+                render()
+                return@launch
             }
             if (!reachable) {
                 render()
@@ -931,6 +954,8 @@ class TubeActivity : ComponentActivity() {
         private val OPEN_PLAYLISTS = setOf("public", "unlisted")
         /** 비공개 내 재생목록 '모두 재생'에서 더 받는 쪽 수 (20개씩 — 재생 화면이 받는 50개까지) */
         private const val PLAY_ALL_MORE_PAGES = 2
+        /** '모두 재생' 전에 저절로 받던 다음 쪽을 기다리는 최대 시간 */
+        private const val MORE_WAIT_MS = 15_000L
         /** 타일에서 바로 온 일을 마치고 닫기까지 ('폰에서 열림' 애니메이션 길이쯤) */
         private const val SHORTCUT_CLOSE_MS = 1_800L
 

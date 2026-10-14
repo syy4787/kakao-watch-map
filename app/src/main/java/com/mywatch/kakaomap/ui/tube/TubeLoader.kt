@@ -151,6 +151,14 @@ class TubeLoader(
         }
     }
 
+    /** 받는 중인 것(새로 고침·더 보기, 이어지는 더 보기까지)이 끝날 때까지 기다린다 ('모두 재생'이 같은 쪽을 또 받지 않게) */
+    suspend fun settled(feed: Feed) {
+        while (true) {
+            val job = jobs[feed.key]?.takeIf { it.isActive } ?: return
+            job.join()
+        }
+    }
+
     /** 다른 곳에서 더 받은 목록으로 바꾼다 ('모두 재생'이 비공개 재생목록을 더 받았을 때 — 목록에도 보이게) */
     fun offer(feed: Feed, page: TubePage) {
         val s = slot(feed)
