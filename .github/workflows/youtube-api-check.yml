@@ -61,7 +61,11 @@ jobs:
       - name: Ask the real API
         run: ./gradlew --no-daemon testDebugUnitTest --tests com.mywatch.kakaomap.YouTubeDataLiveTest
 
+      # 요약(키 없음)을 실행 요약과 로그 둘 다에
       - name: Summary
         if: always()
         run: |
-          if [ -f app/build/youtube-live.md ]; then cat app/build/youtube-live.md >> "$GITHUB_STEP_SUMMARY"; fi
+          if [ -f app/build/youtube-live.md ]; then
+            cat app/build/youtube-live.md >> "$GITHUB_STEP_SUMMARY"
+            cat app/build/youtube-live.md
+          fi

@@ -5,24 +5,38 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
 
-/** 아주 작은 HTTP GET 도우미 (라이브러리 없이 HttpURLConnection 사용) */
+/** 아주 작은 HTTP 도우미 (라이브러리 없이 HttpURLConnection 사용) */
 object Http {
 
     class Response(val code: Int, val body: String)
 
     @Throws(IOException::class)
-    fun get(url: String, headers: Map<String, String> = emptyMap(), timeoutMs: Int = 12_000): Response {
+    fun get(url: String, headers: Map<String, String> = emptyMap(), timeoutMs: Int = 12_000): Response =
+        send(url, "GET", null, headers, timeoutMs)
+
+    /** 폼(application/x-www-form-urlencoded)을 보낸다 — 구글 로그인(OAuth) 요청 */
+    @Throws(IOException::class)
+    fun post(url: String, form: Map<String, String>, headers: Map<String, String> = emptyMap(), timeoutMs: Int = 12_000): Response =
+        send(url, "POST", query(form).toByteArray(Charsets.UTF_8), headers, timeoutMs)
+
+    private fun send(url: String, method: String, body: ByteArray?, headers: Map<String, String>, timeoutMs: Int): Response {
         val conn = URL(url).openConnection() as HttpURLConnection
         try {
             conn.connectTimeout = timeoutMs
             conn.readTimeout = timeoutMs
-            conn.requestMethod = "GET"
+            conn.requestMethod = method
             conn.setRequestProperty("Accept", "application/json")
             headers.forEach { (k, v) -> conn.setRequestProperty(k, v) }
+            if (body != null) {
+                conn.doOutput = true
+                conn.setRequestProperty("Content-Type", "application/x-www-form-urlencoded")
+                conn.setFixedLengthStreamingMode(body.size)
+                conn.outputStream.use { it.write(body) }
+            }
             val code = conn.responseCode
             val stream = if (code in 200..299) conn.inputStream else conn.errorStream
-            val body = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
-            return Response(code, body)
+            val text = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
+            return Response(code, text)
         } finally {
             conn.disconnect()
         }

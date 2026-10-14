@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 11 이하 백업: 유튜브 로그인 토큰(워치의 키 저장소 키로만 풀림)은 백업하지 않는다 -->
+<full-backup-content>
+    <exclude domain="sharedpref" path="tube_account.xml" />
+</full-backup-content>

@@ -168,13 +168,18 @@ object TubeApi {
         ).search(query, next, source)
     }
 
-    /** 유튜브 Data API — 키 + 이 앱의 서명 머리글(키를 'Android 앱'으로 제한해 둔 경우) */
+    /**
+     * 유튜브 Data API — 키 + 이 앱의 서명 머리글(키를 'Android 앱'으로 제한해 둔 경우),
+     * 내 데이터는 로그인 토큰 ([TubeAccount], 거절되면 새로 받게)
+     */
     fun data(context: Context): YouTubeData {
         val app = context.applicationContext
+        val auth = TubeAccount.auth(app)
         return YouTubeData(
             key = BuildConfig.YOUTUBE_API_KEY,
-            token = { null },
+            token = { auth.accessToken() },
             get = { url, headers -> Http.get(url, appHeaders(app) + headers) },
+            onUnauthorized = { auth.invalidateAccess() },
         )
     }
 

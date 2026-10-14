@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 12+ 클라우드 백업·기기 옮기기: 유튜브 로그인 토큰은 빼고 (새 기기에선 다시 로그인) -->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="sharedpref" path="tube_account.xml" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="sharedpref" path="tube_account.xml" />
+    </device-transfer>
+</data-extraction-rules>

@@ -51,6 +51,10 @@ android {
         buildConfigField("String", "TAGO_SERVICE_KEY", "\"${secret("tago.service.key", "TAGO_SERVICE_KEY")}\"")
         // 유튜브 음악: 유튜브 자체 검색(YouTube Data API v3) 키. 없으면 카카오 동영상 검색으로 찾는다
         buildConfigField("String", "YOUTUBE_API_KEY", "\"${secret("youtube.api.key", "YOUTUBE_API_KEY")}\"")
+        // 유튜브 로그인(구글 OAuth 기기 흐름) 클라이언트 — Google Cloud 의 'TV 및 입력 제한 기기' 클라이언트.
+        // 없으면 앱이 '로그인 준비 중'으로 보여 준다 (구독·재생목록·좋아요만 못 봄)
+        buildConfigField("String", "YOUTUBE_OAUTH_CLIENT_ID", "\"${secret("youtube.oauth.client.id", "YOUTUBE_OAUTH_CLIENT_ID")}\"")
+        buildConfigField("String", "YOUTUBE_OAUTH_CLIENT_SECRET", "\"${secret("youtube.oauth.client.secret", "YOUTUBE_OAUTH_CLIENT_SECRET")}\"")
         // 자동 업데이트를 받아 올 GitHub 저장소 (아이디/kakao-watch-map). Actions 에선 자동으로 채워짐
         buildConfigField("String", "UPDATE_REPO", "\"${System.getenv("GITHUB_REPOSITORY") ?: localProps.getProperty("update.repo") ?: ""}\"")
     }
