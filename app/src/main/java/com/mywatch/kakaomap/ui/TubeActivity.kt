@@ -88,6 +88,8 @@ class TubeActivity : ComponentActivity() {
     private var login: LoginState = LoginState.Starting
     private var loginJob: Job? = null
     private var visible = false
+    /** 지난번에 볼 때 로그인돼 있었는지 — 계정에서 앱 접근을 끊는 등으로 로그아웃되면 내 데이터·내 화면을 걷어 낸다 */
+    private var wasSignedIn = false
 
     /**
      * 타일에서 바로 들어온 한 번의 일([EXTRA_VOICE]·[EXTRA_MIX]). 폰에서 열면 잠깐 알려 주고 닫는다(워치 화면으로).
@@ -125,6 +127,7 @@ class TubeActivity : ComponentActivity() {
         }
         onBackPressedDispatcher.addCallback(this, back)
         ambient = AmbientCover(this, ::ambientSummary)
+        wasSignedIn = signedIn
         show()
         if (savedInstanceState == null) handleIntent(intent)
     }
@@ -264,6 +267,12 @@ class TubeActivity : ComponentActivity() {
             nav.reset(Page.Terms)
             scrolls.clear()
         }
+        val nowSignedIn = signedIn
+        if (wasSignedIn && !nowSignedIn) {
+            loader.clearMine()
+            nav.dropMine()
+        }
+        wasSignedIn = nowSignedIn
         feedsOf(nav.top).forEach { loader.load(it) }
         render()
         if (nav.top == Page.Login && login == LoginState.Starting && loginJob == null) startLogin()
@@ -530,10 +539,14 @@ class TubeActivity : ComponentActivity() {
         }
     }
 
-    /** 화면이 다시 보이면 같은 코드로 이어서 기다린다 */
+    /** 화면이 다시 보이면 같은 코드로 이어서 기다린다 (꺼지기 직전 보낸 물음으로 이미 로그인됐으면 끝) */
     private fun resumeLogin() {
         val w = login as? LoginState.Waiting ?: return
         if (nav.top != Page.Login || loginJob?.isActive == true) return
+        if (signedIn) {
+            signedInNow()
+            return
+        }
         loginJob = lifecycleScope.launch { waitForApproval(w.code) }
     }
 
@@ -547,6 +560,11 @@ class TubeActivity : ComponentActivity() {
         var interval = code.intervalSec
         while (true) {
             delay(interval * 1000L)
+            // 그 사이 로그인됨 (화면이 꺼지기 직전 보낸 물음이 끝남) — 쓰인 코드로 또 묻지 않는다
+            if (signedIn) {
+                signedInNow()
+                return
+            }
             val r = try {
                 withContext(Dispatchers.IO) { auth.poll(code) }
             } catch (e: CancellationException) {
@@ -560,7 +578,7 @@ class TubeActivity : ComponentActivity() {
             }
             when (r) {
                 Poll.Pending -> Unit
-                is Poll.SlowDown -> interval = r.intervalSec
+                is Poll.SlowDown -> interval = com.mywatch.kakaomap.tube.TubeAuth.nextInterval(interval, r)
                 Poll.Denied -> {
                     login = LoginState.Denied
                     render()
@@ -583,6 +601,9 @@ class TubeActivity : ComponentActivity() {
     private fun signedInNow() {
         loginJob = null
         login = LoginState.Starting
+        // 다른 계정이었을 수 있다 — 받아 둔 내 데이터는 버리고 새로
+        loader.clearMine()
+        wasSignedIn = true
         loader.load(Feed.Account, force = true)
         if (nav.top == Page.Login) {
             nav.back()
@@ -619,7 +640,10 @@ class TubeActivity : ComponentActivity() {
      */
     private fun play(req: PlayRequest) {
         if (opening) return
-        val crashed = PlayerGuard.of(this).crashedRecently()
+        val guard = PlayerGuard.of(this)
+        // 재생 화면 프로세스가 네이티브로 죽었으면 시스템 기록에 남는다 — 다시 누르면 또 죽는 고리를 끊는다
+        guard.checkSystemExits(this)
+        val crashed = guard.crashedRecently()
         val route = TubePlay.route(
             req.video,
             page = WatchPlayer.pageBase() != null,

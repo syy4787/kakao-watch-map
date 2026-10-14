@@ -67,6 +67,7 @@ class UpdateOutsideTest {
     @After
     fun tearDown() {
         UpdateManager.baseUrl = UpdateManager.GITHUB
+        UpdateManager.clock = System::currentTimeMillis
         UpdateNet.override = null
         server.close()
     }
@@ -198,14 +199,14 @@ class UpdateOutsideTest {
     @Test
     fun aCorruptReleaseIsNotDownloadedOverAndOverOnPhoneData() {
         // update.json 의 SHA-256 과 실제 파일이 다르다(손으로 바꾼 파일 등) — 받을 때마다 13MB 를 버리게 된다
-        server.updateJson = server.updateJsonFor(999).replace(FakeReleaseServer.sha256Hex(server.apk), "0".repeat(64))
+        server.updateJson = server.updateJsonFor(999, size = server.apk.size.toLong()).replace(FakeReleaseServer.sha256Hex(server.apk), "0".repeat(64))
         UpdateManager.check(context)
         repeat(3) { runBlocking { TestListenableWorkerBuilder<UpdateInstallWorker>(context).build().doWork() } }
         assertEquals("자동으로는 두 번까지만 받아 본다", 2, server.apkRequests.size)
 
         // 새 릴리스(다른 파일)가 나오면 다시 자동으로 받는다
         server.apk = ByteArray(1_000) { 7 }
-        server.updateJson = server.updateJsonFor(1000)
+        server.updateJson = server.updateJsonFor(1000, size = server.apk.size.toLong())
         UpdateManager.check(context)
         runBlocking { TestListenableWorkerBuilder<UpdateInstallWorker>(context).build().doWork() }
         assertEquals(3, server.apkRequests.size)
@@ -214,7 +215,7 @@ class UpdateOutsideTest {
     @Test
     fun whyAnAutomaticUpdateFailedIsStillThereAfterTheNextCheck() {
         ErrorLog.init(context)
-        server.updateJson = server.updateJsonFor(999)
+        server.updateJson = server.updateJsonFor(999, size = server.apk.size.toLong())
         server.apkMissing = true
         UpdateManager.check(context)
         runBlocking { TestListenableWorkerBuilder<UpdateInstallWorker>(context).build().doWork() }
@@ -252,7 +253,7 @@ class UpdateOutsideTest {
     @Test
     fun aVideoPlayingInTheAppIsNotCutOffByAnAutomaticUpdate() {
         // 재생 화면은 따로 된 프로세스(:player) — 이 프로세스의 '화면 수'로는 안 보인다
-        server.updateJson = server.updateJsonFor(999)
+        server.updateJson = server.updateJsonFor(999, size = server.apk.size.toLong())
         UpdateManager.check(context)
         val presence = PlayerPresence.of(context)
         presence.shown()
@@ -304,11 +305,65 @@ class UpdateOutsideTest {
     }
 
     @Test
-    fun outsideOnPhoneDataTheAutomaticUpdateDownloadsWithoutWaitingForWifiOrCharging() {
-        server.updateJson = server.updateJsonFor(999)
+    fun outsideOnPhoneDataASmallAutomaticUpdateDownloadsWithoutWaitingForWifiOrCharging() {
+        server.updateJson = server.updateJsonFor(999, size = 13_000_000)
         UpdateManager.check(context)   // 백그라운드 확인이 새 버전을 찾음
         val worker = TestListenableWorkerBuilder<UpdateInstallWorker>(context).build()
         runBlocking { worker.doWork() }
         assertEquals("집 밖(폰 블루투스·충전 아님)에서도 내려받아야 함", 1, server.apkRequests.size)
+    }
+
+    @Test
+    fun aBigAutomaticUpdateWaitsForTheWatchWifiInsteadOfPhoneData() {
+        // 재생 엔진이 들어 있어 약 105MB — 폰 블루투스(폰 데이터)로 매번 받지 않는다. '지금 업데이트'는 어디서나
+        server.updateJson = server.updateJsonFor(999, size = 105_000_000)
+        UpdateManager.check(context)
+        assertEquals(ListenableWorker.Result.success(), runBlocking { TestListenableWorkerBuilder<UpdateInstallWorker>(context).build().doWork() })
+        assertEquals("Wi-Fi 가 없으면 받지 않고 다음 확인 때", 0, server.apkRequests.size)
+        assertTrue("실패로 남기지 않는다", UpdateManager.lastError(context) == null)
+        // 집: 워치가 Wi-Fi 를 켤 수 있으면 받는다
+        val wifi = FakeWifi()
+        UpdateNet.override = { _, _ -> wifi }
+        runBlocking { TestListenableWorkerBuilder<UpdateInstallWorker>(context).build().doWork() }
+        assertEquals(1, server.apkRequests.size)
+        assertEquals(1, wifi.opened.get())
+    }
+
+    @Test
+    fun aBigUpdateThatWaitedTwoDaysWithoutWifiComesOverThePhone() {
+        // 이틀 넘게 Wi-Fi 를 못 만나면 그때는 폰으로라도 (업데이트가 한없이 밀리지 않게)
+        server.updateJson = server.updateJsonFor(999, size = 105_000_000)
+        UpdateManager.check(context)
+        runBlocking { TestListenableWorkerBuilder<UpdateInstallWorker>(context).build().doWork() }
+        assertEquals(0, server.apkRequests.size)
+        val start = System.currentTimeMillis()
+        UpdateManager.clock = { start + Duration.ofDays(2).plusMinutes(1).toMillis() }
+        UpdateManager.check(context)
+        runBlocking { TestListenableWorkerBuilder<UpdateInstallWorker>(context).build().doWork() }
+        assertEquals(1, server.apkRequests.size)
+    }
+
+    @Test
+    fun aBigUpdateWhoseWifiDropsMidwayWaitsInsteadOfFinishingOverThePhone() {
+        server.updateJson = server.updateJsonFor(999, size = 105_000_000)
+        server.cutFirstApkAt = 120_000
+        UpdateManager.check(context)
+        UpdateNet.override = { _, _ -> FakeWifi(failAfter = 1) }
+        runBlocking { TestListenableWorkerBuilder<UpdateInstallWorker>(context).build().doWork() }
+        assertEquals("Wi-Fi 로 받다 끊기면 거기서 멈춘다 (받은 데까지는 남김)", 1, server.apkRequests.size)
+        // 다음에 Wi-Fi 를 만나면 이어받는다
+        UpdateNet.override = { _, _ -> FakeWifi() }
+        runBlocking { TestListenableWorkerBuilder<UpdateInstallWorker>(context).build().doWork() }
+        assertTrue(server.apkRequests.toString(), Regex("""bytes=[1-9]\d*-""").containsMatchIn(server.apkRequests.last()))
+    }
+
+    @Test
+    fun theUpdateJsonCarriesTheSizeAndItSurvivesBeingRemembered() {
+        val info = UpdateInfo.parse("""{"versionCode":5,"versionName":"2.5","apkUrl":"u","sha256":"AA","notes":"",""" +
+            """"apks":{"armeabi-v7a":{"url":"v7","sha256":"BB","size":104528312}},"size":186413091}""", listOf("armeabi-v7a"))
+        assertEquals(104_528_312L, info.sizeBytes)
+        assertEquals(104_528_312L, UpdateInfo.parse(info.toJson(), listOf("armeabi-v7a")).sizeBytes)
+        assertEquals("모든 CPU 용이면 그 크기", 186_413_091L, UpdateInfo.parse("""{"versionCode":5,"apkUrl":"u","sha256":"AA","size":186413091}""", listOf("x86")).sizeBytes)
+        assertEquals("예전 update.json 엔 크기가 없다", null, UpdateInfo.parse("""{"versionCode":5,"apkUrl":"u","sha256":"AA"}""", listOf("x86")).sizeBytes)
     }
 }

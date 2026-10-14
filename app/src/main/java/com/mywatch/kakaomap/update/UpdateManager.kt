@@ -27,10 +27,14 @@ data class UpdateInfo(
     val apkUrl: String,
     val sha256: String,
     val notes: String,
+    /** 받을 APK 크기 (바이트). 예전 update.json 엔 없다 */
+    val sizeBytes: Long? = null,
 ) {
     fun toJson(): String = JSONObject()
         .put("versionCode", versionCode).put("versionName", versionName)
-        .put("apkUrl", apkUrl).put("sha256", sha256).put("notes", notes).toString()
+        .put("apkUrl", apkUrl).put("sha256", sha256).put("notes", notes)
+        .apply { sizeBytes?.let { put("size", it) } }
+        .toString()
 
     companion object {
         /**
@@ -49,6 +53,7 @@ data class UpdateInfo(
                 apkUrl = own?.getString("url") ?: o.getString("apkUrl"),
                 sha256 = (own?.getString("sha256") ?: o.getString("sha256")).lowercase(),
                 notes = o.optString("notes"),
+                sizeBytes = (own ?: o).optLong("size", -1).takeIf { it > 0 },
             )
         }
 
@@ -77,6 +82,7 @@ object UpdateManager {
     private const val KEY_PENDING = "pending_user_action"
     private const val KEY_BAD_SHA = "bad_sha"
     private const val KEY_BAD_SHA_COUNT = "bad_sha_count"
+    private const val KEY_WAITING = "waiting_since"
 
     /** 받은 파일이 update.json 의 SHA-256 과 계속 다르면 같은 릴리스는 자동으로 이만큼만 받아 본다 (밖에선 폰 데이터라) */
     private const val MAX_AUTO_CORRUPT = 2
@@ -148,17 +154,48 @@ object UpdateManager {
 
     /**
      * 자동 업데이트와 화면의 '지금 업데이트'가 동시에 같은 파일을 받지 않게 한 번에 하나씩.
-     * 워치 Wi-Fi 를 [wifiWaitMs] 까지 기다려 보고([UpdateNet]) 오면 그쪽으로, 아니면 늘 쓰던 망(폰 블루투스 등)으로
+     * 워치 Wi-Fi 를 [wifiWaitMs] 까지 기다려 보고([UpdateNet]) 오면 그쪽으로, 아니면 늘 쓰던 망(폰 블루투스 등)으로.
+     * [wifiOnly] 면 Wi-Fi 로만 — 없거나 받다 끊기면 [NeedsWifi] (받은 데까지는 남겨 두고 다음에 이어받기)
      */
     @Throws(IOException::class)
-    fun download(c: Context, info: UpdateInfo, wifiWaitMs: Long = WIFI_WAIT_MS, onProgress: (Int) -> Unit = {}): File = synchronized(downloadLock) {
-        downloading = true
-        try {
-            downloadLocked(c, info, wifiWaitMs, onProgress)
-        } finally {
-            downloading = false
+    fun download(c: Context, info: UpdateInfo, wifiWaitMs: Long = WIFI_WAIT_MS, wifiOnly: Boolean = false, onProgress: (Int) -> Unit = {}): File =
+        synchronized(downloadLock) {
+            downloading = true
+            try {
+                downloadLocked(c, info, wifiWaitMs, wifiOnly, onProgress)
+            } finally {
+                downloading = false
+            }
         }
+
+    /** 큰 업데이트를 Wi-Fi 로만 받으려는데 Wi-Fi 가 없음 — 실패가 아니라 기다림 */
+    class NeedsWifi : IOException("워치 Wi-Fi 를 기다려요")
+
+    /** 이보다 큰 APK 는 자동 업데이트가 워치 Wi-Fi 에서만 받는다 (재생 엔진이 들어 있어 약 105MB — 폰 데이터로 매번 받지 않게) */
+    const val BIG_BYTES = 30L * 1024 * 1024
+
+    /** 큰 업데이트가 이만큼 Wi-Fi 를 못 만나면 그때는 폰으로라도 받는다 (업데이트가 한없이 밀리지 않게) */
+    const val WIFI_PATIENCE_MS = 2 * 24 * 3_600_000L
+
+    /** 크기를 모르면(예전 update.json) 크다고 본다 */
+    fun isBig(info: UpdateInfo): Boolean = (info.sizeBytes ?: Long.MAX_VALUE) > BIG_BYTES
+
+    /** 자동 업데이트가 이 릴리스를 처음 기다리기 시작한 때 */
+    private fun waitingSince(c: Context, info: UpdateInfo, now: Long): Long {
+        val p = prefs(c)
+        val saved = p.getString(KEY_WAITING, null)?.split(':')
+        if (saved != null && saved.size == 2 && saved[0] == info.versionCode.toString()) saved[1].toLongOrNull()?.let { return it }
+        p.edit { putString(KEY_WAITING, "${info.versionCode}:$now") }
+        return now
     }
+
+    /** 자동 업데이트가 Wi-Fi 에서만 받아야 하는지: 큰 업데이트이고 아직 이틀이 안 됨 ('지금 업데이트'는 언제나 어디서든) */
+    fun autoNeedsWifi(c: Context, info: UpdateInfo, now: Long = clock()): Boolean =
+        isBig(info) && now - waitingSince(c, info, now) < WIFI_PATIENCE_MS
+
+    /** 지금 시각 (시험에선 바꿔 끼운다) */
+    @VisibleForTesting
+    internal var clock: () -> Long = System::currentTimeMillis
 
     /** 워치가 저장된 Wi-Fi 를 켜고 붙는 데 걸리는 시간만큼은 기다려 준다 (찾고·붙고·주소 받기 몇 초) */
     const val WIFI_WAIT_MS = 10_000L
@@ -187,7 +224,7 @@ object UpdateManager {
 
     private fun cacheDir(c: Context) = File(c.cacheDir, "update")
 
-    private fun downloadLocked(c: Context, info: UpdateInfo, wifiWaitMs: Long, onProgress: (Int) -> Unit): File {
+    private fun downloadLocked(c: Context, info: UpdateInfo, wifiWaitMs: Long, wifiOnly: Boolean, onProgress: (Int) -> Unit): File {
         val dir = cacheDir(c).apply { mkdirs() }
         val name = cacheFileName(info)
         // 다른 버전·다른 APK 의 옛 파일은 지운다
@@ -197,13 +234,16 @@ object UpdateManager {
         val wifi = UpdateNet.wifi(c, wifiWaitMs)
         try {
             if (wifi == null) {
+                if (wifiOnly && !UpdateNet.onWifiNow(c)) throw NeedsWifi()
                 fetchWithRetries(info, file, onProgress, null, RETRY_DELAYS_MS)
             } else {
                 try {
                     fetchWithRetries(info, file, onProgress, wifi::open, WIFI_RETRY_DELAYS_MS)
                 } catch (e: IOException) {
-                    // Wi-Fi 가 끊겼으면(집을 나섬 등) 받은 데까지는 두고 늘 쓰던 망으로 이어받는다. 없는 파일(4xx)은 어디서나 같다
+                    // Wi-Fi 가 끊겼으면(집을 나섬 등) 받은 데까지는 두고 늘 쓰던 망으로 이어받는다 (Wi-Fi 로만이면 다음에 Wi-Fi 에서).
+                    // 없는 파일(4xx)은 어디서나 같다
                     if (e is HttpStatusException && e.code in 400..499) throw e
+                    if (wifiOnly) throw NeedsWifi()
                     fetchWithRetries(info, file, onProgress, null, RETRY_DELAYS_MS)
                 }
             }

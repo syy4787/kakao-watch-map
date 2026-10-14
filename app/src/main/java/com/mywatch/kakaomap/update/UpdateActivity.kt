@@ -111,7 +111,9 @@ class UpdateActivity : ComponentActivity() {
             }
             rows += Row.Note(status)
             if (UpdateManager.hasUpdate(c)) {
-                rows += Row.Action(ACTION_INSTALL, R.drawable.ic_download, "지금 업데이트", accent = true)
+                // 크기를 알면 얼마나 받는지 (재생 엔진이 들어 있어 큼 — 워치 Wi-Fi 가 있으면 그쪽으로 받음)
+                val size = latest?.sizeBytes?.let { "약 ${(it + 500_000) / 1_000_000}MB · Wi-Fi 가 있으면 그쪽으로" }
+                rows += Row.Action(ACTION_INSTALL, R.drawable.ic_download, "지금 업데이트", accent = true, sub = size)
             }
             rows += Row.Action(ACTION_CHECK, R.drawable.ic_refresh, "업데이트 확인")
             UpdateManager.lastError(c)?.let { rows += Row.Note("⚠ $it") }

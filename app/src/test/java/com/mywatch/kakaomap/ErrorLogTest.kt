@@ -30,6 +30,16 @@ class ErrorLogTest {
     }
 
     @Test
+    fun googleKeysAndTokensNeverLandInTheLogEither() {
+        // 유튜브 API 키·구글 로그인 토큰·클라이언트 비밀 (값은 가짜 — 모양만)
+        val raw = "GET https://www.googleapis.com/youtube/v3/search?part=snippet&key=AIzaSyFAKEfake_FAKE-fake0123456789abcd&q=x " +
+            "Authorization: Bearer ya29.a0FAKE-fake_TOKEN.fake refresh=1//0gFAKE-fake_REFRESH secret=GOCSPX-FAKE_fake-Secret0"
+        val s = ErrorLogFormat.sanitize(raw)
+        listOf("AIzaSyFAKE", "ya29.a0FAKE", "1//0gFAKE", "GOCSPX-FAKE").forEach { assertFalse("$it 가 남음: $s", s.contains(it)) }
+        assertTrue("나머지는 그대로: $s", s.contains("/youtube/v3/search?part=snippet&key=…&q=x"))
+    }
+
+    @Test
     fun aCrashShowsWhereInOurCode() {
         val cause = NullPointerException("x was null")
         val e = IllegalStateException("boom", cause)

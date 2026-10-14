@@ -68,7 +68,14 @@ class TubeAuth(
     /** 이 빌드에 로그인용 구글 클라이언트가 들어 있음 (없으면 '로그인 준비 중') */
     val configured: Boolean get() = clientId.isNotBlank() && clientSecret.isNotBlank()
 
-    val signedIn: Boolean get() = store.load() != null
+    /** 저장소를 만지는 동안만 잠깐 (네트워크를 기다리는 동안엔 잡지 않는다 — 로그아웃이 화면을 멈추지 않게) */
+    private val lock = Any()
+    /** 토큰 새로 받기는 한 번에 하나 */
+    private val renewing = Any()
+    /** 로그아웃할 때마다 바뀐다 — 그 전에 시작한 새로 받기의 결과는 버린다 */
+    private var generation = 0
+
+    val signedIn: Boolean get() = synchronized(lock) { store.load() != null }
 
     /** 폰에서 넣을 코드를 받는다 */
     fun start(): DeviceCode {
@@ -104,7 +111,7 @@ class TubeAuth(
             // 승인 화면에서 유튜브 권한을 빼고 줬으면 로그인하지 않는다 (scope 가 없으면 요청한 그대로 준 것)
             val scope = json?.optString("scope").orEmpty()
             if (scope.isNotBlank() && SCOPE !in scope.split(' ')) return Poll.Denied
-            store.save(Tokens(access, refresh, now() + expiresMs(json)))
+            synchronized(lock) { store.save(Tokens(access, refresh, now() + expiresMs(json))) }
             return Poll.Granted
         }
         return when (val error = json?.optString("error")) {
@@ -120,40 +127,52 @@ class TubeAuth(
      * 유튜브에 보낼 토큰. 1분 안에 끝나면 새로 받는다. 로그인 안 했거나 계정에서 앱 접근을 끊었으면(invalid_grant) null —
      * 그땐 로그아웃된 것으로. 인터넷이 안 되거나 구글이 잠깐 안 되면 예외 (로그인은 그대로)
      */
-    @Synchronized
     fun accessToken(): String? {
-        val t = store.load() ?: return null
-        if (t.expiresAtMs - now() > RENEW_BEFORE_MS) return t.access
-        val res = send(TOKEN, linkedMapOf(
-            "client_id" to clientId.trim(), "client_secret" to clientSecret.trim(),
-            "refresh_token" to t.refresh, "grant_type" to "refresh_token",
-        ))
-        val json = json(res.body)
-        val access = json?.optString("access_token").orEmpty()
-        if (res.code in 200..299 && access.isNotBlank()) {
-            val renewed = Tokens(access, json?.optString("refresh_token").orEmpty().ifBlank { t.refresh }, now() + expiresMs(json))
-            store.save(renewed)
-            return renewed.access
+        val (first, gen) = synchronized(lock) { (store.load() ?: return null) to generation }
+        if (first.expiresAtMs - now() > RENEW_BEFORE_MS) return first.access
+        synchronized(renewing) {
+            // 기다리는 사이 다른 스레드가 새로 받았거나, 로그아웃했을 수 있다
+            val t = synchronized(lock) { if (gen != generation) return null else store.load() } ?: return null
+            if (t.expiresAtMs - now() > RENEW_BEFORE_MS) return t.access
+            val res = send(TOKEN, linkedMapOf(
+                "client_id" to clientId.trim(), "client_secret" to clientSecret.trim(),
+                "refresh_token" to t.refresh, "grant_type" to "refresh_token",
+            ))
+            val json = json(res.body)
+            val access = json?.optString("access_token").orEmpty()
+            synchronized(lock) {
+                if (gen != generation) return null   // 받는 사이 로그아웃 → 새 토큰은 버린다
+                if (res.code in 200..299 && access.isNotBlank()) {
+                    val renewed = Tokens(access, json?.optString("refresh_token").orEmpty().ifBlank { t.refresh }, now() + expiresMs(json))
+                    store.save(renewed)
+                    return renewed.access
+                }
+                if (json?.optString("error") in SIGNED_OUT) {
+                    store.clear()
+                    generation++
+                    return null
+                }
+            }
+            throw ApiException("로그인을 새로 고치지 못했어요 (${res.code})")
         }
-        if (json?.optString("error") in SIGNED_OUT) {
-            store.clear()
-            return null
-        }
-        throw ApiException("로그인을 새로 고치지 못했어요 (${res.code})")
     }
 
     /** 유튜브가 토큰을 거절함(401) — 다음 [accessToken] 에서 새로 받게 */
-    @Synchronized
-    fun invalidateAccess() {
+    fun invalidateAccess() = synchronized(lock) {
         store.load()?.let { store.save(it.copy(expiresAtMs = 0)) }
     }
 
     /** 로그아웃: 워치에서 먼저 지우고(인터넷이 없어도), 구글에 접근 권한 철회를 보낸다 (정책 III.D.2) */
     fun signOut() = revoke(forget())
 
-    /** 워치에서 토큰을 지운다 (바로 — 화면이 곧장 로그아웃된 모습이 되게). 지운 토큰을 돌려준다 → [revoke] */
-    @Synchronized
-    fun forget(): Tokens? = store.load().also { store.clear() }
+    /**
+     * 워치에서 토큰을 지운다 (바로 — 화면이 곧장 로그아웃된 모습이 되게, 새로 받는 중이어도 기다리지 않음).
+     * 지운 토큰을 돌려준다 → [revoke]
+     */
+    fun forget(): Tokens? = synchronized(lock) {
+        generation++
+        store.load().also { store.clear() }
+    }
 
     /** 구글에 접근 권한 철회 (네트워크 — 백그라운드에서). 실패해도 그만 */
     fun revoke(t: Tokens?) {
@@ -187,6 +206,10 @@ class TubeAuth(
     }
 
     companion object {
+        /** 다음에 묻기까지 (초): slow_down 이면 5초씩 더 늘린다 (RFC 8628 3.5 — 되돌리지 않음) */
+        fun nextInterval(current: Int, p: Poll): Int = if (p is Poll.SlowDown) current + SLOW_DOWN_STEP_SEC else current
+
+        private const val SLOW_DOWN_STEP_SEC = 5
         const val SCOPE = "https://www.googleapis.com/auth/youtube.readonly"
         const val DEVICE_CODE = "https://oauth2.googleapis.com/device/code"
         const val TOKEN = "https://oauth2.googleapis.com/token"

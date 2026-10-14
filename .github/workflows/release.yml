@@ -137,8 +137,9 @@ jobs:
           for ABI in armeabi-v7a arm64-v8a; do
             cp "$OUT/app-$ABI-release.apk" "kakao-watch-map-$ABI.apk"
             ABI_SHA=$(sha256sum "kakao-watch-map-$ABI.apk" | cut -d' ' -f1)
-            APKS=$(jq -c --arg abi "$ABI" --arg url "$BASE/kakao-watch-map-$ABI.apk" --arg sha "$ABI_SHA" \
-              '. + {($abi): {url: $url, sha256: $sha}}' <<< "$APKS")
+            ABI_SIZE=$(stat -c %s "kakao-watch-map-$ABI.apk")
+            APKS=$(jq -c --arg abi "$ABI" --arg url "$BASE/kakao-watch-map-$ABI.apk" --arg sha "$ABI_SHA" --argjson size "$ABI_SIZE" \
+              '. + {($abi): {url: $url, sha256: $sha, size: $size}}' <<< "$APKS")
           done
           # 워치에 설치된 앱과 같은 키로 서명됐는지 (다르면 워치가 거부하므로 올리지 않는다)
           APKSIGNER=$(ls -d "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
@@ -148,6 +149,8 @@ jobs:
               || { echo "::error::$f 의 서명 키가 워치 앱과 달라요"; exit 1; }
           done
           SHA=$(sha256sum kakao-watch-map.apk | cut -d' ' -f1)
+          # 크기 — 큰 업데이트(재생 엔진 포함)는 워치가 자동으로는 Wi-Fi 에서만 받는다
+          SIZE=$(stat -c %s kakao-watch-map.apk)
           NOTES=$(git log -1 --pretty=%s)
           echo "NOTES=$NOTES" >> "$GITHUB_ENV"
           jq -n \
@@ -157,7 +160,8 @@ jobs:
             --arg sha "$SHA" \
             --arg notes "$NOTES" \
             --argjson apks "$APKS" \
-            '{versionCode: $code, versionName: $name, apkUrl: $url, sha256: $sha, notes: $notes, apks: $apks}' > update.json
+            --argjson size "$SIZE" \
+            '{versionCode: $code, versionName: $name, apkUrl: $url, sha256: $sha, size: $size, notes: $notes, apks: $apks}' > update.json
           cat update.json
           ls -l kakao-watch-map*.apk
 

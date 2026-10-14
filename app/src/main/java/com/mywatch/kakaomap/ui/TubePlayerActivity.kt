@@ -19,6 +19,7 @@ import androidx.activity.ComponentActivity
 import androidx.annotation.VisibleForTesting
 import androidx.core.net.toUri
 import androidx.core.view.ViewConfigurationCompat
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import com.mywatch.kakaomap.BuildConfig
 import com.mywatch.kakaomap.R
@@ -26,6 +27,7 @@ import com.mywatch.kakaomap.data.ErrorLog
 import com.mywatch.kakaomap.tube.PhoneOpener
 import com.mywatch.kakaomap.tube.PlayerGuard
 import com.mywatch.kakaomap.tube.PlayerPresence
+import com.mywatch.kakaomap.tube.PlayerRecovery
 import com.mywatch.kakaomap.tube.WatchPlayer
 import kotlinx.coroutines.launch
 import org.mozilla.geckoview.AllowOrDeny
@@ -61,7 +63,11 @@ class TubePlayerActivity : ComponentActivity() {
     private var pageBase = ""
     private var url = ""
     private var painted = false
-    private var kills = 0
+    private val recovery = PlayerRecovery()
+    /** 화면이 안 보일 때 엔진이 꺼졌음 — 다시 보일 때 연다 */
+    private var reopenOnStart = false
+
+    private val visible: Boolean get() = lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
 
     private val heartbeat = object : Runnable {
         override fun run() {
@@ -144,6 +150,10 @@ class TubePlayerActivity : ComponentActivity() {
 
     override fun onStart() {
         super.onStart()
+        if (reopenOnStart) {
+            reopenOnStart = false
+            reopen()
+        }
         session?.setActive(true)
         session?.setFocused(true)
         handler.removeCallbacks(heartbeat)
@@ -197,6 +207,7 @@ class TubePlayerActivity : ComponentActivity() {
 
     private fun retry() {
         hideError()
+        recovery.retried()
         val s = session
         if (s == null || !s.isOpen) {
             try {
@@ -206,6 +217,34 @@ class TubePlayerActivity : ComponentActivity() {
             }
         } else {
             s.loadUri(url)
+        }
+    }
+
+    /** 엔진의 화면 프로세스가 꺼진 뒤 다시 연다 — 보이는지에 맞게 활성(안 보이면 재생 화면이 '숨김'을 보고 틀지 않는다) */
+    private fun reopen() {
+        val s = session ?: return
+        try {
+            if (!s.isOpen) s.open(engine(applicationContext))
+            s.setActive(visible)
+            s.setFocused(visible)
+            s.loadUri(url)
+        } catch (t: Throwable) {
+            engineFailed("재생 엔진을 다시 열지 못함", t)
+        }
+    }
+
+    private fun apply(d: PlayerRecovery.Do, where: String) {
+        when (d) {
+            PlayerRecovery.Do.REOPEN -> reopen()
+            PlayerRecovery.Do.REOPEN_WHEN_VISIBLE -> reopenOnStart = true
+            PlayerRecovery.Do.SHOW_ERROR -> showError(R.string.player_load_failed)
+            PlayerRecovery.Do.FAIL_TO_BROWSER -> engineFailed(where, null)
+            PlayerRecovery.Do.FAIL_QUIETLY -> {
+                // 안 보이는 동안 죽음: 기억만 하고(다음엔 인터넷 앱으로) 닫는다 — 다른 앱을 띄우지 않는다
+                guard.failed()
+                ErrorLog.record("유튜브·앱 안 재생", "$where (화면이 꺼진 동안)")
+                finish()
+            }
         }
     }
 
@@ -296,23 +335,12 @@ class TubePlayerActivity : ComponentActivity() {
         }
 
         override fun onCrash(session: GeckoSession) {
-            engineFailed("재생 엔진이 멈춤", null)
+            handler.post { if (!isFinishing && !isDestroyed) apply(recovery.onCrash(visible), "재생 엔진이 멈춤") }
         }
 
-        /** 메모리가 모자라 엔진의 화면 프로세스가 꺼짐 — 한 번은 다시 연다 */
+        /** 메모리가 모자라 엔진의 화면 프로세스가 꺼짐 — 보이면 다시 열고, 안 보이면 다시 보일 때 ([PlayerRecovery]) */
         override fun onKill(session: GeckoSession) {
-            if (++kills > 1) {
-                engineFailed("재생 엔진이 거듭 꺼짐", null)
-                return
-            }
-            handler.post {
-                try {
-                    session.open(engine(applicationContext))
-                    session.loadUri(url)
-                } catch (t: Throwable) {
-                    engineFailed("재생 엔진을 다시 열지 못함", t)
-                }
-            }
+            handler.post { if (!isFinishing && !isDestroyed) apply(recovery.onKill(visible), "재생 엔진이 꺼짐") }
         }
 
         override fun onCloseRequest(session: GeckoSession) {

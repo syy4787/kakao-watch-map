@@ -81,7 +81,9 @@ class UpdateWorker(context: Context, params: WorkerParameters) : CoroutineWorker
 }
 
 /**
- * 내려받기·설치 — 집 Wi-Fi 든 밖(폰 블루투스·LTE, 폰 데이터)이든 어디서나 (사용자가 폰 데이터로 받기로 함, 1번에 약 13MB).
+ * 내려받기·설치 — 작은 업데이트는 집 Wi-Fi 든 밖(폰 블루투스·LTE, 폰 데이터)이든 어디서나 (사용자가 폰 데이터로 받기로 함).
+ * 재생 엔진이 들어 있어 큰 업데이트(약 105MB)는 워치가 Wi-Fi 를 켤 수 있을 때만 — 이틀 넘게 못 만나면 그때는 어디서든
+ * ([UpdateManager.autoNeedsWifi]). '지금 업데이트'는 언제나 어디서든.
  * 안내 중이거나 화면을 보고 있는 동안에는 설치하지 않고 미룬다
  * (설치하면 앱이 다시 시작돼 쓰던 화면·안내가 끊기므로). 화면을 다 닫거나 안내가 끝나면 곧바로 다시 시도한다.
  */
@@ -96,7 +98,7 @@ class UpdateInstallWorker(context: Context, params: WorkerParameters) : Coroutin
         // 받을 때마다 손상된 파일이면(update.json 과 다름) 같은 릴리스를 자동으로 또 받지 않는다 — 폰 데이터 낭비
         if (!UpdateManager.autoDownloadAllowed(c, info)) return@withContext Result.success()
         try {
-            val file = UpdateManager.download(c, info)
+            val file = UpdateManager.download(c, info, wifiOnly = UpdateManager.autoNeedsWifi(c, info))
             // 내려받는 사이 이 작업이 취소·교체됐으면(앱을 열었다 닫음 등) 설치하지 않는다 — 두 번 설치 방지
             if (isStopped) return@withContext Result.retry()
             UpdateManager.verify(c, file, info)?.let {
@@ -106,6 +108,9 @@ class UpdateInstallWorker(context: Context, params: WorkerParameters) : Coroutin
             if (busy(c)) return@withContext Result.retry()   // 받는 사이 앱을 열었거나 안내 시작
             if (isStopped) return@withContext Result.retry()
             UpdateManager.install(c, file)
+            Result.success()
+        } catch (e: UpdateManager.NeedsWifi) {
+            // 큰 업데이트 — 워치 Wi-Fi 를 만날 때(6시간마다 확인·앱을 열 때 다시 해 봄). 실패가 아니라 기다림
             Result.success()
         } catch (e: Exception) {
             Log.w(MapApp.TAG, "자동 업데이트 실패", e)

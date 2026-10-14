@@ -49,9 +49,10 @@ class FakeReleaseServer : AutoCloseable {
         }
     }
 
-    fun updateJsonFor(versionCode: Long) =
+    /** [size] = update.json 에 적힌 APK 크기 (없으면 안 적음 — 예전 릴리스처럼) */
+    fun updateJsonFor(versionCode: Long, size: Long? = null) =
         """{"versionCode":$versionCode,"versionName":"2.${versionCode - 100}","apkUrl":"$apkUrl",""" +
-            """"sha256":"${sha256Hex(apk)}","notes":"테스트"}"""
+            """"sha256":"${sha256Hex(apk)}","notes":"테스트"""" + (size?.let { ""","size":$it""" } ?: "") + "}"
 
     private fun serve(s: Socket) {
         val input = s.getInputStream().bufferedReader(Charsets.ISO_8859_1)

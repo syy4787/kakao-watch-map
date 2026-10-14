@@ -16,6 +16,9 @@ import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
 import java.io.IOException
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import kotlin.concurrent.thread
 
 /**
  * 유튜브 로그인 (구글 OAuth 2.0 기기 흐름 — 'TV 및 입력 제한 기기'): 코드 받기 → 폰에서 승인을 기다림(천천히·거절·만료) →
@@ -223,6 +226,43 @@ class TubeAuthTest {
         } catch (e: ApiException) {
             assertTrue(a.signedIn)
         }
+    }
+
+    @Test
+    fun signingOutDoesNotWaitForATokenRenewalAndItsResultIsDropped() {
+        // 토큰을 새로 받는 중(느린 블루투스)에 로그아웃 → 화면(메인 스레드)이 그 응답을 기다리면 멈춘다
+        store.t = Tokens("OLD", "RT", now + 10_000)   // 곧 끝남 → 새로 받는다
+        val inFlight = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        g.reply = {
+            inFlight.countDown()
+            release.await(5, TimeUnit.SECONDS)
+            Http.Response(200, """{"access_token":"NEW","expires_in":3599}""")
+        }
+        val a = auth()
+        var got: String? = "unset"
+        val t = thread { got = a.accessToken() }
+        assertTrue(inFlight.await(2, TimeUnit.SECONDS))
+        val start = System.nanoTime()
+        val forgotten = a.forget()
+        assertTrue("로그아웃은 바로", System.nanoTime() - start < 500_000_000L)
+        assertEquals("RT", forgotten?.refresh)
+        release.countDown()
+        t.join(3_000)
+        assertNull("로그아웃 뒤 도착한 새 토큰은 버린다", got)
+        assertNull("다시 로그인된 것처럼 되지 않는다", store.t)
+        assertFalse(a.signedIn)
+    }
+
+    @Test
+    fun slowDownKeepsAddingFiveSeconds() {
+        // RFC 8628 3.5: slow_down 마다 간격을 5초씩 더 (되돌리지 않음)
+        var interval = 5
+        interval = TubeAuth.nextInterval(interval, Poll.SlowDown(10))
+        assertEquals(10, interval)
+        interval = TubeAuth.nextInterval(interval, Poll.SlowDown(10))
+        assertEquals(15, interval)
+        assertEquals("다른 대답엔 그대로", 15, TubeAuth.nextInterval(interval, Poll.Pending))
     }
 
     @Test

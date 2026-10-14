@@ -1,5 +1,7 @@
 package com.mywatch.kakaomap.tube
 
+import android.app.ActivityManager
+import android.app.ApplicationExitInfo
 import android.content.Context
 import android.os.Build
 import android.os.SystemClock
@@ -62,6 +64,19 @@ class PlayerGuard(private val dir: File, private val version: Int, private val n
 
     private val startingFile get() = File(dir, "starting")
     private val crashedFile get() = File(dir, "crashed")
+    private val exitsFile get() = File(dir, "exits_checked")
+
+    /** 시스템이 남긴 프로세스 종료 기록 하나 ([ApplicationExitInfo] 를 시험하기 쉽게 줄인 것) */
+    data class Exit(val process: String, val reason: Int, val at: Long) {
+        companion object {
+            const val CRASH = 1
+            const val NATIVE_CRASH = 2
+            const val ANR = 3
+            const val INIT_FAILURE = 4
+            const val LOW_MEMORY = 5
+            const val OTHER = 0
+        }
+    }
 
     fun starting() = write(startingFile, now())
 
@@ -91,6 +106,32 @@ class PlayerGuard(private val dir: File, private val version: Int, private val n
         }
     }
 
+    /**
+     * 시스템의 종료 기록에서 재생 화면 프로세스(:player)가 죽은 것(네이티브 오류·오류·응답 없음·시작 실패)을 찾아 [failed] 를 남긴다 —
+     * 엔진(libxul)이 네이티브로 죽으면 자바 처리기([watchCrashes])가 돌지 못한다. 메모리 때문에 꺼진 것은 엔진 탓이 아니라 뺀다.
+     * 본 기록은 다시 세지 않고, 이 버전에서 처음 볼 땐 그 전 기록(예전 버전)은 따지지 않는다
+     */
+    fun noteExits(exits: List<Exit>) {
+        val checked = read(exitsFile)?.takeIf { it.second == version }?.first
+        if (checked == null) {
+            write(exitsFile, now())
+            return
+        }
+        val fresh = exits.filter { it.at > checked }
+        if (fresh.any { it.process.endsWith(PLAYER_PROCESS) && it.reason in ENGINE_DEATHS }) failed()
+        fresh.maxOfOrNull { it.at }?.let { write(exitsFile, it) }
+    }
+
+    /** [noteExits] 를 시스템 기록으로 (Android 11+). 못 읽으면 아무것도 안 한다 */
+    fun checkSystemExits(context: Context) {
+        runCatching {
+            val am = context.getSystemService(ActivityManager::class.java) ?: return
+            noteExits(am.getHistoricalProcessExitReasons(context.packageName, 0, 16).map { e ->
+                Exit(e.processName.orEmpty(), reasonOf(e.reason), e.timestamp)
+            })
+        }
+    }
+
     fun crashedRecently(): Boolean {
         val starting = read(startingFile)
         if (starting != null && now() - starting.first > STALE_MS) failed()
@@ -116,10 +157,25 @@ class PlayerGuard(private val dir: File, private val version: Int, private val n
     }.getOrNull()
 
     companion object {
-        const val STALE_MS = 60_000L
+        /**
+         * 시작 표시가 이만큼 남아 있으면 그 재생 화면은 죽은 것 — 목록에서 다시 누를 땐 재생 화면이 떠 있을 수 없으므로 짧게.
+         * (뒤로 나온 재생 화면의 정리가 따로 된 프로세스라 조금 늦을 수 있는 만큼만 봐준다)
+         */
+        const val STALE_MS = 3_000L
         const val FALLBACK_MS = 6 * 3_600_000L
+        private const val PLAYER_PROCESS = ":player"
+        private val ENGINE_DEATHS = setOf(Exit.CRASH, Exit.NATIVE_CRASH, Exit.ANR, Exit.INIT_FAILURE)
 
         fun of(context: Context) = PlayerGuard(playerDir(context), BuildConfig.VERSION_CODE)
+
+        private fun reasonOf(r: Int): Int = when (r) {
+            ApplicationExitInfo.REASON_CRASH -> Exit.CRASH
+            ApplicationExitInfo.REASON_CRASH_NATIVE -> Exit.NATIVE_CRASH
+            ApplicationExitInfo.REASON_ANR -> Exit.ANR
+            ApplicationExitInfo.REASON_INITIALIZATION_FAILURE -> Exit.INIT_FAILURE
+            ApplicationExitInfo.REASON_LOW_MEMORY -> Exit.LOW_MEMORY
+            else -> Exit.OTHER
+        }
     }
 }
 
@@ -168,5 +224,34 @@ class PlayerPresence(private val dir: File, private val elapsed: () -> Long = Sy
         const val STALE_MS = 90_000L
 
         fun of(context: Context) = PlayerPresence(playerDir(context))
+    }
+}
+
+/**
+ * 재생 엔진이 꺼지거나(메모리가 모자라 엔진의 화면 프로세스가 꺼짐) 죽었을 때 할 일.
+ * 화면이 보이지 않을 땐 다시 열지도, 다른 앱을 띄우지도 않는다 — 꺼진 화면에서 소리가 나거나(보이지 않는 재생 금지)
+ * 인터넷 앱이 길 안내 위로 튀어나오지 않게. 메모리 때문에 꺼진 것은 엔진 고장으로 치지 않는다
+ */
+class PlayerRecovery {
+    enum class Do { REOPEN, REOPEN_WHEN_VISIBLE, SHOW_ERROR, FAIL_TO_BROWSER, FAIL_QUIETLY }
+
+    private var kills = 0
+
+    fun onKill(visible: Boolean): Do = when {
+        !visible -> Do.REOPEN_WHEN_VISIBLE
+        ++kills > MAX_KILLS -> Do.SHOW_ERROR
+        else -> Do.REOPEN
+    }
+
+    fun onCrash(visible: Boolean): Do = if (visible) Do.FAIL_TO_BROWSER else Do.FAIL_QUIETLY
+
+    /** 사용자가 '다시 시도'를 누름 — 처음부터 센다 */
+    fun retried() {
+        kills = 0
+    }
+
+    companion object {
+        /** 보이는 동안 이만큼까지는 바로 다시 연다 */
+        const val MAX_KILLS = 2
     }
 }

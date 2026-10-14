@@ -25,11 +25,14 @@ object ErrorLogFormat {
     private val KAKAO_AK = Regex("""(KakaoAK)\s+\S+""")
     /** 카카오 앱 키(32자리)·공공데이터 키(64자리)처럼 긴 16진수 */
     private val HEX_TOKEN = Regex("""\b[0-9a-fA-F]{24,}\b""")
+    /** 구글(유튜브) API 키 'AIza…', 로그인 토큰 'ya29.…'·'1//…', OAuth 클라이언트 비밀 'GOCSPX-…' */
+    private val GOOGLE_SECRET = Regex("""(AIza|ya29\.|1//|GOCSPX-)[0-9A-Za-z_.\-]+""")
 
     /** 인증키처럼 보이는 값을 지운다 — 오류 문구에 요청 주소가 섞여 와도 키가 기록에 남지 않게 */
     fun sanitize(text: String): String = text
         .replace(SERVICE_KEY, "$1…")
         .replace(KAKAO_AK, "$1 …")
+        .replace(GOOGLE_SECRET, "…")
         .replace(HEX_TOKEN, "…")
 
     /** 앱이 멈춘 원인: 예외 이름·문구 + 우리 코드에서 가장 가까운 세 곳 + 근본 원인 */

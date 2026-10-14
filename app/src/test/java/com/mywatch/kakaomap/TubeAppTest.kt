@@ -440,6 +440,48 @@ class TubeAppTest {
         assertTrue(rows(a).any { it is Row.Action && it.id == TubeRows.A_LOGIN })
     }
 
+    @Test
+    fun whenAccessIsRemovedInTheGoogleAccountMyPagesAndDataGoAway() {
+        signIn()
+        backend.pages[Feed.Account.key] = { Fetched(TubePage(emptyList(), null, channels = listOf(channel))) }
+        backend.pages[Feed.Liked.key] = { Fetched(TubePage(listOf(v("likedaaaaa1")), null)) }
+        val c = Robolectric.buildActivity(TubeActivity::class.java).setup()
+        val a = c.get()
+        settle { !opening(a) }
+        tapAction(a, TubeRows.A_LIBRARY)
+        tapAction(a, TubeRows.A_LIKED)
+        assertTrue(rows(a).filterIsInstance<Row.VideoCard>().any { it.video.id == "likedaaaaa1" })
+        // 구글 계정 > 보안에서 이 앱의 접근을 끊음 → 다음에 토큰을 쓸 때 앱이 알아차리고 지운다
+        store.t = null
+        c.pause().resume()
+        settle()
+        assertFalse("내 화면은 걷어 낸다", titles(a).first() == "좋아요 표시한 동영상")
+        // 다른 계정으로 다시 로그인 → 예전 계정의 좋아요가 남아 있지 않다
+        backend.pages[Feed.Liked.key] = { Fetched(TubePage(listOf(v("likedbbbbb1")), null)) }
+        store.t = Tokens("AT2", "RT2", now + 3_600_000)
+        c.pause().resume()
+        settle()
+        if (titles(a).first() != "보관함") tapAction(a, TubeRows.A_LIBRARY)
+        tapAction(a, TubeRows.A_LIKED)
+        val ids = rows(a).filterIsInstance<Row.VideoCard>().map { it.video.id }
+        assertEquals(listOf("likedbbbbb1"), ids)
+    }
+
+    @Test
+    fun ifSignInFinishedWhileTheScreenWasOffItSaysSoInsteadOfCodeExpired() {
+        val a = open()
+        tapAction(a, TubeRows.A_LIBRARY)
+        tapAction(a, TubeRows.A_LOGIN)
+        settle { rows(a).any { it is Row.Code } }
+        // 화면이 꺼지기 직전 보낸 물음이 끝나 로그인됨 → 그 코드는 이미 쓰였다 (다시 물으면 invalid_grant)
+        store.t = Tokens("AT", "RT", now + 3_600_000)
+        tokenReply = Http.Response(400, """{"error":"invalid_grant"}""")
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(6))
+        settle { titles(a).firstOrNull() != "로그인" }
+        assertEquals("로그인 화면은 닫히고 보던 화면으로", "보관함", titles(a).first())
+        assertFalse(rows(a).any { it is Row.Note && it.text == context.getString(R.string.tube_login_expired) })
+    }
+
     // ---------------- 링크 · 타일 ----------------
 
     @Test

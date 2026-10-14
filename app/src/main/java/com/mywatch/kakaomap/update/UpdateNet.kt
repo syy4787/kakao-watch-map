@@ -73,6 +73,13 @@ object UpdateNet {
         }
     }
 
+    /** 지금 쓰는 망이 이미 Wi-Fi(또는 유선)인지 — 그럼 따로 부탁할 것 없이 그대로 받아도 된다 */
+    fun onWifiNow(context: Context): Boolean = runCatching {
+        val cm = context.getSystemService(ConnectivityManager::class.java) ?: return false
+        val caps = cm.getNetworkCapabilities(cm.activeNetwork) ?: return false
+        caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) || caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)
+    }.getOrDefault(false)
+
     private fun release(cm: ConnectivityManager, callback: ConnectivityManager.NetworkCallback) {
         runCatching { cm.unregisterNetworkCallback(callback) }
     }

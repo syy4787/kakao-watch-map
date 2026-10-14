@@ -3,6 +3,8 @@ package com.mywatch.kakaomap
 import com.mywatch.kakaomap.tube.PlayRoute
 import com.mywatch.kakaomap.tube.PlayerGuard
 import com.mywatch.kakaomap.tube.PlayerPresence
+import com.mywatch.kakaomap.tube.PlayerRecovery
+import com.mywatch.kakaomap.tube.PlayerRecovery.Do
 import com.mywatch.kakaomap.tube.Queue
 import com.mywatch.kakaomap.tube.TubeLinks
 import com.mywatch.kakaomap.tube.TubePlay
@@ -92,11 +94,13 @@ class TubePlayTest {
         now += 10 * 60_000
         assertFalse(guard().crashedRecently())
 
-        // 시작하다 프로세스가 죽음 (표시가 남음): 바로는 모르고(아직 뜨는 중일 수 있음), 1분이 넘으면 죽은 것
+        // 시작하다 프로세스가 죽음 (표시가 남음, 엔진은 네이티브로 죽어 자바 처리기도 못 돎):
+        // 목록에서 다시 누를 땐 재생 화면이 떠 있을 수 없다 — 몇 초만 지나면 죽은 것 (곧장 다시 누르면 또 죽는 고리를 끊는다).
+        // 방금 뒤로 나온 재생 화면의 정리(따로 된 프로세스)가 아직일 수 있는 1~2초만 봐준다
         guard().starting()
-        now += 30_000
+        now += 1_500
         assertFalse(guard().crashedRecently())
-        now += 60_000
+        now += 5_000
         assertTrue(guard().crashedRecently())
         now += 5 * 3_600_000
         assertTrue("6시간 동안은 삼성 인터넷으로", guard().crashedRecently())
@@ -132,6 +136,52 @@ class TubePlayTest {
         p.shown()
         t = 1_000
         assertFalse(p.busy(600_000))
+    }
+
+    @Test
+    fun aNativeCrashOfThePlayerProcessReportedByTheSystemIsRemembered() {
+        var now = 5_000_000L
+        val guard = PlayerGuard(tmp.root, 130) { now }
+        val pkg = "com.mywatch.kakaomap"
+        // 처음 보는 버전: 그 전의 기록(예전 버전에서 죽은 것)은 따지지 않는다
+        guard.noteExits(listOf(PlayerGuard.Exit("$pkg:player", PlayerGuard.Exit.NATIVE_CRASH, now - 60_000)))
+        assertFalse(guard.crashedRecently())
+        now += 60_000
+        // 메모리가 모자라 꺼진 것·다른 프로세스는 엔진 탓이 아니다
+        guard.noteExits(listOf(
+            PlayerGuard.Exit("$pkg:player", PlayerGuard.Exit.LOW_MEMORY, now - 1_000),
+            PlayerGuard.Exit(pkg, PlayerGuard.Exit.NATIVE_CRASH, now - 1_000),
+            PlayerGuard.Exit("$pkg:tab0", PlayerGuard.Exit.NATIVE_CRASH, now - 1_000),
+        ))
+        assertFalse(guard.crashedRecently())
+        // 재생 화면 프로세스가 네이티브로 죽음 → 6시간 인터넷 앱으로
+        guard.noteExits(listOf(PlayerGuard.Exit("$pkg:player", PlayerGuard.Exit.NATIVE_CRASH, now - 500)))
+        assertTrue(guard.crashedRecently())
+        // 같은 기록을 나중에 또 봐도 6시간을 늘리지 않는다
+        now += 5 * 3_600_000L
+        guard.noteExits(listOf(PlayerGuard.Exit("$pkg:player", PlayerGuard.Exit.NATIVE_CRASH, now - 5 * 3_600_000L - 500)))
+        now += 2 * 3_600_000L
+        assertFalse(guard.crashedRecently())
+        // 응답 없음(ANR)도
+        guard.noteExits(listOf(PlayerGuard.Exit("$pkg:player", PlayerGuard.Exit.ANR, now - 10)))
+        assertTrue(guard.crashedRecently())
+    }
+
+    @Test
+    fun whenTheEngineIsKilledOrCrashesNothingHappensOffScreen() {
+        val r = PlayerRecovery()
+        // 화면이 꺼진 동안 메모리 때문에 꺼짐 → 다시 열지 않고(소리가 날 수 있음) 다시 보일 때 연다. 엔진 고장으로 치지 않는다
+        assertEquals(Do.REOPEN_WHEN_VISIBLE, r.onKill(visible = false))
+        assertEquals(Do.REOPEN_WHEN_VISIBLE, r.onKill(visible = false))
+        // 보이는 동안 꺼지면 바로 다시 — 거듭 꺼지면(메모리가 계속 모자람) '다시 시도'를 보여 준다
+        assertEquals(Do.REOPEN, r.onKill(visible = true))
+        assertEquals(Do.REOPEN, r.onKill(visible = true))
+        assertEquals(Do.SHOW_ERROR, r.onKill(visible = true))
+        r.retried()
+        assertEquals("다시 시도하면 처음부터 센다", Do.REOPEN, r.onKill(visible = true))
+        // 엔진이 죽음: 보일 땐 인터넷 앱으로 이어서, 안 보일 땐 기억만 하고 조용히 닫는다 (다른 앱이 길 안내 위로 튀어나오지 않게)
+        assertEquals(Do.FAIL_TO_BROWSER, r.onCrash(visible = true))
+        assertEquals(Do.FAIL_QUIETLY, r.onCrash(visible = false))
     }
 
     @Test
