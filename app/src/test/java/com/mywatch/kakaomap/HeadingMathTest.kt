@@ -4,7 +4,9 @@ import android.view.Surface
 import com.mywatch.kakaomap.location.HeadingMath
 import com.mywatch.kakaomap.location.WearSide
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import kotlin.math.PI
 import kotlin.math.cos
@@ -107,8 +109,8 @@ class HeadingMathTest {
         assertEquals(false, side.flipped)
         // 아직 모를 때: 수평에 가까우면 12시 쪽(뒤)을 가리킨다 — 지금까지 사용자가 본 증상
         assertHeading(180.0, HeadingMath.screenHeadingDeg(lookingFlipped(north, 5.0), Surface.ROTATION_0, side.flipped))
-        // 화면을 2초쯤 보면(초당 16번) 뒤집어 찬 것을 알아챈다
-        glances(40) { lookingFlipped(north, it) }.forEach { side.observe(it, Surface.ROTATION_0) }
+        // 화면을 4초쯤 보면(초당 16번) 뒤집어 찬 것을 알아챈다
+        glances(80) { lookingFlipped(north, it) }.forEach { side.observe(it, Surface.ROTATION_0) }
         assertEquals(true, side.flipped)
         for (tilt in listOf(0.0, 5.0, 20.0, 45.0, 70.0, 90.0)) {
             assertHeading(0.0, HeadingMath.screenHeadingDeg(lookingFlipped(north, tilt), Surface.ROTATION_0, side.flipped))
@@ -135,7 +137,7 @@ class HeadingMathTest {
     @Test
     fun relearnsWhenIPutTheWatchOnTheOtherWay() {
         val side = WearSide(flipped = true)
-        glances(60) { looking(north, it) }.forEach { side.observe(it, Surface.ROTATION_0) }
+        glances(100) { looking(north, it) }.forEach { side.observe(it, Surface.ROTATION_0) }
         assertEquals(false, side.flipped)
     }
 
@@ -172,6 +174,23 @@ class HeadingMathTest {
         // 화면 위쪽과 화면 앞쪽이 같은 수평 방향을 가리키면(화면을 비스듬히 땅으로) 바라보는 방향을 알 수 없다
         val s = sin(PI / 4)
         assertNull(HeadingMath.screenHeadingDeg(matrix(y = V(0.0, s, s), z = V(0.0, s, -s)), Surface.ROTATION_0))
+    }
+
+    // ── 움직이는 방향(GPS) — 자전거 손잡이를 잡으면 팔이 앞을 향해 워치 화면으로 잰 방향이 90° 틀어진다 ──
+
+    @Test
+    fun ridingOrCyclingFastUsesTheGpsCourse() {
+        val now = 100_000L
+        val bike = HeadingMath.Course(bearingDeg = 75f, speedMps = 5f, accuracyDeg = 10f, atMs = now - 1_000)
+        assertTrue(HeadingMath.useCourse(bike, now))
+        // 걷는 속도에선 손목 방향(센서)이 더 정확하다 (GPS 방향은 걸음마다 흔들림)
+        assertFalse(HeadingMath.useCourse(bike.copy(speedMps = 1.3f), now))
+        // 오래된 방향·흐린 방향은 안 씀
+        assertFalse(HeadingMath.useCourse(bike.copy(atMs = now - 5_000), now))
+        assertFalse(HeadingMath.useCourse(bike.copy(accuracyDeg = 40f), now))
+        // 정확도를 모르면 속도만 충분하면
+        assertTrue(HeadingMath.useCourse(bike.copy(accuracyDeg = null), now))
+        assertFalse(HeadingMath.useCourse(null, now))
     }
 
     @Test

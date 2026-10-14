@@ -48,6 +48,26 @@ object HeadingMath {
         return ue.toDouble() to un.toDouble()
     }
 
+    /** GPS 가 잰 움직이는 방향 — [atMs] 는 받은 때 (부팅 후 ms) */
+    data class Course(val bearingDeg: Float, val speedMps: Float, val accuracyDeg: Float?, val atMs: Long)
+
+    /**
+     * 손목 방향(센서) 대신 움직이는 방향(GPS)을 쓸지: 자전거·버스처럼 빠르게 움직이면 그쪽이 맞다 —
+     * 자전거 손잡이를 잡으면 팔이 앞을 향해 화면으로 잰 방향이 90° 틀어지고, 버스에선 옆으로 앉기도 한다.
+     * 걷는 속도에선 GPS 방향이 걸음마다 흔들려 손목 방향이 낫다
+     */
+    fun useCourse(c: Course?, nowMs: Long): Boolean {
+        if (c == null) return false
+        if (nowMs - c.atMs > COURSE_MAX_AGE_MS) return false
+        if (c.speedMps < COURSE_MIN_SPEED_MPS) return false
+        return c.accuracyDeg == null || c.accuracyDeg <= COURSE_MAX_ACCURACY_DEG
+    }
+
+    private const val COURSE_MAX_AGE_MS = 3_000L
+    /** 시속 9km — 빨리 걷기보다 빠름 (자전거·차) */
+    private const val COURSE_MIN_SPEED_MPS = 2.5f
+    private const val COURSE_MAX_ACCURACY_DEG = 25f
+
     /** 카카오 지도 Label 회전값: 정북 0, 시계 방향 +, −180~180° 를 라디안으로 (카카오 데브톡 공식 답변 기준) */
     fun labelRadians(headingDeg: Float): Float {
         var d = headingDeg % 360f

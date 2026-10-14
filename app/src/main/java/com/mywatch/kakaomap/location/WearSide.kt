@@ -59,8 +59,8 @@ class WearSide(flipped: Boolean = false) {
         const val MIN_UP_H = 0.3
         /** 두 방향이 이루는 각이 53° 안쪽(같은 쪽) 또는 127° 바깥(반대쪽)일 때만 */
         const val MIN_AGREE = 0.6
-        /** 표본 하나의 무게 — 화면을 2초쯤(초당 16번) 보면 판단이 바뀐다 */
-        const val RATE = 0.04
+        /** 표본 하나의 무게 — 화면을 3~4초(초당 16번) 보면 판단이 바뀐다 (남에게 잠깐 보여 준 것으로는 안 바뀌게) */
+        const val RATE = 0.025
         /** 판단을 바꾸는 문턱 (가운데 ±0.5 는 그대로 — 잠깐 이상한 자세로는 안 바뀜) */
         const val SWITCH = 0.5
     }

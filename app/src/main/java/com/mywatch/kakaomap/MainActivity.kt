@@ -151,6 +151,10 @@ class MainActivity : ComponentActivity() {
     private var myLabelHasCone = false
     private var heading: Float? = null
     private var lastHeadingApplied = Float.NaN
+    /** 마지막으로 바꾼 때 (부팅 후 ms) — 나침반 모드에선 지도 전체가 돌므로 너무 자주 돌리지 않는다 */
+    private var lastHeadingAt = 0L
+    /** GPS 가 잰 움직이는 방향 — 자전거·버스처럼 빠르면 손목 방향 대신 이것 ([HeadingMath.useCourse]) */
+    private var course: HeadingMath.Course? = null
     /** 부채꼴에 마지막으로 준 회전값(라디안, −π~π) */
     private var lastLabelRad = 0f
     private lateinit var headingSensor: HeadingSensor
@@ -292,11 +296,14 @@ class MainActivity : ComponentActivity() {
         routePill.setOnClickListener { openRouteDetail() }
         guideBox.setOnClickListener {
             // 다시 찾기를 다 쓴 채 벗어나 있으면: 누르면 지금 한 번 더 찾는다. 그 밖엔 둘째 줄 접기·펴기
-            if (rerouteStoppedNow(Navigator.state.value)) {
-                guideBox.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
-                NavigationService.rerouteNow(this)
-            } else {
-                toggleGuideCompact()
+            val active = RouteRepository.activeRoute
+            when {
+                active != null && needsPrecise(active) -> requestLocationPermission(byUser = true)   // 두 번 거절했으면 설정으로
+                rerouteStoppedNow(Navigator.state.value) -> {
+                    guideBox.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
+                    NavigationService.rerouteNow(this)
+                }
+                else -> toggleGuideCompact()
             }
         }
         // 글자가 바뀌어 폭이 달라지면 원 가장자리 쪽으로 다시 붙인다 (레이아웃 중에 바꾸지 않도록 한 박자 뒤에)
@@ -647,7 +654,10 @@ class MainActivity : ComponentActivity() {
         val rawSub = if (s.bannerTitle != null) s.bannerSub else fallback.second
         // GPS 신호가 끊기면(지하·실내) 둘째 줄로 알린다 — 접어 둔 상태여도. 다시 찾기를 다 썼으면 그것을(누르면 한 번 더)
         val stopped = rerouteStoppedNow(s)
+        // '대략적 위치'만 허용돼 안내가 실제로는 돌지 않음 — 안내하는 척하지 않고 알린다(누르면 다시 묻거나 설정으로)
+        val noPrecise = needsPrecise(active)
         val sub = when {
+            noPrecise -> getString(R.string.precise_needed_banner)
             stopped -> getString(R.string.reroute_stopped)
             s.signalLost && !s.arrived -> getString(R.string.gps_weak)
             else -> rawSub
@@ -663,7 +673,7 @@ class MainActivity : ComponentActivity() {
         guideSub.maxWidth = textMax
         fitText(guideMain, main, textMax, maxSp = 14f, minSp = 11f)
         fitText(guideSub, sub.orEmpty(), textMax, maxSp = 12f, minSp = 10.5f)
-        guideSub.visibility = if (sub == null || (guideCompact && !s.signalLost && !stopped)) View.GONE else View.VISIBLE
+        guideSub.visibility = if (sub == null || (guideCompact && !s.signalLost && !stopped && !noPrecise)) View.GONE else View.VISIBLE
         applyGuideIcon(s, active)
         guideBox.visibility = if (main.isEmpty() || mapFailed) View.GONE else View.VISIBLE
         routePill.text = NavOverlayText.pill(
@@ -724,6 +734,9 @@ class MainActivity : ComponentActivity() {
     }
 
     /** 배너 톡 → 한 줄로 접기 / 펼치기 (다음에 열어도 그대로) */
+    private fun needsPrecise(active: ActiveRoute) =
+        active.startNavigation && Locator.hasPermission(this) && !Locator.hasPrecise(this)
+
     private fun rerouteStoppedNow(s: NavState) =
         s.rerouteStopped && !s.rerouting && !s.arrived && (s.offRoute || s.passedStop || s.missedRide)
 
@@ -834,7 +847,8 @@ class MainActivity : ComponentActivity() {
         )
     }
 
-    private fun setLocMode(mode: LocMode) {
+    /** [keepRotation] = 지도를 손으로 끌어 따라가기가 풀림 — 나침반 모드로 돌아가 있던 지도를 손가락 밑에서 북쪽으로 돌리지 않는다 */
+    private fun setLocMode(mode: LocMode, keepRotation: Boolean = false) {
         val map = kakaoMap
         val previous = locMode
         locMode = mode
@@ -853,9 +867,11 @@ class MainActivity : ComponentActivity() {
         when (mode) {
             LocMode.NONE -> {
                 tracking?.stopTracking()
-                if (previous == LocMode.COMPASS) map.moveCamera(CameraUpdateFactory.rotateTo(0.0), CameraAnimation.from(300))
+                if (previous == LocMode.COMPASS && !keepRotation) map.moveCamera(CameraUpdateFactory.rotateTo(0.0), CameraAnimation.from(300))
             }
             LocMode.FOLLOW, LocMode.COMPASS -> {
+                // 따라가기는 북쪽이 위 — 나침반 모드에서 지도를 끌어 돌아간 채 남은 지도를 바로 세운다
+                if (mode == LocMode.FOLLOW && previous == LocMode.NONE) map.moveCamera(CameraUpdateFactory.rotateTo(0.0), CameraAnimation.from(300))
                 myLabel?.let {
                     tracking?.startTracking(it)
                     tracking?.setTrackingRotation(mode == LocMode.COMPASS)
@@ -890,7 +906,13 @@ class MainActivity : ComponentActivity() {
             stopLocationUpdates()
             return
         }
-        if (!inAmbient) headingSensor.start() else headingSensor.stop()
+        if (!inAmbient) {
+            // 첫 위치가 오기 전에도 자북 → 진북 보정(한국은 약 −8°)을 마지막 위치로
+            RouteRepository.lastLocation?.let { headingSensor.updateLocation(it) }
+            headingSensor.start()
+        } else {
+            headingSensor.stop()
+        }
         if (updatesRunning && plan == activePlan) return
         val firstStart = !updatesRunning
         val priority = when (plan.power) {
@@ -929,6 +951,10 @@ class MainActivity : ComponentActivity() {
         Navigator.onFix(this, fix)      // 위치 저장 + 안내 계산 (같은 위치는 한 번만)
         if (inAmbient) return           // 저전력 화면에선 지도를 건드리지 않는다
         headingSensor.updateLocation(c)
+        course = if (loc.hasBearing() && loc.hasSpeed()) {
+            HeadingMath.Course(loc.bearing, loc.speed, if (loc.hasBearingAccuracy()) loc.bearingAccuracyDegrees else null, SystemClock.elapsedRealtime())
+        } else null
+        course?.takeIf { HeadingMath.useCourse(it, SystemClock.elapsedRealtime()) }?.let { applyHeading(it.bearingDeg) }
         val pos = LatLng.from(c.lat, c.lng)
         val label = myLabel
         if (label == null) {
@@ -954,15 +980,26 @@ class MainActivity : ComponentActivity() {
             .setAnchorPoint(0.5f, 0.5f)
     )
 
+    /** 손목 방향(센서) — 빠르게 움직이는 중이면 GPS 방향이 대신한다 */
     private fun onHeading(deg: Float) {
+        if (HeadingMath.useCourse(course, SystemClock.elapsedRealtime())) return
+        applyHeading(deg)
+    }
+
+    private fun applyHeading(deg: Float) {
         heading = deg
         val label = myLabel ?: return
         if (!myLabelHasCone) {
             myLabelHasCone = true
             label.changeStyles(myStyle(true))
         }
-        if (!lastHeadingApplied.isNaN() && angleDiff(deg, lastHeadingApplied) < 3f) return
+        // 나침반 모드는 지도 전체가 함께 돌아 32비트 워치엔 무겁다 — 6° 넘게·초당 5번까지만
+        val compass = locMode == LocMode.COMPASS
+        val now = SystemClock.elapsedRealtime()
+        if (!lastHeadingApplied.isNaN() && angleDiff(deg, lastHeadingApplied) < (if (compass) 6f else 3f)) return
+        if (compass && now - lastHeadingAt < 200) return
         lastHeadingApplied = deg
+        lastHeadingAt = now
         // 카카오 Label 회전은 −180~180°. 뒤쪽(±180°)을 넘을 때는 애니메이션 없이 — 숫자대로 돌리면
         // 반대쪽으로 한 바퀴 가까이 휘돌아(나침반 모드에선 지도까지) 방향이 '난리'로 보인다
         val target = HeadingMath.labelRadians(deg * AppConfig.HEADING_SIGN)
@@ -1038,7 +1075,7 @@ class MainActivity : ComponentActivity() {
             followLostByTouch = true
             modeBeforeTouch = locMode
         }
-        setLocMode(LocMode.NONE)
+        setLocMode(LocMode.NONE, keepRotation = true)
     }
 
     // ───────────────────────── 버튼·안내 문구 ─────────────────────────

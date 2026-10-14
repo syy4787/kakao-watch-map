@@ -67,6 +67,7 @@
     <string name="nav_channel">길 안내</string>
     <string name="nav_gave_up_title">%1$s 안내를 끝냈어요</string>
     <string name="nav_gave_up_text">경로를 30분 넘게 벗어나 있어서 배터리를 아끼려고 안내를 껐어요. 다시 가려면 길찾기에서 안내 시작을 눌러 주세요.</string>
+    <string name="precise_needed_banner">정확한 위치가 필요해요 · 톡하면 허용</string>
     <string name="reroute_stopped">다시 찾기를 멈췄어요 · 톡하면 다시</string>
     <string name="nav_stalled_text">한참 동안 더 나아가지 않아서 배터리를 아끼려고 안내를 껐어요. 다시 가려면 길찾기에서 안내 시작을 눌러 주세요.</string>
     <string name="nav_no_fix_text">30분 넘게 위치를 받지 못해서(위치가 꺼졌거나 실내) 안내를 껐어요. 다시 가려면 길찾기에서 안내 시작을 눌러 주세요.</string>

@@ -80,7 +80,7 @@ class HeadingSensorTest {
         val got = mutableListOf<Float>()
         val first = HeadingSensor(context) { got += it }
         first.start()
-        repeat(60) { k -> send(flippedLookingNorth(25.0 + (k % 7) * 5.0)) }
+        repeat(90) { k -> send(flippedLookingNorth(25.0 + (k % 7) * 5.0)) }
         // 거의 수평으로 내려 봐도
         repeat(10) { send(flippedLookingNorth(5.0)) }
         first.stop()
