@@ -81,6 +81,8 @@ data class NavState(
     val finished: Boolean = false,
     /** GPS 신호를 한동안 못 받음 */
     val signalLost: Boolean = false,
+    /** 이번 여정의 다시 찾기를 다 씀 — 벗어나 있으면 배너로 알리고, 누르면 한 번 더 */
+    val rerouteStopped: Boolean = false,
     /** 지도 배너: 오른쪽 굵은 글자 — 짧은 '할 일' (좌회전, 617번 승차, 곧 하차 …) */
     val bannerTitle: String? = null,
     /** 지도 배너: 오른쪽 둘째 줄 — 장소 하나 (역전약국 앞, 시청역 …) */
@@ -663,6 +665,11 @@ class NavEngine(
     /** GPS 신호를 한동안 못 받음 / 다시 받음 */
     fun setSignalLost(lost: Boolean) {
         if (state.signalLost != lost) state = state.copy(signalLost = lost)
+    }
+
+    /** 다시 찾기를 다 씀 / 한 번 더 함 */
+    fun setRerouteStopped(stopped: Boolean) {
+        if (state.rerouteStopped != stopped) state = state.copy(rerouteStopped = stopped)
     }
 
     // ───────── 문구 ─────────

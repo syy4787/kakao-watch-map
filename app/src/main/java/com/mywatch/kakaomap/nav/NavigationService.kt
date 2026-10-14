@@ -91,11 +91,11 @@ class NavigationService : Service() {
     private var lastNotifyAt = 0L
 
     private var rerouteJob: Job? = null
-    private var lastRerouteAt = 0L
-    /** 새 경로에 올라서지 못한 채 연달아 재탐색한 횟수 → 간격을 30초·1분·2분·4분으로 늘림 */
-    private var reroutesWithoutMatch = 0
-    /** 이번 여정에서 다시 찾은 횟수 — 하루 무료 사용량(경로 API 1,000회)을 지키려고 10번까지만 */
-    private var rerouteCount = 0
+    /**
+     * 다시 찾기 간격·횟수 ([RerouteGate]): 새 경로를 따라 실제로 나아가지 못한 채 또 벗어나면 30초·1분·2분·4분,
+     * 한 여정 10번까지(하루 무료 사용량 — 경로 API 1,000회). 다 쓰면 배너로 알리고 누르면 한 번 더
+     */
+    private val reroutes = RerouteGate()
     /** 지금 따라가는 여정 (새 길찾기를 시작하면 횟수·시작 시각을 새로) */
     private var tripId = 0L
     private var retryJob: Job? = null
@@ -116,6 +116,8 @@ class NavigationService : Service() {
     private var signalJob: Job? = null
     /** 경로 밖에 있는 시간 (10분: 저전력 위치로, 벗어난 채 30분: 안내 끝냄) */
     private val lostClock = LostClock()
+    /** 경로 위에서 진척이 없는 시간 (10분: 저전력 위치로, 1시간·위치 없이 30분: 안내 끝냄, 목적지 옆: 도착) */
+    private val stall = StallClock()
     /**
      * 위치가 안 들어와도(멈춰 있으면 거의 안 옴) 정한 시각에 다시 판단하는 알람.
      * 코루틴 delay 는 워치가 잠든(CPU 꺼짐) 동안 시간이 안 가서 몇 시간씩 늦어지므로, 부팅 후 시각 기준 알람을 쓴다
@@ -123,6 +125,7 @@ class NavigationService : Service() {
      *  늦어도 그 사이 위치가 들어오면 그때 바로 판단하므로 이 알람은 '위치가 안 올 때'의 보험이다).
      */
     private val lostWake by lazy { Wake("kakaomap:lost") { onState(Navigator.state.value) } }
+    private val stallWake by lazy { Wake("kakaomap:stall") { onState(Navigator.state.value) } }
     private val passiveWake by lazy { Wake("kakaomap:passive") { onState(Navigator.state.value) } }
     private val finishWake by lazy { Wake("kakaomap:finish") { finishIfStillArrived() } }
     /** 저전력(Wi-Fi·기지국) 위치로 쉬는 동안 몇 분마다 GPS 로 한 번 확인 — 기지국 위치만 잡히면 걷기 시작해도 모르므로 */
@@ -139,6 +142,7 @@ class NavigationService : Service() {
                     if (loc.hasAccuracy()) loc.accuracy else null,
                     if (loc.hasSpeed()) loc.speed else null,
                 )
+                if (loc.hasAccuracy() && loc.accuracy <= USABLE_FIX_M) stall.onUsableFix(SystemClock.elapsedRealtime())
                 Navigator.onFix(this@NavigationService, loc.toFix())
             }
             onSignal(true)
@@ -194,6 +198,17 @@ class NavigationService : Service() {
             shutdown()
             return START_NOT_STICKY
         }
+        if (intent?.action == ACTION_REROUTE) {
+            // 다시 찾기를 다 쓴 뒤 배너를 눌러 한 번 더
+            val a = RouteRepository.activeRoute
+            val st = Navigator.state.value
+            if (a != null && a.startNavigation && (st.offRoute || st.passedStop || st.missedRide) && !st.rerouting) {
+                reroutes.manual()
+                Navigator.setRerouteStopped(false)
+                maybeReroute(a, st)
+            }
+            return START_NOT_STICKY
+        }
         val active = RouteRepository.activeRoute
         if (active == null || !active.startNavigation || !Locator.hasPrecise(this)) {
             shutdown()
@@ -208,6 +223,7 @@ class NavigationService : Service() {
         running = false
         stopTracking()
         lostWake.cancel()
+        stallWake.cancel()
         passiveWake.cancel()
         finishWake.cancel()
         scope.cancel()
@@ -299,14 +315,13 @@ class NavigationService : Service() {
         if (active.tripId != tripId) {
             // 새 길찾기: 재탐색 횟수·간격·시작 시각을 새로 센다 (재탐색으로 바뀐 경로는 같은 여정이라 이어감)
             tripId = active.tripId
-            rerouteCount = 0
-            reroutesWithoutMatch = 0
-            lastRerouteAt = 0L
+            reroutes.newTrip()
             startedAt = SystemClock.elapsedRealtime()
             lostClock.reset()
+            stall.start(startedAt)
         }
         updateNotification(active, s)
-        if (s.matched && !s.offRoute && !s.passedStop && !s.missedRide) reroutesWithoutMatch = 0
+        if (s.matched && !s.offRoute && !s.passedStop && !s.missedRide) reroutes.onRoute(s, SystemClock.elapsedRealtime())
         trackLost(s)
         if (lostClock.shouldGiveUp(s, SystemClock.elapsedRealtime())) {
             // 경로를 벗어난 채 30분 — 잊고 둔 안내가 배터리를 다 쓰지 않게 스스로 끝낸다
@@ -314,6 +329,7 @@ class NavigationService : Service() {
             finishRoute()
             return
         }
+        if (!s.arrived && checkStall(active, s)) return
         if (s.arrived) {
             // 도착: 진행 중이던 재탐색은 버리고, 위치는 저전력으로 (2분 뒤엔 추가 전력 0), 5분 뒤 또는 300m 넘게 떠나면 끝
             if (rerouteJob?.isActive == true) rerouteJob?.cancel()
@@ -337,6 +353,27 @@ class NavigationService : Service() {
         applyPlan(planFor(active, s))
         // 도보·자전거: 경로를 벗어나면 다시 찾기. 대중교통: 정류장을 지나쳤거나 환승 도보 중 벗어나거나 기차를 놓치면 다시 찾기
         if ((s.offRoute || s.passedStop || s.missedRide) && !s.rerouting) maybeReroute(active, s)
+    }
+
+    /**
+     * 경로 위에서 진척이 없는지 본다 ([StallClock]): 목적지 바로 옆에서 멈췄으면 도착으로 보고 끝내고,
+     * 1시간 진척이 없거나 위치를 30분 못 받으면 알리고 끝낸다. 위치가 안 와도 다음 판단 시각에 깨운다. 끝냈으면 true
+     */
+    private fun checkStall(active: ActiveRoute, s: NavState): Boolean {
+        val now = SystemClock.elapsedRealtime()
+        stall.update(s, now)
+        stallWake.schedule(stall.nextDeadline(now))
+        if (stall.arrivedNearby(s, RouteRepository.freshFix(NEAR_FIX_AGE_MS)?.coord, active.destination, now)) {
+            finishRoute()
+            return true
+        }
+        if (stall.shouldGiveUp(s, now)) {
+            val noFix = s.matched && stall.stalledMs(now) < StallClock.GIVE_UP_MS
+            notifyGaveUp(active, if (noFix) R.string.nav_no_fix_text else R.string.nav_stalled_text)
+            finishRoute()
+            return true
+        }
+        return false
     }
 
     /** 경로 밖에 있는 시간을 잰다. 위치가 안 들어와도 다음 판단 시각(10분·30분)에 다시 보도록 알람을 건다 */
@@ -380,7 +417,7 @@ class NavigationService : Service() {
     private fun sinceLost(): Long = lostClock.sinceLost(SystemClock.elapsedRealtime())
 
     /** 안내를 스스로 끝냈다는 알림 (소리 없이) */
-    private fun notifyGaveUp(active: ActiveRoute) {
+    private fun notifyGaveUp(active: ActiveRoute, why: Int = R.string.nav_gave_up_text) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) return
@@ -388,8 +425,8 @@ class NavigationService : Service() {
         val n = NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_navigation)
             .setContentTitle(getString(R.string.nav_gave_up_title, active.destinationName))
-            .setContentText(getString(R.string.nav_gave_up_text))
-            .setStyle(NotificationCompat.BigTextStyle().bigText(getString(R.string.nav_gave_up_text)))
+            .setContentText(getString(why))
+            .setStyle(NotificationCompat.BigTextStyle().bigText(getString(why)))
             .setContentIntent(openMapIntent())
             .setAutoCancel(true)
             .setSilent(true)
@@ -412,8 +449,12 @@ class NavigationService : Service() {
      */
     private fun maybeReroute(active: ActiveRoute, s: NavState) {
         val now = SystemClock.elapsedRealtime()
-        val interval = REROUTE_INTERVAL_MS shl reroutesWithoutMatch.coerceAtMost(3)
-        if (rerouteJob?.isActive == true || now - lastRerouteAt < interval || rerouteCount >= MAX_REROUTES) return
+        if (reroutes.exhausted) {
+            // 다 씀 — 말없이 멈추지 않고 배너로 알린다 (누르면 한 번 더: [ACTION_REROUTE])
+            if (!s.rerouteStopped) Navigator.setRerouteStopped(true)
+            return
+        }
+        if (rerouteJob?.isActive == true || !reroutes.canReroute(now)) return
         // 역에서 기차를 놓쳤으면 역 근처면 충분 (역 안이라 GPS 가 거침). 기차·버스가 내릴 곳을 지나쳤으면 다음 역·정류장에 서야
         // 내릴 수 있으니 멈출 때까지 기다렸다가(시속 11km 아래) 그 자리에서 — 달리는 버스 안에서 찾으면 내리기도 전에 출발지가
         // 뒤처진다. 기차는 기지국 위치(1.5km)여도 다음 열차·버스를 찾기엔 충분
@@ -425,9 +466,7 @@ class NavigationService : Service() {
         }
         val fix = RouteRepository.freshFix(10_000)?.takeIf { !it.accuracyM.isNaN() && it.accuracyM <= maxAcc } ?: return
         val from = fix.coord
-        lastRerouteAt = now
-        reroutesWithoutMatch++
-        rerouteCount++
+        reroutes.rerouted(now)
         Navigator.setRerouting(true)
         rerouteJob = scope.launch {
             val result = withContext(Dispatchers.IO) {
@@ -461,7 +500,7 @@ class NavigationService : Service() {
                 // 네트워크 끊김 등 — 아직 벗어나 있으면 간격(30초·1분·2분…)을 두고 다시 시도
                 retryJob?.cancel()
                 retryJob = scope.launch {
-                    delay(REROUTE_INTERVAL_MS shl reroutesWithoutMatch.coerceIn(0, 3))
+                    delay(reroutes.interval())
                     val st = Navigator.state.value
                     if ((st.offRoute || st.passedStop || st.missedRide) && RouteRepository.activeRoute === active) onState(st)
                 }
@@ -564,9 +603,10 @@ class NavigationService : Service() {
             sinceStartMs = now - startedAt,
             lowBattery = lowBattery,
             sinceLostMs = sinceLost(),
+            stalledMs = stall.stalledMs(now),
         )
         // 재탐색을 다 쓴 뒤에도 벗어나 있으면 1초 GPS 를 계속 쓰지 않는다 (경로로 돌아오면 다시 촘촘히)
-        val exhausted = (s.offRoute || s.passedStop || s.missedRide) && rerouteCount >= MAX_REROUTES
+        val exhausted = (s.offRoute || s.passedStop || s.missedRide) && reroutes.exhausted
         return if (exhausted && plan.power == LocPower.HIGH && plan.intervalMs < 3_000) plan.copy(intervalMs = 3_000) else plan
     }
 
@@ -714,12 +754,15 @@ class NavigationService : Service() {
         private const val NOTIFICATION_ID = 42
         private const val GAVE_UP_NOTIFICATION_ID = 43
         private const val ACTION_END = "com.mywatch.kakaomap.END_NAVIGATION"
-        private const val REROUTE_INTERVAL_MS = 30_000L
+        private const val ACTION_REROUTE = "com.mywatch.kakaomap.REROUTE"
         private const val PLAN_DWELL_MS = 5_000L
         private const val SIGNAL_LOST_AFTER_MS = 10_000L
-        private const val MAX_REROUTES = 10
         private const val BATTERY_CHECK_MS = 60_000L
         private const val PROBE_EVERY_MS = 4 * 60_000L
+        /** 이 정확도 안의 위치면 '위치를 받고 있음' (엔진도 50m 넘는 위치는 버린다) */
+        private const val USABLE_FIX_M = 50f
+        /** 목적지 바로 옆인지 볼 때 쓸 위치의 나이 */
+        private const val NEAR_FIX_AGE_MS = 5 * 60_000L
         private const val PROBE_TIMEOUT_MS = 30_000L
         /** 다음 기차·버스를 찾을 때 시간표를 이만큼까지 기다린다 */
         private const val INTERCITY_TIMEOUT_MS = 20_000L
@@ -743,6 +786,14 @@ class NavigationService : Service() {
         fun stop(context: Context) {
             if (!running) return
             context.stopService(Intent(context, NavigationService::class.java))
+        }
+
+        /** 다시 찾기를 다 쓴 뒤 사용자가 배너를 누름 — 지금 한 번 더 (안내 중일 때만, 화면에서) */
+        fun rerouteNow(context: Context) {
+            if (!running) return
+            runCatching {
+                context.startService(Intent(context, NavigationService::class.java).setAction(ACTION_REROUTE))
+            }.onFailure { Log.w(MapApp.TAG, "다시 찾기 요청 실패", it) }
         }
     }
 }

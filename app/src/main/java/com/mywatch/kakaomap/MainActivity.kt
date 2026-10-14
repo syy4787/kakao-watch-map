@@ -290,7 +290,15 @@ class MainActivity : ComponentActivity() {
         // 새 버전 알림을 누르면 바로 받아 설치 (업데이트 화면에서 버튼을 또 찾지 않게)
         updatePill.setOnClickListener { startActivity(UpdateActivity.updateNowIntent(this)) }
         routePill.setOnClickListener { openRouteDetail() }
-        guideBox.setOnClickListener { toggleGuideCompact() }
+        guideBox.setOnClickListener {
+            // 다시 찾기를 다 쓴 채 벗어나 있으면: 누르면 지금 한 번 더 찾는다. 그 밖엔 둘째 줄 접기·펴기
+            if (rerouteStoppedNow(Navigator.state.value)) {
+                guideBox.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
+                NavigationService.rerouteNow(this)
+            } else {
+                toggleGuideCompact()
+            }
+        }
         // 글자가 바뀌어 폭이 달라지면 원 가장자리 쪽으로 다시 붙인다 (레이아웃 중에 바꾸지 않도록 한 박자 뒤에)
         guideBox.addOnLayoutChangeListener { v, l, _, r, _, ol, _, or, _ ->
             if (r - l != or - ol) v.post { fitToCircle(v, atTop = true) }
@@ -637,8 +645,13 @@ class MainActivity : ComponentActivity() {
         val fallback = NavOverlayText.bannerLines(guide.orEmpty())
         val main = s.bannerTitle ?: fallback.first
         val rawSub = if (s.bannerTitle != null) s.bannerSub else fallback.second
-        // GPS 신호가 끊기면(지하·실내) 둘째 줄로 알린다 — 접어 둔 상태여도
-        val sub = if (s.signalLost && !s.arrived) getString(R.string.gps_weak) else rawSub
+        // GPS 신호가 끊기면(지하·실내) 둘째 줄로 알린다 — 접어 둔 상태여도. 다시 찾기를 다 썼으면 그것을(누르면 한 번 더)
+        val stopped = rerouteStoppedNow(s)
+        val sub = when {
+            stopped -> getString(R.string.reroute_stopped)
+            s.signalLost && !s.arrived -> getString(R.string.gps_weak)
+            else -> rawSub
+        }
         // 왼쪽 칸: 아이콘 + 그 아래 거리
         val dist = s.bannerDistM?.let { Format.distance(it) }
         guideDist.text = dist.orEmpty()
@@ -650,7 +663,7 @@ class MainActivity : ComponentActivity() {
         guideSub.maxWidth = textMax
         fitText(guideMain, main, textMax, maxSp = 14f, minSp = 11f)
         fitText(guideSub, sub.orEmpty(), textMax, maxSp = 12f, minSp = 10.5f)
-        guideSub.visibility = if (sub == null || (guideCompact && !s.signalLost)) View.GONE else View.VISIBLE
+        guideSub.visibility = if (sub == null || (guideCompact && !s.signalLost && !stopped)) View.GONE else View.VISIBLE
         applyGuideIcon(s, active)
         guideBox.visibility = if (main.isEmpty() || mapFailed) View.GONE else View.VISIBLE
         routePill.text = NavOverlayText.pill(
@@ -711,6 +724,9 @@ class MainActivity : ComponentActivity() {
     }
 
     /** 배너 톡 → 한 줄로 접기 / 펼치기 (다음에 열어도 그대로) */
+    private fun rerouteStoppedNow(s: NavState) =
+        s.rerouteStopped && !s.rerouting && !s.arrived && (s.offRoute || s.passedStop || s.missedRide)
+
     private fun toggleGuideCompact() {
         guideCompact = !guideCompact
         getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit { putBoolean(KEY_GUIDE_COMPACT, guideCompact) }

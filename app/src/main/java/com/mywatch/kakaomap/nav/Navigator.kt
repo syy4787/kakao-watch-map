@@ -99,6 +99,14 @@ object Navigator {
         _state.value = eng.state
     }
 
+    /** 다시 찾기를 다 씀(배너로 알림) / 한 번 더 함 */
+    @MainThread
+    fun setRerouteStopped(stopped: Boolean) {
+        val eng = engine ?: return
+        eng.setRerouteStopped(stopped)
+        _state.value = eng.state
+    }
+
     fun vibrate(context: Context, event: NavEvent) {
         val vibrator: Vibrator? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             context.getSystemService(VibratorManager::class.java)?.defaultVibrator

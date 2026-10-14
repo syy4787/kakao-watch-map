@@ -49,6 +49,8 @@ object LocationPolicy {
     const val LOST_LONG_MS = 10 * 60_000L
     /** 경로를 벗어난 채 이만큼 지나면 안내를 스스로 끝낸다 (잊고 둔 안내가 배터리를 다 쓰지 않게) — [LostClock] */
     const val GIVE_UP_MS = 30 * 60_000L
+    /** 경로 위에서 이만큼 진척이 없고 멈춰 있으면 GPS 대신 Wi-Fi·기지국 위치 — [StallClock] */
+    const val STALL_LOW_POWER_MS = 10 * 60_000L
     const val AFTER_ARRIVAL_ACTIVE_MS = 2 * 60_000L
     /** 기차·고속버스: 출발 이만큼 전부터 GPS (탔는지 알아야 하므로) */
     private const val WAIT_GPS_MINUTES = 3.0
@@ -67,6 +69,7 @@ object LocationPolicy {
      * @param sinceStartMs 안내를 시작한 뒤 지난 시간
      * @param lowBattery 배터리 15% 이하이면서 충전 중이 아님
      * @param sinceLostMs 경로를 벗어났거나(이탈·정류장 지나침) 아직 경로에 못 오른 채 지난 시간 (경로 위면 0)
+     * @param stalledMs 경로 위에서(또는 오르기 전) 진척 없이 지난 시간 — [StallClock]
      */
     fun navigation(
         s: NavState,
@@ -78,8 +81,9 @@ object LocationPolicy {
         sinceLostMs: Long = 0,
         /** 지금 시각 (기차·버스 시간표와 비교) */
         nowMs: Long = System.currentTimeMillis(),
+        stalledMs: Long = 0,
     ): LocPlan {
-        val plan = basePlan(s, bike, speedMps, sinceArrivalMs, sinceStartMs, sinceLostMs, nowMs)
+        val plan = basePlan(s, bike, speedMps, sinceArrivalMs, sinceStartMs, sinceLostMs, nowMs, stalledMs)
         if (!lowBattery || plan.power != LocPower.HIGH) return plan
         return plan.copy(
             intervalMs = maxOf(plan.intervalMs * 2, 2_000L),
@@ -89,6 +93,7 @@ object LocationPolicy {
 
     private fun basePlan(
         s: NavState, bike: Boolean, speedMps: Float?, sinceArrivalMs: Long, sinceStartMs: Long, sinceLostMs: Long, nowMs: Long,
+        stalledMs: Long,
     ): LocPlan {
         if (s.arrived) {
             return if (sinceArrivalMs < AFTER_ARRIVAL_ACTIVE_MS) LocPlan(LocPower.BALANCED, 10_000, minDistanceM = 5f)
@@ -97,6 +102,11 @@ object LocationPolicy {
         val still = speedMps != null && speedMps < STILL_MPS
         // 재탐색 중에는 정확히 따라간다 (잠깐)
         if (s.rerouting) return LocPlan(LocPower.HIGH, 1_000)
+        // 경로 위에서 10분 넘게 진척 없이 멈춰 있음(목적지 건물 안·경로 위 카페 등): GPS 대신 Wi-Fi·기지국 위치 —
+        // 몇 분마다 GPS 로 확인해 걷기 시작하면 바로 다시 GPS (타거나 기다리는 중은 제외)
+        if (stalledMs >= STALL_LOW_POWER_MS && still && !s.onRide && !s.waitingBus && !s.waitingLongRide) {
+            return LocPlan(LocPower.BALANCED, 15_000, minDistanceM = 10f)
+        }
         // 기차가 내릴 역을 지나침: 다음 역에 설 때까지는 내릴 수 없고 다시 찾기도 그때 하므로 저전력으로 기다린다
         if (s.passedStop && s.onLongRide) return LocPlan(LocPower.BALANCED, 30_000)
         if (s.offRoute || s.passedStop || s.missedRide || !s.matched) {
