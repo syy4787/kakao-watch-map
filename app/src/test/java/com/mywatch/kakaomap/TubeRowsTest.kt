@@ -96,6 +96,11 @@ class TubeRowsTest {
         assertTrue("앞에 있는데 모자라면 반으로", TubeThumbs.cachedBytes() in 1..TubeThumbs.maxBytes() / 2)
         TubeThumbs.trim(android.content.ComponentCallbacks2.TRIM_MEMORY_BACKGROUND)
         assertEquals("뒤로 돌려지면 비운다", 0, TubeThumbs.cachedBytes())
+        // 재검토에서 찾음: 길 안내 중엔 안내 서비스 때문에 이 프로세스가 뒤로 돌려지지 않아(BACKGROUND 가 안 옴) 반이 안내 내내 남았다 →
+        // 안내 중에 가려지면 다 비운다 (재생 화면·지도·안내가 함께 메모리를 쓰므로 안내가 대신 정리되지 않게)
+        fill()
+        TubeThumbs.trim(android.content.ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN, guiding = true)
+        assertEquals(0, TubeThumbs.cachedBytes())
     }
 
     @Test

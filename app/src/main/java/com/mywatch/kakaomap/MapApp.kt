@@ -14,6 +14,7 @@ import androidx.annotation.VisibleForTesting
 import com.kakao.vectormap.KakaoMapSdk
 import com.mywatch.kakaomap.data.ErrorLog
 import com.mywatch.kakaomap.data.RouteRepository
+import com.mywatch.kakaomap.nav.NavigationService
 import com.mywatch.kakaomap.tube.PlayerGuard
 import com.mywatch.kakaomap.tube.PlayerIdle
 import com.mywatch.kakaomap.tube.PlayerLifecycleShim
@@ -44,9 +45,9 @@ class MapApp : Application() {
             }
             ProcessRole.MAIN -> Unit
         }
-        // 화면이 가려지면 미리보기 그림을 반으로, 시스템이 뒤로 돌리면 다 돌려준다 (2GB 워치 — 길 안내가 대신 정리되지 않게)
+        // 화면이 가려지면 미리보기 그림을 반으로(길 안내 중이면 다), 시스템이 뒤로 돌리면 다 돌려준다 (2GB 워치 — 길 안내가 대신 정리되지 않게)
         registerComponentCallbacks(object : ComponentCallbacks2 {
-            override fun onTrimMemory(level: Int) = TubeThumbs.trim(level)
+            override fun onTrimMemory(level: Int) = TubeThumbs.trim(level, guiding = NavigationService.running)
             override fun onConfigurationChanged(newConfig: Configuration) = Unit
             @Deprecated("시스템 콜백")
             override fun onLowMemory() = TubeThumbs.trim(ComponentCallbacks2.TRIM_MEMORY_COMPLETE)

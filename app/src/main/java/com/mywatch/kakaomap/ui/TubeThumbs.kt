@@ -58,11 +58,13 @@ object TubeThumbs {
      * 시스템이 메모리를 돌려 달라고 할 때 ([android.content.ComponentCallbacks2.onTrimMemory]):
      * 시스템이 이 프로세스를 뒤로 돌렸으면(BACKGROUND 이상) 비우고, 화면이 가려졌거나(UI_HIDDEN — 동영상을 열면 재생 화면이
      * 다른 프로세스라 늘 이렇다) 앞에 있는데 모자라면(RUNNING_LOW·CRITICAL) 최근 본 것 반만 남긴다 — 목록으로 돌아와 다시 받지 않게.
-     * Android 14+ 는 UI_HIDDEN·BACKGROUND 만 보낸다
+     * 길 안내 중([guiding])엔 안내 서비스 때문에 뒤로 돌려지지 않으므로(BACKGROUND 가 안 옴) 가려지면 다 비운다 —
+     * 재생 화면·지도·안내가 함께 메모리를 쓰는 때라 안내가 대신 정리되지 않게. Android 14+ 는 UI_HIDDEN·BACKGROUND 만 보낸다
      */
-    fun trim(level: Int) {
+    fun trim(level: Int, guiding: Boolean = false) {
         when {
             level >= android.content.ComponentCallbacks2.TRIM_MEMORY_BACKGROUND -> cache.evictAll()
+            guiding && level >= android.content.ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN -> cache.evictAll()
             level >= android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW -> cache.trimToSize(cache.maxSize() / 2)
         }
     }
