@@ -309,6 +309,8 @@ class ScreensRenderTest {
         tube("tube_login_font130", TubeRows.login(tubeApp, TubeRows.LoginState.Waiting(code)), pages = 3, fontScale = 1.3f)
         tube("tube_login_denied", TubeRows.login(tubeApp, TubeRows.LoginState.Denied), pages = 1)
         tube("tube_account", TubeRows.account(tubeApp, signedIn), pages = 2)
+        tube("tube_terms_first", TubeRows.terms(tubeApp, agreed = false, privacy = true), pages = 3)
+        tube("tube_terms_first_font130", TubeRows.terms(tubeApp, agreed = false, privacy = true), pages = 4, fontScale = 1.3f)
     }
 
     @Test

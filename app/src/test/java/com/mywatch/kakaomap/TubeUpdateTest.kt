@@ -37,6 +37,7 @@ class TubeUpdateTest {
     fun setUp() {
         TubeThumbs.enabled = false
         TubeState(context).clear()
+        TubeState(context).agree()   // 약관 동의는 처음 한 번 (TubeAppTest 에서 확인)
     }
 
     @After

@@ -79,6 +79,11 @@ jobs:
                 exit 1
               }
           done
+          # 암호화 파일에서 꺼낸 키들은 GitHub 가 모르는 값이라 직접 가린다 (어떤 단계의 로그에도 나오지 않게)
+          sed -n 's/^[[:space:]]*[^#![:space:]][^=:]*[=:][[:space:]]*//p' "$RUNNER_TEMP/secrets.properties" | tr -d ' \t\r' |
+            while IFS= read -r v; do
+              if [ -n "$v" ]; then echo "::add-mask::$v"; fi
+            done
 
       # 유튜브 키가 실제로 되는지 한 번 물어 실행 요약에 남긴다 (영상 정보 1건 — 하루 한도 1만 중 1).
       # 안 돼도 배포는 그대로 한다 — 앱은 그때 카카오 동영상 검색으로 찾는다
@@ -89,6 +94,17 @@ jobs:
           YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
           SECRETS_FILE: ${{ runner.temp }}/secrets.properties
         run: bash .github/scripts/check-youtube-key.sh
+
+      # 유튜브 로그인 클라이언트(구글 OAuth 'TV 및 입력 제한 기기')가 되는지 — 코드를 받아 토큰을 한 번 물어본다
+      # ('아직 허용 안 함'이 오면 ID·비밀이 맞음). 안 돼도 배포는 그대로 (앱은 '로그인 준비 중'으로)
+      - name: Check YouTube login
+        if: steps.check.outputs.ready == 'true'
+        continue-on-error: true
+        env:
+          YOUTUBE_OAUTH_CLIENT_ID: ${{ secrets.YOUTUBE_OAUTH_CLIENT_ID }}
+          YOUTUBE_OAUTH_CLIENT_SECRET: ${{ secrets.YOUTUBE_OAUTH_CLIENT_SECRET }}
+          SECRETS_FILE: ${{ runner.temp }}/secrets.properties
+        run: bash .github/scripts/check-youtube-login.sh
 
       # 키를 바꾸거나(TAGO 실시간 버스 키 추가 등) 할 때는 저장소 Secrets 에 같은 이름으로 넣으면
       # 암호화 파일보다 우선한다 (비어 있으면 무시)
@@ -101,6 +117,8 @@ jobs:
           KAKAO_REST_API_KEY: ${{ secrets.KAKAO_REST_API_KEY }}
           TAGO_SERVICE_KEY: ${{ secrets.TAGO_SERVICE_KEY }}
           YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+          YOUTUBE_OAUTH_CLIENT_ID: ${{ secrets.YOUTUBE_OAUTH_CLIENT_ID }}
+          YOUTUBE_OAUTH_CLIENT_SECRET: ${{ secrets.YOUTUBE_OAUTH_CLIENT_SECRET }}
         run: |
           RELEASE_KEY_PASSWORD=$(bash .github/scripts/signing-password.sh)
           export RELEASE_KEY_PASSWORD

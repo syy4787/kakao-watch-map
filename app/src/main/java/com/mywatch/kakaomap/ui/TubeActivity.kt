@@ -19,6 +19,7 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.OrientationHelper
 import androidx.wear.input.RemoteInputIntentHelper
 import androidx.wear.widget.ConfirmationOverlay
+import com.mywatch.kakaomap.BuildConfig
 import com.mywatch.kakaomap.R
 import com.mywatch.kakaomap.data.ErrorLog
 import com.mywatch.kakaomap.tile.TubeTileService
@@ -179,6 +180,11 @@ class TubeActivity : ComponentActivity() {
 
     private fun handleIntent(intent: Intent?) {
         if (intent == null) return
+        // 약관에 동의하기 전엔 타일·링크의 일도 하지 않는다 (먼저 묻는 화면)
+        if (!state.agreed) {
+            shortcut = null
+            return
+        }
         // '최근 앱'에서 다시 열면 처음 열 때의 요청이 그대로 다시 온다 → 그냥 홈
         if ((intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY) != 0) return
         // 재생 화면의 링크로 열렸으면 끼워 넣은 값(타일용)은 따르지 않는다. '목록으로'는 그냥 이 화면, '폰에서 이어 보기'는 한 번 묻기
@@ -236,7 +242,7 @@ class TubeActivity : ComponentActivity() {
         is Page.Chart -> listOf(Feed.Popular(p.category))
         is Page.Channel -> listOf(Feed.ChannelInfo(p.id), Feed.ChannelVideos(p.id), Feed.ChannelPlaylists(p.id))
         is Page.Playlist -> listOf(Feed.PlaylistVideos(p.id, p.own))
-        Page.History, is Page.Menu, Page.Login, is Page.Handoff -> emptyList()
+        Page.History, is Page.Menu, Page.Login, is Page.Handoff, Page.Terms -> emptyList()
     }
 
     /** '더 보기'로 이어 받을 것 */
@@ -251,8 +257,13 @@ class TubeActivity : ComponentActivity() {
         else -> null
     }
 
-    /** 지금 화면을 받을 것을 받고(없거나 오래됐으면) 그린다 */
+    /** 지금 화면을 받을 것을 받고(없거나 오래됐으면) 그린다. 약관에 동의하기 전엔 약관 화면만 (유튜브에 묻지 않음) */
     private fun show() {
+        if (!state.agreed && nav.top != Page.Terms) {
+            stopLogin()
+            nav.reset(Page.Terms)
+            scrolls.clear()
+        }
         feedsOf(nav.top).forEach { loader.load(it) }
         render()
         if (nav.top == Page.Login && login == LoginState.Starting && loginJob == null) startLogin()
@@ -293,6 +304,7 @@ class TubeActivity : ComponentActivity() {
             Page.Login -> TubeRows.login(this, login)
             Page.Account -> TubeRows.account(this, account())
             is Page.Handoff -> TubeRows.handoff(this, p.handoff)
+            Page.Terms -> TubeRows.terms(this, state.agreed, privacy = TubeLinks.privacyUrl(BuildConfig.UPDATE_REPO) != null)
         }
     }
 
@@ -455,6 +467,13 @@ class TubeActivity : ComponentActivity() {
             id == TubeRows.A_PERMISSIONS -> openOnPhone(PERMISSIONS_URL, R.string.tube_opened_phone_page) {}
             id == TubeRows.A_HANDOFF -> (top as? Page.Handoff)?.let { doHandoff(it.handoff) }
             id == TubeRows.A_CANCEL -> goBack()
+            id == TubeRows.A_AGREE -> {
+                state.agree()
+                goHome()
+            }
+            id == TubeRows.A_TERMS -> go(Page.Terms)
+            id == TubeRows.A_YT_TERMS -> openOnPhone(TubeLinks.YOUTUBE_TERMS, R.string.tube_opened_phone_page) {}
+            id == TubeRows.A_PRIVACY -> TubeLinks.privacyUrl(BuildConfig.UPDATE_REPO)?.let { openOnPhone(it, R.string.tube_opened_phone_page) {} }
         }
     }
 

@@ -55,6 +55,14 @@ class TubeState(context: Context) {
         prefs.edit { putString(K_PLAYED, PlayedHistory.encode(played(nowMs).filterNot { it.video.id == id })) }
     }
 
+    /**
+     * YouTube 약관·이 앱의 개인정보 처리방침에 동의했는지 (유튜브 API 정책: 앱을 쓰기 전에 동의).
+     * 처리방침이 크게 바뀌면 [TERMS_VERSION] 을 올려 다시 묻는다. '기록 지우기'로는 지워지지 않는다
+     */
+    val agreed: Boolean get() = prefs.getInt(K_AGREED, 0) >= TERMS_VERSION
+
+    fun agree() = prefs.edit { putInt(K_AGREED, TERMS_VERSION) }
+
     /** '기록 지우기' — 본 동영상·검색어 (예전 버전의 '듣는 곳' 설정도 함께 정리) */
     fun clear() = synchronized(LOCK) {
         prefs.edit {
@@ -73,6 +81,8 @@ class TubeState(context: Context) {
         private const val K_SEARCHES = "searches"
         private const val K_PLAYED = "played"
         private const val K_YT_BLOCKED = "youtube_blocked_day"
+        private const val K_AGREED = "terms_agreed"
+        private const val TERMS_VERSION = 1
         /** 예전 버전의 '듣는 곳' (지금은 쓰지 않음 — 기록 지우기 때 정리) */
         private const val K_TARGET = "target"
         private val LOCK = Any()

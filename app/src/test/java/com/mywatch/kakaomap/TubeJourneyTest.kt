@@ -220,6 +220,7 @@ class TubeJourneyTest {
         Page.Login -> "로그인"
         Page.Account -> null   // 내 채널 이름 (받기 전엔 '내 계정')
         is Page.Handoff -> p.handoff.video.title
+        Page.Terms -> "약관·개인정보"
     }
 
     // ---------------- 한 걸음 ----------------
@@ -234,11 +235,20 @@ class TubeJourneyTest {
         val shown = rows(a)
         val tappable = shown.filter { it is Row.VideoCard || it is Row.ChannelItem || it is Row.PlaylistItem || it is Row.Action || it is Row.Chips }
         val cards = shown.filterIsInstance<Row.VideoCard>()
+        // 아직 안 눌러 본 버튼이 있으면 가끔은 그것부터 (골고루 가 보게)
+        val fresh = shown.flatMap { r ->
+            when (r) {
+                is Row.Action -> if ("action:" + r.id !in visited) listOf(Step.Tap(r)) else emptyList()
+                is Row.Chips -> r.items.filter { "action:" + it.id !in visited }.map { Step.Tap(r, it) }
+                else -> emptyList()
+            }
+        }
         val r = random.nextDouble()
         return when {
             r < 0.22 -> Step.Back
             r < 0.34 && cards.isNotEmpty() -> Step.Long(cards.random(random))
             tappable.isEmpty() -> Step.Back
+            r < 0.5 && fresh.isNotEmpty() -> fresh.random(random)
             else -> {
                 val row = tappable.random(random)
                 if (row is Row.Chips) Step.Tap(row, row.items.random(random)) else Step.Tap(row)
@@ -267,18 +277,19 @@ class TubeJourneyTest {
     @Test
     fun anyOrderOfTapsNeverGetsStuckAndAlwaysPlaysTheRightThing() {
         var steps = 0
-        for (seed in 1..16) {
+        for (seed in 1..20) {
             random = Random(seed)
             failRate = if (seed % 3 == 0) 0.3 else 0.08
             store.t = if (seed % 2 == 0) Tokens("AT", "RT", now + 3_600_000) else null
             tokenReply = Http.Response(428, """{"error":"authorization_pending"}""")
             TubeState(context).clear()
+            TubeState(context).agree()
             playerDir(context).deleteRecursively()
             steps += journey(seed, 70)
         }
-        assertTrue("충분히 눌러 봤다: $steps", steps >= 1_000)
+        assertTrue("충분히 눌러 봤다: $steps", steps >= 1_400)
         println("들러 본 것: " + visited.sorted())
-        val pages = listOf("Home", "Search", "Subscriptions", "Library", "History", "Liked", "MyPlaylists", "Chart", "Channel", "Playlist", "Menu", "Login", "Account", "Handoff")
+        val pages = listOf("Home", "Search", "Subscriptions", "Library", "History", "Liked", "MyPlaylists", "Chart", "Channel", "Playlist", "Menu", "Login", "Account", "Handoff", "Terms")
         val missing = pages.filter { "page:$it" !in visited }
         assertTrue("모든 화면에 가 봤다 (못 간 곳: $missing)", missing.isEmpty())
         val actions = listOf(TubeRows.A_MORE, TubeRows.A_RETRY, TubeRows.A_PLAY, TubeRows.A_PLAY_ALL, TubeRows.A_CHANNEL, TubeRows.A_LOGIN, TubeRows.A_LOGOUT, TubeRows.A_SEARCH, TubeRows.A_ON_PHONE)

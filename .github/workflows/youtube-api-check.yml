@@ -1,8 +1,9 @@
 name: YouTube API check
 
-# 실제 유튜브 Data API 가 앱이 묻는 그대로 대답하는지(받는 칸·글 모양·채널·재생목록) 확인한다 (YouTubeDataLiveTest).
+# 실제 유튜브 Data API 가 앱이 묻는 그대로 대답하는지(받는 칸·글 모양·채널·재생목록) 확인한다 (YouTubeDataLiveTest),
+# 그리고 유튜브 로그인 클라이언트(구글 OAuth)가 되는지 (check-youtube-login.sh — 사람이 할 일 없음).
 # 키는 가리고, 결과 요약만 실행 요약(Summary)에 남긴다. 쓰는 한도: 검색 1번 + 약 8단위 (하루 1만 중).
-# 앱을 배포하지 않는다 — 확인만.
+# 앱을 배포하지 않는다 — 확인만. Actions 에서 Run workflow 로 언제든.
 on:
   workflow_dispatch:
   push:
@@ -11,6 +12,7 @@ on:
       - 'app/src/main/java/com/mywatch/kakaomap/tube/YouTubeData.kt'
       - 'app/src/main/java/com/mywatch/kakaomap/tube/TubeParsers.kt'
       - 'app/src/test/java/com/mywatch/kakaomap/YouTubeDataLiveTest.kt'
+      - '.github/scripts/check-youtube-login.sh'
       - '.github/workflows/youtube-api-check.yml'
 
 permissions:
@@ -34,22 +36,33 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v6
 
+      # 배포와 같은 암호화 파일 (값은 모두 가린다)
+      - name: Decrypt API keys
+        env:
+          RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ -z "$(printf '%s' "${RELEASE_KEY_PASSWORD:-}" | tr -d '[:space:]')" ]; then exit 0; fi
+          PW=$(bash .github/scripts/signing-password.sh)
+          echo "::add-mask::$PW"
+          export PW
+          props="$RUNNER_TEMP/secrets.properties"
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -in signing/secrets.properties.enc -out "$props" -pass env:PW
+          sed -n 's/^[[:space:]]*[^#![:space:]][^=:]*[=:][[:space:]]*//p' "$props" | tr -d ' \t\r' |
+            while IFS= read -r v; do
+              if [ -n "$v" ]; then echo "::add-mask::$v"; fi
+            done
+
       # 배포와 같은 순서로 키를 찾는다: GitHub Secret YOUTUBE_API_KEY → 없으면 암호화 파일의 youtube.api.key
       - name: Find the YouTube key
         env:
-          RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
           YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
         run: |
           set -euo pipefail
           key=$(printf '%s' "${YOUTUBE_API_KEY:-}" | tr -d '[:space:]')
-          if [ -z "$key" ] && [ -n "${RELEASE_KEY_PASSWORD:-}" ]; then
-            PW=$(bash .github/scripts/signing-password.sh)
-            echo "::add-mask::$PW"
-            export PW
-            props="$RUNNER_TEMP/secrets.properties"
-            openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -in signing/secrets.properties.enc -out "$props" -pass env:PW
+          props="$RUNNER_TEMP/secrets.properties"
+          if [ -z "$key" ] && [ -f "$props" ]; then
             key=$(sed -n 's/^[[:space:]]*youtube\.api\.key[[:space:]]*[=:][[:space:]]*//p' "$props" | tail -n 1 | tr -d '[:space:]')
-            rm -f "$props"
           fi
           if [ -z "$key" ]; then
             echo "::error::유튜브 키가 없어요"
@@ -57,6 +70,14 @@ jobs:
           fi
           echo "::add-mask::$key"
           echo "YOUTUBE_LIVE_TEST_KEY=$key" >> "$GITHUB_ENV"
+
+      - name: Check YouTube login
+        continue-on-error: true
+        env:
+          YOUTUBE_OAUTH_CLIENT_ID: ${{ secrets.YOUTUBE_OAUTH_CLIENT_ID }}
+          YOUTUBE_OAUTH_CLIENT_SECRET: ${{ secrets.YOUTUBE_OAUTH_CLIENT_SECRET }}
+          SECRETS_FILE: ${{ runner.temp }}/secrets.properties
+        run: bash .github/scripts/check-youtube-login.sh
 
       - name: Ask the real API
         run: ./gradlew --no-daemon testDebugUnitTest --tests com.mywatch.kakaomap.YouTubeDataLiveTest
@@ -69,3 +90,7 @@ jobs:
             cat app/build/youtube-live.md >> "$GITHUB_STEP_SUMMARY"
             cat app/build/youtube-live.md
           fi
+
+      - name: Clean up secrets
+        if: always()
+        run: rm -f "$RUNNER_TEMP/secrets.properties"

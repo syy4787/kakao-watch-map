@@ -54,6 +54,16 @@ class TubeStateTest {
     }
 
     @Test
+    fun theAgreementToTheTermsIsAskedOnceAndSurvivesClearingHistory() {
+        val state = TubeState(context)
+        assertFalse(state.agreed)
+        state.agree()
+        assertTrue(state.agreed)
+        state.clear()
+        assertTrue("기록 지우기는 동의를 지우지 않는다", TubeState(context).agreed)
+    }
+
+    @Test
     fun songsOlderThanThirtyDaysAreDeletedFromStorageNotJustHidden() {
         val state = TubeState(context)
         val old = TubeVideo("BzYnNdJhZQw", "밤편지", "1theK", 294)

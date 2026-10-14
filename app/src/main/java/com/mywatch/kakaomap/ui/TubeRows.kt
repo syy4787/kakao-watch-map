@@ -49,6 +49,10 @@ object TubeRows {
     const val A_FORGET = "forget"
     const val A_CANCEL = "cancel"
     const val A_HANDOFF = "handoff"
+    const val A_AGREE = "agree"
+    const val A_YT_TERMS = "yt_terms"
+    const val A_PRIVACY = "privacy"
+    const val A_TERMS = "terms"
 
     /** 홈 구역마다 보여 주는 수 (나머지는 '더 보기') */
     private const val HOME_HISTORY = 2
@@ -307,8 +311,21 @@ object TubeRows {
         }
         rows += accountRow(c, account)
         if (history > 0) rows += Row.Action(A_CLEAR, R.drawable.ic_delete, c.getString(R.string.tube_clear))
+        rows += Row.Action(A_TERMS, R.drawable.ic_info, c.getString(R.string.tube_terms))
         return rows
     }
+
+    /**
+     * YouTube 약관·개인정보 (유튜브 API 정책 III.A): 처음엔 '시작하기 전에' + 동의(주 버튼), 그 뒤엔 볼 것만.
+     * 약관·처리방침은 폰에서 연다. [privacy] = 처리방침 주소를 앎 (로컬 빌드는 모름)
+     */
+    fun terms(c: Context, agreed: Boolean, privacy: Boolean): List<Row> = listOfNotNull(
+        Row.Header(c.getString(if (agreed) R.string.tube_terms else R.string.tube_terms_first)),
+        Row.Note(c.getString(R.string.tube_terms_text)),
+        if (agreed) null else Row.Action(A_AGREE, R.drawable.ic_check, c.getString(R.string.tube_terms_agree), accent = true),
+        Row.Action(A_YT_TERMS, R.drawable.ic_smartphone, c.getString(R.string.tube_terms_youtube), sub = c.getString(R.string.tube_terms_on_phone)),
+        if (privacy) Row.Action(A_PRIVACY, R.drawable.ic_smartphone, c.getString(R.string.tube_terms_privacy), sub = c.getString(R.string.tube_terms_on_phone)) else null,
+    )
 
     // ---------------- 메뉴 · 로그인 · 계정 · 이어 보기 ----------------
 

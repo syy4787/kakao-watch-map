@@ -39,6 +39,8 @@ sealed class Page {
     }
     /** 재생 화면의 '폰에서 이어 보기' — 한 번 묻는다 */
     data class Handoff(val handoff: com.mywatch.kakaomap.tube.Handoff) : Page()
+    /** YouTube 약관·개인정보 처리방침 (처음 열 때 동의, 그 뒤엔 보관함에서 언제든) */
+    data object Terms : Page()
 }
 
 /** 뒤로 가기 쌓기 — 뒤로는 늘 한 칸, 맨 아래는 홈 */

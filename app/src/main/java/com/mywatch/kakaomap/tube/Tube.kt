@@ -159,6 +159,12 @@ object TubeLinks {
         return "https://${parts[0].lowercase()}.github.io/${parts[1]}/tube/"
     }
 
+    /** 이 앱의 개인정보 처리방침 (재생 화면과 같은 GitHub Pages — web/privacy.html). 저장소를 모르면 null */
+    fun privacyUrl(repo: String?): String? = playerBase(repo)?.removeSuffix("tube/")?.plus("privacy.html")
+
+    /** YouTube 서비스 약관 (유튜브 API 정책: 앱이 링크를 보여 줘야 함) */
+    const val YOUTUBE_TERMS = "https://www.youtube.com/t/terms"
+
     /**
      * 워치 인터넷 앱으로 열 재생 화면 주소. 곡은 # 뒤에 — 브라우저가 서버로 보내지 않고 화면 안에서만 읽는다.
      * [mix] = 이 곡으로 시작하는 유튜브 믹스(유튜브가 비슷한 곡을 이어 줌). 제목·채널은 열리자마자 보여 줄 이름.

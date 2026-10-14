@@ -218,10 +218,24 @@ class TubeRowsTest {
     }
 
     @Test
+    fun theTermsPageAsksOnceAndStaysReachableFromTheLibrary() {
+        val first = TubeRows.terms(c, agreed = false, privacy = true)
+        assertEquals("시작하기 전에", (first.first() as Row.Header).title)
+        assertTrue("유튜브 API 서비스를 쓴다고 알린다", first.filterIsInstance<Row.Note>().any { it.text.contains("YouTube API 서비스") && it.text.contains("YouTube 서비스 약관") })
+        assertEquals("동의가 주 버튼", TubeRows.A_AGREE, first.filterIsInstance<Row.Action>().first { it.accent }.id)
+        assertEquals(listOf(TubeRows.A_AGREE, TubeRows.A_YT_TERMS, TubeRows.A_PRIVACY), actions(first))
+        val later = TubeRows.terms(c, agreed = true, privacy = true)
+        assertEquals("약관·개인정보", (later.first() as Row.Header).title)
+        assertEquals("이미 동의했으면 볼 것만", listOf(TubeRows.A_YT_TERMS, TubeRows.A_PRIVACY), actions(later))
+        assertEquals("처리방침 주소를 모르면(로컬 빌드) 약관만", listOf(TubeRows.A_YT_TERMS), actions(TubeRows.terms(c, agreed = true, privacy = false)))
+        assertTrue("보관함에서 언제든", actions(TubeRows.library(c, 0, Account(configured = true, signedIn = false))).contains(TubeRows.A_TERMS))
+    }
+
+    @Test
     fun theLibraryShowsMyListsOnlyWhenSignedIn() {
         val out = TubeRows.library(c, history = 3, Account(configured = true, signedIn = false))
-        assertEquals(listOf(TubeRows.A_HISTORY, TubeRows.A_LOGIN, TubeRows.A_CLEAR), actions(out))
+        assertEquals(listOf(TubeRows.A_HISTORY, TubeRows.A_LOGIN, TubeRows.A_CLEAR, TubeRows.A_TERMS), actions(out))
         val inn = TubeRows.library(c, history = 0, Account(configured = true, signedIn = true, channel = channel))
-        assertEquals(listOf(TubeRows.A_HISTORY, TubeRows.A_LIKED, TubeRows.A_MY_PLAYLISTS, TubeRows.A_ACCOUNT), actions(inn))
+        assertEquals(listOf(TubeRows.A_HISTORY, TubeRows.A_LIKED, TubeRows.A_MY_PLAYLISTS, TubeRows.A_ACCOUNT, TubeRows.A_TERMS), actions(inn))
     }
 }

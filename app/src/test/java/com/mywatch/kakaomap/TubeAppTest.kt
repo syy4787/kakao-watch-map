@@ -105,6 +105,7 @@ class TubeAppTest {
     fun setUp() {
         TubeThumbs.enabled = false
         TubeState(context).clear()
+        TubeState(context).agree()
         playerDir(context).deleteRecursively()
         WatchPlayer.base = base
         WatchPlayer.probe = { true }
@@ -200,6 +201,36 @@ class TubeAppTest {
 
     private fun signIn() {
         store.t = Tokens("AT", "RT", now + 3_600_000)
+    }
+
+    // ---------------- 처음 ----------------
+
+    @Test
+    fun theFirstTimeItAsksToAgreeAndDoesNotAskYouTubeBefore() {
+        context.getSharedPreferences("tube", Context.MODE_PRIVATE).edit().clear().commit()
+        val a = open()
+        assertEquals("시작하기 전에", titles(a).first())
+        assertTrue("동의하기 전엔 유튜브에 묻지 않는다: ${backend.asked}", backend.asked.isEmpty())
+        tapAction(a, TubeRows.A_YT_TERMS)
+        assertEquals(listOf(TubeLinks.YOUTUBE_TERMS), phoneOpened)
+        tapAction(a, TubeRows.A_AGREE)
+        assertEquals("유튜브", titles(a).first())
+        assertTrue(backend.asked.contains(Feed.Popular("10").key))
+        a.finish()
+        val again = open()
+        assertEquals("다시 열면 바로 홈", "유튜브", titles(again).first())
+    }
+
+    @Test
+    fun beforeAgreeingBackClosesAndShortcutsWait() {
+        context.getSharedPreferences("tube", Context.MODE_PRIVATE).edit().clear().commit()
+        TubeState(context).addPlayed(v("lastaaaaaa1"))
+        val a = open(Intent(context, TubeActivity::class.java).putExtra(TubeActivity.EXTRA_MIX, true))
+        assertEquals("타일에서 와도 먼저 묻는다", "시작하기 전에", titles(a).first())
+        assertNull("동의 전엔 틀지 않는다", started(a))
+        a.onBackPressedDispatcher.onBackPressed()
+        idle()
+        assertTrue(a.isFinishing)
     }
 
     // ---------------- 재생 ----------------

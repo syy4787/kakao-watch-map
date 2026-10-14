@@ -66,6 +66,14 @@ class TubeTest {
     }
 
     @Test
+    fun privacyPolicyLivesNextToThePlayerPage() {
+        // 유튜브 API 정책: 개인정보 처리방침은 언제든 볼 수 있게 — 재생 화면과 같은 GitHub Pages 에
+        assertEquals("https://syy4787.github.io/kakao-watch-map/privacy.html", TubeLinks.privacyUrl("syy4787/kakao-watch-map"))
+        assertNull("저장소를 모르면 없음", TubeLinks.privacyUrl(null))
+        assertEquals("https://www.youtube.com/t/terms", TubeLinks.YOUTUBE_TERMS)
+    }
+
+    @Test
     fun watchPlayerLinkCarriesTheSongAfterTheHashSoItIsNeverSentToTheServer() {
         val base = "https://syy4787.github.io/kakao-watch-map/tube/"
         val song = TubeVideo("BzYnNdJhZQw", "밤편지 & Night", "IU 아이유")
