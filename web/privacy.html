@@ -11,21 +11,21 @@
     :root { --bg: #121212; --fg: #f1f1f1; --dim: #aaaaaa; --line: #303030; --link: #8ab4f8; }
   }
   html { -webkit-text-size-adjust: 100%; }
-  body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.65 system-ui, -apple-system, "Noto Sans KR", "Apple SD Gothic Neo", sans-serif; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.65 system-ui, -apple-system, "Noto Sans KR", "Apple SD Gothic Neo", sans-serif; word-break: keep-all; overflow-wrap: break-word; }
   main { max-width: 720px; margin: 0 auto; padding: 24px 16px 48px; }
   h1 { font-size: 1.5rem; line-height: 1.3; margin: 0 0 4px; }
   h2 { font-size: 1.1rem; margin: 28px 0 8px; padding-top: 16px; border-top: 1px solid var(--line); }
   p, li { margin: 6px 0; }
   ul { padding-left: 1.2em; }
   .dim { color: var(--dim); font-size: .9rem; }
-  a { color: var(--link); word-break: break-all; }
+  a { color: var(--link); overflow-wrap: anywhere; }
   .box { border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; margin: 16px 0; }
 </style>
 </head>
 <body>
 <main>
   <h1>개인정보 처리방침 · 이용 약관</h1>
-  <p class="dim">갤럭시워치 전용앱 — 유튜브 · 시행일 2026년 10월 14일</p>
+  <p class="dim"><a href="./">갤럭시워치 전용앱</a> — 유튜브 · 시행일 2026년 10월 14일</p>
 
   <div class="box">
     <p><strong>이 앱은 YouTube API 서비스를 사용합니다.</strong> 이 앱을 쓰면

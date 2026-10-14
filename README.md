@@ -133,7 +133,7 @@ Claude 가 코드 수정 → GitHub 에 올림 → GitHub Actions 가 서명된 
 
 ### 6) 재생 화면 올리기 (GitHub Pages) — ✅ 완료
 
-`web/` 이 `main` 에 올라가면 Actions 의 **Watch player page** 가 시뮬레이터로 확인한 뒤 `gh-pages` 브랜치로 올리고, GitHub Pages 가 `https://<사용자>.github.io/<저장소>/tube/`(재생 화면)·`/privacy.html`(개인정보 처리방침)로 보여 줍니다. GitHub Pages 가 꺼져 있으면 한 번만: 저장소 **Settings → Pages → Build and deployment → Source: Deploy from a branch → Branch: `gh-pages` / (root) → Save**. 재생 화면에 닿지 못하면 앱은 알아서 폰 유튜브로 틉니다. 앱 안 엔진이 멈췄을 때를 위해 워치에 **삼성 인터넷**이 있으면 좋습니다(없으면 그때도 폰으로).
+`web/` 이 `main` 에 올라가면 Actions 의 **Watch player page** 가 시뮬레이터로 확인한 뒤 `gh-pages` 브랜치로 올리고, GitHub Pages 가 `https://<사용자>.github.io/<저장소>/tube/`(재생 화면)·`/privacy.html`(개인정보 처리방침)·`/`(앱 소개)로 보여 줍니다. GitHub Pages 가 꺼져 있으면 한 번만: 저장소 **Settings → Pages → Build and deployment → Source: Deploy from a branch → Branch: `gh-pages` / (root) → Save**. 재생 화면에 닿지 못하면 앱은 알아서 폰 유튜브로 틉니다. 앱 안 엔진이 멈췄을 때를 위해 워치에 **삼성 인터넷**이 있으면 좋습니다(없으면 그때도 폰으로).
 
 ### 7) 유튜브 로그인 켜기 — 구독·좋아요·내 재생목록 (10분)
 
@@ -202,5 +202,6 @@ app/src/main/java/com/mywatch/kakaomap/
 └─ update/                  자체 업데이트(확인·다운로드·검증·설치), 자동 업데이트 작업, 앱 정보 화면
 web/tube/index.html         워치 재생 화면 (GitHub Pages) — 유튜브 공식 플레이어 + 둥근 화면용 조작·다음 곡·목록 이어 틀기
 web/privacy.html            개인정보 처리방침·이용 약관 (유튜브 API 정책)
+web/index.html              앱 소개 페이지 (Google 로그인 동의 화면의 '앱 홈페이지')
 tools/tube-sim/             재생 화면 시뮬레이터 (가짜 유튜브 플레이어 + 시나리오·무작위 사용자)
 ```
