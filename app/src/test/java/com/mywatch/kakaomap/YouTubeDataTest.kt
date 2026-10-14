@@ -4,6 +4,7 @@ import com.mywatch.kakaomap.net.ApiException
 import com.mywatch.kakaomap.net.Http
 import com.mywatch.kakaomap.tube.NetworkException
 import com.mywatch.kakaomap.tube.SignInNeededException
+import com.mywatch.kakaomap.tube.Uploads
 import com.mywatch.kakaomap.tube.YouTubeData
 import com.mywatch.kakaomap.tube.YouTubeHttpException
 import com.mywatch.kakaomap.tube.YouTubeQuotaException
@@ -66,7 +67,7 @@ class YouTubeDataTest {
         assertEquals("mostPopular", c.params["chart"])
         assertEquals("KR", c.params["regionCode"])
         assertEquals("10", c.params["videoCategoryId"])
-        assertEquals("snippet,contentDetails,statistics,status", c.params["part"])
+        assertEquals("snippet,contentDetails,statistics,status,player", c.params["part"])
         assertTrue("받는 칸을 줄인다 (워치는 폰 인터넷을 빌려 씀)", c.params["fields"].orEmpty().contains("statistics/viewCount"))
         // 누구나 보는 차트는 로그인했어도 키로 (로그인이 풀려도 홈은 보이게)
         assertEquals(key, c.params["key"])
@@ -422,6 +423,361 @@ class YouTubeDataTest {
         assertTrue(data(g, token = { "AT" }).subscriptionFeed().isEmpty())
     }
 
+    /** 동영상 정보는 어디서 묻든 분류와 플레이어 크기(세로인지)를 함께 — 크기는 maxHeight 를 보낸 요청에만 온다(문서). 값은 1단위 그대로 */
+    @Test
+    fun everyVideoQuestionAsksForTheShapeAndCategory() {
+        val g = FakeGoogle()
+        g.routes["/videos"] = { videos(video("BzYnNdJhZQw", duration = "PT30S", size = 203 to 360, category = "10")) }
+        val yt = data(g, token = { "AT" })
+        val chart = yt.popular("10", null).videos.single()
+        assertEquals("10", chart.categoryId)
+        assertTrue("세로 30초 = Shorts", chart.isShort)
+        assertEquals(true, yt.details(listOf("BzYnNdJhZQw")).getValue("BzYnNdJhZQw").portrait)
+        yt.liked(null)
+        assertEquals(3, g.count("/videos"))
+        g.calls.forEach { c ->
+            assertEquals("snippet,contentDetails,statistics,status,player", c.params["part"])
+            assertEquals("360", c.params["maxHeight"])
+            val fields = c.params["fields"].orEmpty()
+            assertTrue(fields, fields.contains("liveBroadcastContent,categoryId)"))
+            assertTrue(fields, fields.contains("player(embedWidth,embedHeight)"))
+        }
+        assertEquals(360, YouTubeData.MAX_HEIGHT)
+        assertFalse("id 로 물을 땐 maxResults 없이", g.calls[1].params.containsKey("maxResults"))
+    }
+
+    @Test
+    fun channelUploadsOfEachKindUseTheirOwnList() {
+        val g = FakeGoogle()
+        val ch = "UCweOkPb1wVVH0Q0Tlj4a5Pw"
+        g.routes["/videos"] = videosFrom(mapOf(
+            "longvideo01" to long("longvideo01"),
+            "shortvideo1" to short("shortvideo1"),
+            "livevideo01" to video("livevideo01", duration = "P0D", size = 0 to 0, live = true),
+        ))
+        g.routes["/playlistItems"] = { c ->
+            when (c.params["playlistId"]) {
+                "UULFweOkPb1wVVH0Q0Tlj4a5Pw" -> items(listOf("longvideo01"), next = "LF2")
+                "UUSHweOkPb1wVVH0Q0Tlj4a5Pw" -> items(listOf("shortvideo1"))
+                "UULVweOkPb1wVVH0Q0Tlj4a5Pw" -> items(listOf("livevideo01"))
+                "UUweOkPb1wVVH0Q0Tlj4a5Pw" -> items(listOf("shortvideo1", "longvideo01", "livevideo01"))
+                else -> error(404, "playlistNotFound")
+            }
+        }
+        val yt = data(g)
+        val long = yt.uploads(ch, Uploads.LONG, null)
+        assertEquals(listOf("longvideo01"), long.videos.map { it.id })
+        assertEquals("다음 쪽 값은 그대로", "LF2", long.next)
+        assertEquals("UULFweOkPb1wVVH0Q0Tlj4a5Pw", g.last("/playlistItems").params["playlistId"])
+        yt.uploads(ch, Uploads.LONG, "LF2")
+        assertEquals("UULFweOkPb1wVVH0Q0Tlj4a5Pw", g.last("/playlistItems").params["playlistId"])
+        assertEquals("LF2", g.last("/playlistItems").params["pageToken"])
+
+        assertEquals(listOf("shortvideo1"), yt.uploads(ch, Uploads.SHORTS, null).videos.map { it.id })
+        assertEquals("UUSHweOkPb1wVVH0Q0Tlj4a5Pw", g.last("/playlistItems").params["playlistId"])
+        assertEquals(listOf("livevideo01"), yt.uploads(ch, Uploads.LIVE, null).videos.map { it.id })
+        assertEquals("UULVweOkPb1wVVH0Q0Tlj4a5Pw", g.last("/playlistItems").params["playlistId"])
+        assertEquals(listOf("shortvideo1", "longvideo01", "livevideo01"), yt.uploads(ch, Uploads.ALL, null).videos.map { it.id })
+        assertEquals("UUweOkPb1wVVH0Q0Tlj4a5Pw", g.last("/playlistItems").params["playlistId"])
+        assertEquals("목록은 키로 (누구나 보는 것)", key, g.last("/playlistItems").params["key"])
+        assertEquals(5, g.count("/playlistItems"))
+
+        // 이상한 채널 번호는 묻지도 않는다
+        val before = g.calls.size
+        Uploads.entries.forEach { assertTrue(yt.uploads("UCbad", it, null).videos.isEmpty()) }
+        assertEquals(before, g.calls.size)
+    }
+
+    /**
+     * UULF·UUSH·UULV 는 문서에 없는 자동 재생목록 — 없으면(404) 긴 동영상·Shorts 는 전체(UU)에서 모양으로 골라 대신하고,
+     * 다음 쪽은 'UU:' 를 붙인 값으로 전체에서 같은 거르기로 이어서. 생방송은 대신할 길이 없어 빈 목록
+     */
+    @Test
+    fun aMissingListOfOneKindFallsBackToAllUploadsFilteredByShape() {
+        val g = FakeGoogle()
+        val ch = "UChlgI3UHCOnwUGzWzbJ3H5w"
+        val all = "UUhlgI3UHCOnwUGzWzbJ3H5w"
+        val (s1, s2, s3) = listOf("short000001", "short000002", "short000003")
+        val (l1, l2, l3, l4) = listOf("long0000001", "long0000002", "long0000003", "long0000004")
+        g.routes["/videos"] = videosFrom(listOf(s1, s2, s3).associateWith { short(it) } + listOf(l1, l2, l3, l4).associateWith { long(it) })
+        // 전체 목록: 1쪽 = Shorts·긴 것 섞임, 2쪽 = 긴 것만, 3쪽 = Shorts 하나 (끝)
+        g.routes["/playlistItems"] = { c ->
+            if (c.params["playlistId"] != all) error(404, "playlistNotFound")
+            else when (c.params["pageToken"]) {
+                null -> items(listOf(s1, l1, s2, l2), next = "U2")
+                "U2" -> items(listOf(l3, l4), next = "U3")
+                "U3" -> items(listOf(s3))
+                else -> error(400, "invalidPageToken")
+            }
+        }
+        val yt = data(g)
+        val long = yt.uploads(ch, Uploads.LONG, null)
+        assertEquals(listOf(l1, l2), long.videos.map { it.id })
+        assertEquals("UU:U2", long.next)
+        assertEquals(listOf("UULFhlgI3UHCOnwUGzWzbJ3H5w", all), g.calls.filter { it.path == "/playlistItems" }.map { it.params["playlistId"] })
+
+        // 'UU:' 값으로 부르면 특별 목록은 다시 묻지 않고 전체에서 이어서
+        var before = g.count("/playlistItems")
+        val long2 = yt.uploads(ch, Uploads.LONG, "UU:U2")
+        assertEquals(listOf(l3, l4), long2.videos.map { it.id })
+        assertEquals("UU:U3", long2.next)
+        assertEquals(1, g.count("/playlistItems") - before)
+        assertEquals(all, g.last("/playlistItems").params["playlistId"])
+        assertEquals("U2", g.last("/playlistItems").params["pageToken"])
+
+        val shorts = yt.uploads(ch, Uploads.SHORTS, null)
+        assertEquals(listOf(s1, s2), shorts.videos.map { it.id })
+        assertEquals("UU:U2", shorts.next)
+        // Shorts 가 하나도 없는 쪽은 넘겨서 볼 것이 나올 때까지 (세 쪽까지)
+        before = g.count("/playlistItems")
+        val shorts2 = yt.uploads(ch, Uploads.SHORTS, "UU:U2")
+        assertEquals(listOf(s3), shorts2.videos.map { it.id })
+        assertNull(shorts2.next)
+        assertEquals(2, g.count("/playlistItems") - before)
+
+        // 생방송은 대신하지 않는다 (전체 목록도 묻지 않음)
+        before = g.count("/playlistItems")
+        val live = yt.uploads(ch, Uploads.LIVE, null)
+        assertTrue(live.videos.isEmpty())
+        assertNull(live.next)
+        assertEquals(1, g.count("/playlistItems") - before)
+
+        // 동영상이 하나도 없는 채널(전체도 404)은 오류 없이 빈 목록
+        val empty = "UC3IZKseVpdzPSBaWxBxundA"
+        Uploads.entries.forEach { kind ->
+            val page = yt.uploads(empty, kind, null)
+            assertTrue("$kind", page.videos.isEmpty())
+            assertNull("$kind", page.next)
+        }
+
+        // 404 가 아닌 오류는 그대로 (대신하지 않음)
+        g.routes["/playlistItems"] = { error(500, "backendError") }
+        try {
+            yt.uploads(ch, Uploads.LONG, null)
+            fail()
+        } catch (e: YouTubeHttpException) {
+            assertEquals(500, e.code)
+        }
+    }
+
+    @Test
+    fun uploadsFeedTakesTheNewestOfOneKindFromSeveralChannels() = runBlocking {
+        val g = FakeGoogle()
+        val chA = "UCweOkPb1wVVH0Q0Tlj4a5Pw"
+        val chB = "UChlgI3UHCOnwUGzWzbJ3H5w"
+        val chC = "UC3IZKseVpdzPSBaWxBxundA"
+        val chD = "UCSJ4gkVC6NrvII8umztf0Ow"
+        val t0 = 1_760_000_000_000L
+        val h = 3_600_000L
+        g.routes["/videos"] = videosFrom(mapOf(
+            "aLong000001" to long("aLong000001", t0 - 1 * h),
+            "aLong000002" to long("aLong000002", t0 - 5 * h),
+            "bShort00001" to short("bShort00001", t0 - 2 * h),
+            "bLong000001" to long("bLong000001", t0 - 3 * h),
+            "bLong000002" to long("bLong000002", t0 - 4 * h),
+            "bLong000003" to long("bLong000003", t0 - 6 * h),
+            "dLong000001" to long("dLong000001", t0 - h / 2),
+            "aLive000001" to video("aLive000001", duration = "P0D", size = 0 to 0, live = true, publishedMs = t0),
+        ))
+        g.routes["/playlistItems"] = { c ->
+            when (c.params["playlistId"]) {
+                "UULF" + chA.substring(2) -> items(listOf("aLong000001", "aLong000002"))
+                // B 는 긴 동영상 목록이 없음 → 전체에서 두 배(4개)를 받아 긴 것만, 채널마다 2개까지
+                "UU" + chB.substring(2) -> items(listOf("bShort00001", "bLong000001", "bLong000002", "bLong000003"))
+                "UULF" + chC.substring(2) -> error(500, "backendError")       // 잠깐 안 되는 채널은 빼고
+                "UULF" + chD.substring(2) -> items(listOf("dLong000001"))
+                "UULV" + chA.substring(2) -> items(listOf("aLive000001"))
+                else -> error(404, "playlistNotFound")
+            }
+        }
+        val feed = data(g).uploadsFeed(listOf(chA, chB, chC, chD, chA, "UCbad"), Uploads.LONG, perChannel = 2)
+        assertEquals(listOf("dLong000001", "aLong000001", "bLong000001", "bLong000002", "aLong000002"), feed.map { it.id })
+        assertEquals("정보는 한 번에", 1, g.count("/videos"))
+        assertEquals(
+            setOf("aLong000001", "aLong000002", "bShort00001", "bLong000001", "bLong000002", "bLong000003", "dLong000001"),
+            g.last("/videos").params.getValue("id").split(',').toSet(),
+        )
+        val asked = g.calls.filter { it.path == "/playlistItems" }
+        assertEquals("같은 채널은 한 번, 이상한 번호는 묻지 않는다", 5, asked.size)
+        asked.forEach { c ->
+            val n = if (c.params["playlistId"] == "UU" + chB.substring(2)) "4" else "2"
+            assertEquals(c.params["playlistId"], n, c.params["maxResults"])
+            assertEquals("contentDetails", c.params["part"])
+            assertEquals(key, c.params["key"])
+        }
+        assertEquals(listOf("dLong000001", "aLong000001"), data(g).uploadsFeed(listOf(chA, chB, chD), Uploads.LONG, 2, max = 2).map { it.id })
+
+        // 생방송 목록이 없으면(404) 그 채널은 없음 — 전체로 대신하지 않는다
+        val before = g.count("/playlistItems")
+        val live = data(g).uploadsFeed(listOf(chA, chB), Uploads.LIVE, 3)
+        assertEquals(listOf("aLive000001"), live.map { it.id })
+        assertEquals(2, g.count("/playlistItems") - before)
+
+        // 채널이 없으면 묻지 않고 빈 목록
+        val calls = g.calls.size
+        assertTrue(data(g).uploadsFeed(emptyList(), Uploads.LONG, 3).isEmpty())
+        assertEquals(calls, g.calls.size)
+    }
+
+    @Test
+    fun uploadsFeedFailsOnlyWhenNoChannelCouldBeRead() = runBlocking {
+        val g = FakeGoogle()
+        val chA = "UCweOkPb1wVVH0Q0Tlj4a5Pw"
+        val chB = "UChlgI3UHCOnwUGzWzbJ3H5w"
+        g.routes["/playlistItems"] = { c ->
+            if (c.params["playlistId"]!!.endsWith(chA.substring(2))) error(500, "backendError") else throw IOException("down")
+        }
+        try {
+            data(g).uploadsFeed(listOf(chA, chB), Uploads.SHORTS, 3)
+            fail()
+        } catch (e: YouTubeHttpException) {
+            assertEquals("준 채널 순서의 첫 오류", 500, e.code)
+            assertEquals(0, g.count("/videos"))
+        }
+        try {
+            data(g).shortsOf(listOf(chB, chA), 3)
+            fail()
+        } catch (e: NetworkException) {
+            assertEquals(0, g.count("/videos"))
+        }
+    }
+
+    /** Shorts 고르기: 채널마다 새것부터, 준 채널 순서대로 번갈아 · Shorts 모양(세로·3분 이하)만 */
+    @Test
+    fun shortsTakeTurnsBetweenChannelsInTheGivenOrder() = runBlocking {
+        val g = FakeGoogle()
+        val chA = "UCweOkPb1wVVH0Q0Tlj4a5Pw"
+        val chB = "UChlgI3UHCOnwUGzWzbJ3H5w"
+        val chC = "UC3IZKseVpdzPSBaWxBxundA"
+        val chD = "UCSJ4gkVC6NrvII8umztf0Ow"
+        val t0 = 1_760_000_000_000L
+        val m = 60_000L
+        g.routes["/videos"] = videosFrom(mapOf(
+            "aShort00001" to short("aShort00001", t0 - 10 * m),
+            "aShort00002" to short("aShort00002", t0 - 20 * m),
+            "aShort00003" to short("aShort00003", t0 - 30 * m),
+            "bShort00001" to short("bShort00001", t0 - 1 * m),
+            "bShort00002" to short("bShort00002", t0 - 2 * m),
+            "bShort00003" to short("bShort00003", t0 - 3 * m),
+            "bShort00004" to short("bShort00004", t0 - 4 * m),
+            "bLong000001" to long("bLong000001", t0),
+            "cShort00001" to short("cShort00001", t0 - 100 * m),
+            "cWide000001" to video("cWide000001", duration = "PT30S", size = 640 to 360),
+            "cTall000001" to video("cTall000001", duration = "PT4M", size = 203 to 360),
+            "cUnknown001" to video("cUnknown001", duration = "PT30S"),
+        ))
+        g.routes["/playlistItems"] = { c ->
+            when (c.params["playlistId"]) {
+                // 목록 순서가 새것부터가 아니어도 채널 안에서는 새것부터
+                "UUSH" + chA.substring(2) -> items(listOf("aShort00002", "aShort00001", "aShort00003"))
+                // B 는 Shorts 목록이 없음 → 전체에서 6개(두 배)를 받아 Shorts 만 3개까지
+                "UU" + chB.substring(2) -> items(listOf("bLong000001", "bShort00001", "bShort00002", "bShort00003", "bShort00004"))
+                "UUSH" + chC.substring(2) -> items(listOf("cWide000001", "cShort00001", "cTall000001", "cUnknown001"))
+                "UUSH" + chD.substring(2) -> items(emptyList())
+                else -> error(404, "playlistNotFound")
+            }
+        }
+        val shorts = data(g).shortsOf(listOf(chC, chA, chD, chB), perChannel = 3)
+        assertEquals(
+            listOf("cShort00001", "aShort00001", "bShort00001", "aShort00002", "bShort00002", "aShort00003", "bShort00003"),
+            shorts.map { it.id },
+        )
+        assertTrue(shorts.all { it.isShort })
+        assertEquals("정보는 한 번에", 1, g.count("/videos"))
+        g.calls.filter { it.path == "/playlistItems" }.forEach { c ->
+            val n = if (c.params["playlistId"] == "UU" + chB.substring(2)) "6" else "3"
+            assertEquals(c.params["playlistId"], n, c.params["maxResults"])
+        }
+        assertTrue(data(g).shortsOf(emptyList(), 3).isEmpty())
+    }
+
+    @Test
+    fun searchVideosSendsExactlyTheGivenConditionsAndKeepsTheOrder() {
+        val g = FakeGoogle()
+        val found = """
+            {"nextPageToken":"S2","items":[
+              {"id":{"kind":"youtube#video","videoId":"livevideo01"},"snippet":{"title":"생방송","channelTitle":"YTN","liveBroadcastContent":"live"}},
+              {"id":{"kind":"youtube#channel","channelId":"UChlgI3UHCOnwUGzWzbJ3H5w"},"snippet":{"title":"YTN"}},
+              {"id":{"kind":"youtube#video","videoId":"gonevideo01"},"snippet":{"title":"지워짐","channelTitle":"x","liveBroadcastContent":"none"}},
+              {"id":{"kind":"youtube#video","videoId":"livevideo02"},"snippet":{"title":"생방송 2","channelTitle":"KBS","liveBroadcastContent":"live"}}
+            ]}
+        """.trimIndent()
+        g.routes["/search"] = { ok(found) }
+        // 정보는 다른 순서로, 지워진 것 없이 온다
+        g.routes["/videos"] = {
+            videos(
+                video("livevideo02", duration = "P0D", size = 0 to 0, live = true, views = 7),
+                video("livevideo01", duration = "P0D", size = 0 to 0, live = true, views = 9),
+            )
+        }
+        val yt = data(g)
+        val page = yt.searchVideos(mapOf("eventType" to "live"), null)
+        assertEquals("검색 순서 그대로, 정보에 없는 것은 빼고", listOf("livevideo01", "livevideo02"), page.videos.map { it.id })
+        assertTrue(page.videos.all { it.live })
+        assertEquals(9L, page.videos[0].views)
+        assertTrue("동영상만", page.channels.isEmpty())
+        assertEquals("S2", page.next)
+        assertEquals(
+            mapOf(
+                "part" to "snippet", "type" to "video", "maxResults" to "20", "regionCode" to "KR", "relevanceLanguage" to "ko",
+                "fields" to YouTubeData.SEARCH_FIELDS, "eventType" to "live", "key" to key,
+            ),
+            g.last("/search").params,
+        )
+        assertEquals("livevideo01,gonevideo01,livevideo02", g.last("/videos").params["id"])
+
+        // Shorts 보충 (짧은 동영상 · #shorts) — 준 그대로, 다음 쪽까지
+        yt.searchVideos(mapOf("videoDuration" to "short", "q" to "#shorts"), "S2")
+        val shorts = g.last("/search")
+        assertEquals("short", shorts.params["videoDuration"])
+        assertEquals("#shorts", shorts.params["q"])
+        assertEquals("S2", shorts.params["pageToken"])
+        assertFalse(shorts.params.containsKey("eventType"))
+        // 기본 조건(동영상만·받는 칸)은 바꿀 수 없다
+        yt.searchVideos(mapOf("type" to "channel", "fields" to "items", "videoCategoryId" to "25"), null)
+        val news = g.last("/search")
+        assertEquals("video", news.params["type"])
+        assertEquals(YouTubeData.SEARCH_FIELDS, news.params["fields"])
+        assertEquals("25", news.params["videoCategoryId"])
+
+        // 정보를 못 받으면 검색 결과만이라도
+        g.routes["/videos"] = { error(500, "backendError") }
+        assertEquals(listOf("livevideo01", "gonevideo01", "livevideo02"), yt.searchVideos(mapOf("eventType" to "live"), null).videos.map { it.id })
+        // 검색 한도(하루 100번)를 쓴다 — 다 쓰면 검색 한도라고
+        g.routes["/search"] = { error(403, "quotaExceeded") }
+        try {
+            yt.searchVideos(mapOf("eventType" to "live"), null)
+            fail()
+        } catch (e: YouTubeQuotaException) {
+            assertTrue(e.message!!.contains("검색"))
+        }
+        // 결과가 없으면 정보는 묻지 않는다
+        g.routes["/search"] = { ok("""{"items":[]}""") }
+        val videosBefore = g.count("/videos")
+        assertTrue(yt.searchVideos(mapOf("eventType" to "live"), null).videos.isEmpty())
+        assertEquals(videosBefore, g.count("/videos"))
+    }
+
+    @Test
+    fun theChannelOfAVideoComesFromItsDetails() {
+        val g = FakeGoogle()
+        g.routes["/videos"] = { c ->
+            if (c.params["id"] == "BzYnNdJhZQw") videos(video("BzYnNdJhZQw", channelId = "UCweOkPb1wVVH0Q0Tlj4a5Pw", channelTitle = "1theK (원더케이)"))
+            else videos()
+        }
+        val yt = data(g)
+        assertEquals("UCweOkPb1wVVH0Q0Tlj4a5Pw" to "1theK (원더케이)", yt.channelOfVideo("BzYnNdJhZQw"))
+        assertEquals(1, g.count("/videos"))
+        assertNull("지워진 동영상", yt.channelOfVideo("gonevideo01"))
+        val before = g.calls.size
+        assertNull("이상한 번호는 묻지 않는다", yt.channelOfVideo("bad\"id"))
+        assertEquals(before, g.calls.size)
+        g.routes["/videos"] = { videos(video("BzYnNdJhZQw", channelId = "nope")) }
+        assertNull("채널 번호가 이상하면 모름", yt.channelOfVideo("BzYnNdJhZQw"))
+        g.routes["/videos"] = { videos(video("BzYnNdJhZQw", channelTitle = " ")) }
+        assertEquals("UCweOkPb1wVVH0Q0Tlj4a5Pw" to "채널", yt.channelOfVideo("BzYnNdJhZQw"))
+    }
+
     companion object {
         fun ok(body: String) = Http.Response(200, body)
 
@@ -433,20 +789,44 @@ class YouTubeDataTest {
         /** 채널 k 의 j 번째 영상 번호 (11자) */
         fun feedId(k: Int, j: Int) = "v%02d_%dabcdef".format(k, j)
 
+        /** [size] = 플레이어 크기 (너비 to 높이, maxHeight=360 으로 물은 답 — 글로 온다), [category] = 분류 번호 */
         fun video(
             id: String,
             title: String = "제목 $id",
             duration: String = "PT3M",
             views: Long = 1_000,
             publishedMs: Long = 1_700_000_000_000L,
+            channelId: String = "UCweOkPb1wVVH0Q0Tlj4a5Pw",
+            channelTitle: String = "1theK (원더케이)",
+            size: Pair<Int, Int>? = null,
+            category: String? = null,
+            live: Boolean = false,
         ): String {
             val published = java.time.Instant.ofEpochMilli(publishedMs).toString()
             val t = org.json.JSONObject.quote(title)
-            return """{"id":"$id","snippet":{"publishedAt":"$published","channelId":"UCweOkPb1wVVH0Q0Tlj4a5Pw","title":$t,"channelTitle":"1theK (원더케이)","liveBroadcastContent":"none"},""" +
-                """"contentDetails":{"duration":"$duration"},"statistics":{"viewCount":"$views"},"status":{"embeddable":true}}"""
+            val c = org.json.JSONObject.quote(channelTitle)
+            val cat = category?.let { ""","categoryId":"$it"""" }.orEmpty()
+            val player = size?.let { (w, h) -> ""","player":{"embedWidth":"$w","embedHeight":"$h"}""" }.orEmpty()
+            return """{"id":"$id","snippet":{"publishedAt":"$published","channelId":"$channelId","title":$t,"channelTitle":$c,""" +
+                """"liveBroadcastContent":"${if (live) "live" else "none"}"$cat},""" +
+                """"contentDetails":{"duration":"$duration"},"statistics":{"viewCount":"$views"},"status":{"embeddable":true}$player}"""
         }
+
+        /** 세로 30초 (Shorts — 실제로 203×360 으로 옴) */
+        fun short(id: String, publishedMs: Long = 1_700_000_000_000L) = video(id, duration = "PT30S", publishedMs = publishedMs, size = 203 to 360)
+
+        /** 가로 4분 */
+        fun long(id: String, publishedMs: Long = 1_700_000_000_000L) = video(id, duration = "PT4M", publishedMs = publishedMs, size = 640 to 360)
 
         fun videos(vararg items: String, next: String? = null) =
             ok("""{${if (next != null) "\"nextPageToken\":\"$next\"," else ""}"items":[${items.joinToString(",")}]}""")
+
+        /** playlistItems 한 쪽 (part=contentDetails 만 와도 읽는다) */
+        fun items(ids: List<String>, next: String? = null) =
+            ok("""{${if (next != null) "\"nextPageToken\":\"$next\"," else ""}"items":[${ids.joinToString(",") { """{"contentDetails":{"videoId":"$it"}}""" }}]}""")
+
+        /** 가짜 동영상 정보: 물은 번호 중 [catalog] 에 있는 것만 (물은 순서대로) */
+        private fun videosFrom(catalog: Map<String, String>): (Call) -> Http.Response =
+            { c -> videos(*c.params.getValue("id").split(',').mapNotNull { catalog[it] }.toTypedArray()) }
     }
 }

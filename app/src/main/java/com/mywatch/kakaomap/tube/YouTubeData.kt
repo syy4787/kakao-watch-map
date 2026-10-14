@@ -40,7 +40,7 @@ class YouTubeData(
     fun popular(categoryId: String?, pageToken: String?): TubePage {
         val p = linkedMapOf(
             "part" to VIDEO_PARTS, "chart" to "mostPopular", "regionCode" to REGION,
-            "maxResults" to "$PAGE", "fields" to VIDEO_FIELDS,
+            "maxResults" to "$PAGE", "maxHeight" to "$MAX_HEIGHT", "fields" to VIDEO_FIELDS,
         )
         categoryId?.let { p["videoCategoryId"] = it }
         pageToken?.let { p["pageToken"] = it }
@@ -72,10 +72,39 @@ class YouTubeData(
         val out = LinkedHashMap<String, TubeVideo>()
         ids.filter(TubeLinks::isId).distinct().chunked(MAX_IDS).forEach { chunk ->
             out.putAll(TubeParsers.videoDetails(call("/videos", linkedMapOf(
-                "part" to VIDEO_PARTS, "id" to chunk.joinToString(","), "fields" to VIDEO_FIELDS,
+                "part" to VIDEO_PARTS, "id" to chunk.joinToString(","), "maxHeight" to "$MAX_HEIGHT", "fields" to VIDEO_FIELDS,
             ))))
         }
         return out
+    }
+
+    /**
+     * 조건 검색 — 동영상만 (검색 한도): [extra] = 더할 조건 (실시간 eventType=live · Shorts videoDuration=short&q=#shorts 등).
+     * 기본 조건(동영상·한국·한국어·받는 칸)은 [extra] 로 바꾸지 않는다. 정보를 한 번 더 받아 길이·조회수·모양을 채우고
+     * 검색 순서 그대로 (정보에 없는 것은 뺀다). 정보를 못 받으면 검색 결과만이라도
+     */
+    fun searchVideos(extra: Map<String, String>, pageToken: String?): TubePage {
+        val p = linkedMapOf(
+            "part" to "snippet", "type" to "video", "maxResults" to "$PAGE",
+            "regionCode" to REGION, "relevanceLanguage" to "ko", "fields" to SEARCH_FIELDS,
+        )
+        extra.forEach { (k, v) -> p.putIfAbsent(k, v) }
+        pageToken?.let { p["pageToken"] = it }
+        val found = TubeParsers.youtubeSearchAll(call("/search", p, search = true)).let { TubePage(it.videos, it.next) }
+        if (found.videos.isEmpty()) return found
+        val details = try {
+            details(found.videos.map { it.id })
+        } catch (e: ApiException) {
+            return found
+        }
+        return found.copy(videos = found.videos.mapNotNull { details[it.id] })
+    }
+
+    /** 동영상을 올린 채널 (번호, 이름) — 재생 화면에서 채널 이름을 누르면 (1단위). 모르거나 이상한 번호면 null */
+    fun channelOfVideo(videoId: String): Pair<String, String>? {
+        if (!TubeLinks.isId(videoId)) return null
+        val v = details(listOf(videoId))[videoId] ?: return null
+        return v.channelId?.let { it to v.channel.ifBlank { "채널" } }
     }
 
     /** 채널 정보 (없거나 이상한 번호면 null) */
@@ -94,10 +123,21 @@ class YouTubeData(
      * 재생목록 속 동영상 (담긴 순서대로 · 비공개·삭제·지워진 영상 빼고). 채널 업로드(UU…)도 이것으로.
      * [mine] = 내 재생목록(비공개일 수 있음)이라 로그인으로 묻는다. 없는 목록(404 — 영상이 하나도 없는 채널 등)은 빈 목록
      */
-    fun videosOf(playlistId: String, pageToken: String?, mine: Boolean = false): TubePage {
+    fun videosOf(playlistId: String, pageToken: String?, mine: Boolean = false): TubePage =
+        playlistVideos(playlistId, pageToken, mine) ?: TubePage(emptyList(), null)
+
+    /**
+     * [videosOf] 와 같되 없는 목록(404)이면 null — 대신할 목록으로 바꾸려고. [keep] = 이것만 남긴다.
+     * 한 쪽에 남는 것이 없으면(모두 비공개·삭제됐거나 걸러짐) 볼 것이 나올 때까지 세 쪽까지 (예전엔 첫 쪽만 보고 '동영상이 없어요')
+     */
+    private fun playlistVideos(
+        playlistId: String,
+        pageToken: String?,
+        mine: Boolean = false,
+        keep: (TubeVideo) -> Boolean = { true },
+    ): TubePage? {
         if (!TubeLinks.isPlaylistId(playlistId)) return TubePage(emptyList(), null)
         var token = pageToken
-        // 한 쪽이 모두 비공개·삭제된 영상이면 볼 것이 나올 때까지 세 쪽까지 (예전엔 첫 쪽만 보고 '동영상이 없어요')
         repeat(MAX_EMPTY_PAGES) {
             val p = linkedMapOf(
                 "part" to "snippet,contentDetails,status", "playlistId" to playlistId,
@@ -107,13 +147,45 @@ class YouTubeData(
             val (ids, next) = try {
                 TubeParsers.playlistItems(call("/playlistItems", p, mine = mine))
             } catch (e: YouTubeHttpException) {
-                if (e.code == 404) return TubePage(emptyList(), null) else throw e
+                if (e.code == 404) return null else throw e
             }
-            val videos = if (ids.isEmpty()) emptyList() else details(ids).let { d -> ids.mapNotNull { d[it] } }
+            val videos = if (ids.isEmpty()) emptyList() else details(ids).let { d -> ids.mapNotNull { d[it] } }.filter(keep)
             if (videos.isNotEmpty() || next == null) return TubePage(videos, next)
             token = next
         }
         return TubePage(emptyList(), token)
+    }
+
+    /**
+     * 채널의 [kind] 업로드 (새것부터). UULF·UUSH·UULV 는 문서에 없는 자동 재생목록이라 없으면(404) 대신한다:
+     * 긴 동영상·Shorts 는 전체(UU)에서 모양으로 골라서, 생방송·전체는 빈 목록.
+     * 대신한 쪽의 [TubePage.next] 엔 'UU:' 를 붙인다 — 그 값으로 다시 부르면 전체 목록에서 같은 거르기로 이어서
+     */
+    fun uploads(channelId: String, kind: Uploads, pageToken: String?): TubePage {
+        val all = TubeLinks.uploads(channelId, Uploads.ALL) ?: return TubePage(emptyList(), null)
+        if (pageToken != null && pageToken.startsWith(FROM_ALL)) {
+            return fromAll(all, kind, pageToken.removePrefix(FROM_ALL).ifEmpty { null })
+        }
+        val list = TubeLinks.uploads(channelId, kind) ?: return TubePage(emptyList(), null)
+        playlistVideos(list, pageToken)?.let { return it }
+        return when (kind) {
+            // 다음 쪽을 받다 목록이 없어졌으면 처음부터 대신하지 않는다 — 이미 받은 쪽과 겹친다
+            Uploads.LONG, Uploads.SHORTS -> if (pageToken == null) fromAll(all, kind, null) else TubePage(emptyList(), null)
+            Uploads.ALL, Uploads.LIVE -> TubePage(emptyList(), null)
+        }
+    }
+
+    /** 전체 업로드([all] = UU…)에서 [kind] 의 모양만 — 다음 쪽 값엔 'UU:' */
+    private fun fromAll(all: String, kind: Uploads, pageToken: String?): TubePage {
+        val page = playlistVideos(all, pageToken, keep = shapeOf(kind)) ?: return TubePage(emptyList(), null)
+        return page.copy(next = page.next?.let { FROM_ALL + it })
+    }
+
+    /** [kind] 의 모양: 긴 동영상 = Shorts 아닌 것 · Shorts = 세로·3분 이하 · 그 밖은 모두 */
+    private fun shapeOf(kind: Uploads): (TubeVideo) -> Boolean = when (kind) {
+        Uploads.LONG -> { v -> !v.isShort }
+        Uploads.SHORTS -> { v -> v.isShort }
+        Uploads.ALL, Uploads.LIVE -> { _ -> true }
     }
 
     /** 채널이 만든 재생목록 ([TubePage.playlists]) */
@@ -135,7 +207,9 @@ class YouTubeData(
 
     /** 좋아요 표시한 동영상 (로그인) — 영상 정보가 바로 와서 한 번만 묻는다 */
     fun liked(pageToken: String?): TubePage {
-        val p = linkedMapOf("part" to VIDEO_PARTS, "myRating" to "like", "maxResults" to "$PAGE", "fields" to VIDEO_FIELDS)
+        val p = linkedMapOf(
+            "part" to VIDEO_PARTS, "myRating" to "like", "maxResults" to "$PAGE", "maxHeight" to "$MAX_HEIGHT", "fields" to VIDEO_FIELDS,
+        )
         pageToken?.let { p["pageToken"] = it }
         return TubeParsers.videoPage(call("/videos", p, mine = true))
     }
@@ -185,11 +259,87 @@ class YouTubeData(
     /** 채널 업로드 목록의 최신 [n]개 번호 (영상이 없는 채널 = 404 → 없음) */
     private fun latestOf(ch: TubeChannel, n: Int): List<String> {
         val uploads = ch.uploads ?: TubeLinks.uploadsOf(ch.id) ?: return emptyList()
-        val p = linkedMapOf("part" to "contentDetails", "playlistId" to uploads, "maxResults" to "$n", "fields" to "items/contentDetails/videoId")
+        return latestOrNull(uploads, n).orEmpty()
+    }
+
+    /**
+     * 여러 채널(구독 안 한 채널도)의 [kind] 업로드를 새것부터 [max]개 — 구독 피드처럼 채널마다 최신 [perChannel]개, 정보는 한 번에.
+     * 그 종류의 모양만 남긴다 (긴 동영상 = Shorts 아닌 것, Shorts = 세로·3분 이하). 한 채널이 안 되면 그 채널만 빼고,
+     * 하나도 못 읽으면 그 오류를 낸다
+     */
+    suspend fun uploadsFeed(channelIds: List<String>, kind: Uploads, perChannel: Int, max: Int = 30): List<TubeVideo> =
+        latestByChannel(channelIds, kind, perChannel).flatten().distinctBy { it.id }
+            .sortedByDescending { it.publishedAt ?: Long.MIN_VALUE }.take(max)
+
+    /**
+     * Shorts 고르기: 채널마다 최신 Shorts [perChannel]개 → 준 채널 순서대로 번갈아 (첫 채널의 가장 새것, 둘째 채널의 가장 새것, …
+     * 그다음 저마다 둘째 것). 세로·3분 이하인 것만. 한 채널이 안 되면 그 채널만 빼고, 하나도 못 읽으면 그 오류를 낸다
+     */
+    suspend fun shortsOf(channelIds: List<String>, perChannel: Int): List<TubeVideo> {
+        val lanes = latestByChannel(channelIds, Uploads.SHORTS, perChannel)
+        val out = LinkedHashMap<String, TubeVideo>()
+        for (i in 0 until (lanes.maxOfOrNull { it.size } ?: 0)) {
+            lanes.forEach { lane -> lane.getOrNull(i)?.let { out.putIfAbsent(it.id, it) } }
+        }
+        return out.values.toList()
+    }
+
+    /**
+     * 채널마다(준 순서, 같은 채널은 한 번) [kind] 의 최신 [perChannel]개 — 그 모양만, 새것부터. 번호는 채널마다 따로
+     * (동시에 [PARALLEL]개까지), 정보는 한 번에. 받은 번호가 없는데 안 된 채널이 있으면 그 첫 오류를 낸다
+     */
+    private suspend fun latestByChannel(channelIds: List<String>, kind: Uploads, perChannel: Int): List<List<TubeVideo>> =
+        withContext(Dispatchers.IO) {
+            val channels = channelIds.filter(TubeLinks::isChannelId).distinct()
+            if (channels.isEmpty() || perChannel <= 0) return@withContext emptyList()
+            val gate = Semaphore(PARALLEL)
+            val results: List<Result<List<String>>> = coroutineScope {
+                channels.map { id ->
+                    async {
+                        gate.withPermit {
+                            try {
+                                Result.success(latestIds(id, kind, perChannel))
+                            } catch (e: ApiException) {
+                                Result.failure(e)
+                            }
+                        }
+                    }
+                }.awaitAll()
+            }
+            val lanes = results.map { it.getOrNull().orEmpty() }
+            val ids = lanes.flatten().distinct()
+            if (ids.isEmpty()) {
+                results.firstNotNullOfOrNull { it.exceptionOrNull() }?.let { throw it }
+                return@withContext emptyList()
+            }
+            val details = details(ids)
+            val keep = shapeOf(kind)
+            lanes.map { lane ->
+                lane.mapNotNull { details[it] }.filter(keep).sortedByDescending { it.publishedAt ?: Long.MIN_VALUE }.take(perChannel)
+            }
+        }
+
+    /**
+     * 채널의 [kind] 최신 [n]개 번호. 그 목록이 없으면(404) 긴 동영상·Shorts 는 전체(UU)의 최신 2n개 (정보를 받은 뒤 모양으로 고른다),
+     * 생방송·전체는 없음
+     */
+    private fun latestIds(channelId: String, kind: Uploads, n: Int): List<String> {
+        val list = TubeLinks.uploads(channelId, kind) ?: return emptyList()
+        latestOrNull(list, n)?.let { return it }
+        if (kind != Uploads.LONG && kind != Uploads.SHORTS) return emptyList()
+        return TubeLinks.uploads(channelId, Uploads.ALL)?.let { latestOrNull(it, n * 2) }.orEmpty()
+    }
+
+    /** 재생목록의 앞 [n]개 번호 (1단위). 없는 목록(404)이면 null */
+    private fun latestOrNull(playlistId: String, n: Int): List<String>? {
+        val p = linkedMapOf(
+            "part" to "contentDetails", "playlistId" to playlistId, "maxResults" to "${n.coerceIn(1, MAX_IDS)}",
+            "fields" to "items/contentDetails/videoId",
+        )
         return try {
-            TubeParsers.playlistItems(call("/playlistItems", p)).first
+            TubeParsers.playlistItems(call("/playlistItems", p)).first.take(n)
         } catch (e: YouTubeHttpException) {
-            if (e.code == 404) emptyList() else throw e
+            if (e.code == 404) null else throw e
         }
     }
 
@@ -249,9 +399,16 @@ class YouTubeData(
         const val BROWSE_LIMIT = "오늘 유튜브 사용 한도를 다 썼어요 — 한국 시간 오후 4~5시에 다시 채워져요"
 
         private const val THUMBS = "thumbnails(default/url,medium/url,high/url)"
-        const val VIDEO_PARTS = "snippet,contentDetails,statistics,status"
-        const val VIDEO_FIELDS = "nextPageToken,items(id,snippet(publishedAt,channelId,title,channelTitle,liveBroadcastContent)," +
-            "contentDetails(duration,contentRating/ytRating),statistics/viewCount,status/embeddable)"
+        const val VIDEO_PARTS = "snippet,contentDetails,statistics,status,player"
+        const val VIDEO_FIELDS = "nextPageToken,items(id,snippet(publishedAt,channelId,title,channelTitle,liveBroadcastContent,categoryId)," +
+            "contentDetails(duration,contentRating/ytRating),statistics/viewCount,status/embeddable,player(embedWidth,embedHeight))"
+        /**
+         * 동영상 정보를 물을 때 함께 보내는 플레이어 높이 — 유튜브는 maxHeight(또는 maxWidth)를 보낸 요청에만
+         * player.embedWidth/embedHeight 를 준다(문서). 그 비율로 세로(Shorts)를 가린다. 한도는 그대로 1단위
+         */
+        const val MAX_HEIGHT = 360
+        /** 대신한 목록(전체 업로드 UU…)에서 이어 받는 다음 쪽 값의 앞머리 */
+        private const val FROM_ALL = "UU:"
         const val SEARCH_FIELDS = "nextPageToken,items(id(videoId,channelId,playlistId)," +
             "snippet(publishedAt,channelId,title,channelTitle,liveBroadcastContent,$THUMBS))"
         const val CHANNEL_PARTS = "snippet,statistics,contentDetails"
