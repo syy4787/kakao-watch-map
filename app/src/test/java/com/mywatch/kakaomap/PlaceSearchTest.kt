@@ -74,6 +74,29 @@ class PlaceSearchTest {
         assertEquals("CU 대전시청역점", found?.places?.single()?.name)
     }
 
+    /**
+     * 리뷰에서 찾음: '내 주변'이 몇 시간 전 위치를 중심으로 찾을 수 있었다 — 새 위치를 못 잡으면 6시간 안의 마지막 위치를 써서
+     * 다른 동네(도시)의 화장실이 지금 거리처럼 나왔다. 내 주변은 10분 안 위치, 새로 못 잡으면 15분 안의 마지막 위치까지만
+     */
+    @Test
+    fun nearbyDoesNotUseAnOldLocation() = runBlocking {
+        val min = 60_000L
+        val calls = Calls()
+        val busan = Coord(35.1151, 129.0415)
+        // 20분 전에 잡힌 위치가 있고, 시스템의 마지막 위치는 2시간 전 — 새로는 못 잡음
+        val s = PlaceSearch(
+            recent = { maxAgeMs -> cityHall.takeIf { 20 * min <= maxAgeMs } },
+            locate = { lastMaxAgeMs -> calls.located++; busan.takeIf { 120 * min <= lastMaxAgeMs } },
+            keyword = { q, near -> calls.keyword += q to near; emptyList() },
+            nearby = { kind, near -> calls.nearby += kind to near; emptyList() },
+        )
+        assertNull("오래된 위치로는 '내 주변'을 찾지 않는다 (위치를 잡지 못했어요)", s.nearby(NearbyKind.TOILET))
+        assertTrue(calls.nearby.isEmpty())
+        assertEquals("새 위치는 잡아 봄", 1, calls.located)
+        // 이름 검색은 가까운 곳을 먼저 받는 데만 쓰므로 조금 지난 위치도 그대로 (전국보다 낫다)
+        assertEquals(cityHall, s.search("스타벅스").center)
+    }
+
     @Test
     fun nearbyKindsUseKakaoCategoriesSortedByDistance() {
         val (path, params) = KakaoApi.nearbyRequest(NearbyKind.PHARMACY, cityHall)

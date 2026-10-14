@@ -99,11 +99,11 @@ object Locator {
 
     /**
      * 검색 중심으로 쓸 대략적 위치 (몇 백 m 틀려도 됨 — GPS 를 켜지 않는다).
-     * 저전력(Wi-Fi·기지국) 새 위치를 [waitMs] 까지 기다려 보고, 못 잡으면 [ROUGH_LAST_MAX_AGE_MS] 안의 마지막 위치.
+     * 저전력(Wi-Fi·기지국) 새 위치를 [waitMs] 까지 기다려 보고, 못 잡으면 [lastMaxAgeMs] 안의 마지막 위치.
      * 권한이 없거나 아무것도 없으면 null (그러면 전국에서 찾는다)
      */
     @SuppressLint("MissingPermission")
-    suspend fun rough(context: Context, waitMs: Long = ROUGH_WAIT_MS): Coord? {
+    suspend fun rough(context: Context, waitMs: Long = ROUGH_WAIT_MS, lastMaxAgeMs: Long = ROUGH_LAST_MAX_AGE_MS): Coord? {
         if (!hasPermission(context)) return null
         val client = LocationServices.getFusedLocationProviderClient(context)
         val cts = CancellationTokenSource()
@@ -127,7 +127,7 @@ object Locator {
                     .addOnSuccessListener { if (cont.isActive) cont.resume(it) }
                     .addOnFailureListener { if (cont.isActive) cont.resume(null) }
             }
-        }?.takeIf { SystemClock.elapsedRealtimeNanos() - it.elapsedRealtimeNanos <= ROUGH_LAST_MAX_AGE_MS * 1_000_000 }
+        }?.takeIf { SystemClock.elapsedRealtimeNanos() - it.elapsedRealtimeNanos <= lastMaxAgeMs * 1_000_000 }
         val fix = loc?.toFix() ?: return null
         RouteRepository.updateFix(fix)
         return fix.coord
