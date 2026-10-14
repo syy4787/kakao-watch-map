@@ -8,9 +8,8 @@ import java.net.URLDecoder
 import java.net.URLEncoder
 
 /**
- * 워치용 유튜브 리모컨의 순수 계산 (단위 테스트로 검증).
- * 워치는 검색·고르기·기록만 하고, 재생과 '믹스'(다음 곡 추천 = 내 계정의 알고리즘)는 폰의 공식 유튜브 앱이 한다 —
- * 유튜브 약관상 다른 앱이 영상·소리를 직접 받아 재생하면 안 되고, 프리미엄 백그라운드 재생도 공식 앱에서만 된다.
+ * 워치용 유튜브 앱의 순수 계산 (단위 테스트로 검증): 동영상·채널·재생목록 모양, 링크, 보여 줄 글, 기록.
+ * 재생은 유튜브 공식 플레이어(임베드)만 — 영상·소리를 직접 받거나 저장하지 않는다 (유튜브 API 정책).
  */
 data class TubeVideo(
     val id: String,
@@ -19,13 +18,48 @@ data class TubeVideo(
     /** 길이(초). 모르거나 생방송이면 null */
     val durationSec: Int? = null,
     val live: Boolean = false,
+    /** 올린 채널 번호(UC…) — 채널 화면으로 갈 때. 모르면 null */
+    val channelId: String? = null,
+    /** 조회수 (숨겼거나 모르면 null) */
+    val views: Long? = null,
+    /** 올린 때(ms). 모르면 null */
+    val publishedAt: Long? = null,
+    /** 워치 플레이어(다른 곳에 넣은 유튜브 플레이어)로 틀 수 있음 — 올린 사람이 막았거나 나이 제한이면 false (폰 유튜브로) */
+    val embeddable: Boolean = true,
+)
+
+/** 채널: 번호(UC…)·이름·동그란 사진 · 구독자(숨기면 null) · 동영상 수 · 업로드 재생목록(UU…, 응답에 없으면 null) */
+data class TubeChannel(
+    val id: String,
+    val title: String,
+    val thumb: String?,
+    val subscribers: Long? = null,
+    val videoCount: Long? = null,
+    val uploads: String? = null,
+)
+
+/** 재생목록: 번호·제목·만든 채널·미리보기 · 동영상 수(모르면 null) */
+data class TubePlaylist(
+    val id: String,
+    val title: String,
+    val channel: String,
+    val thumb: String?,
+    val count: Int? = null,
 )
 
 /** 워치 재생 화면의 '폰에서 이어 듣기'가 맡긴 일: 이 곡을 [startSec] 초부터, [mix] 면 믹스로 */
 data class Handoff(val video: TubeVideo, val startSec: Int, val mix: Boolean)
 
-/** 한 번 검색한 결과 한 쪽. [next] = 다음 쪽을 받을 값(유튜브 토큰 또는 카카오 쪽 번호), 없으면 끝 */
-data class TubePage(val videos: List<TubeVideo>, val next: String?)
+/**
+ * 받은 목록 한 쪽. [next] = 다음 쪽을 받을 값(유튜브 토큰 또는 카카오 쪽 번호), 없으면 끝.
+ * 검색 결과엔 채널·재생목록도 섞여 온다
+ */
+data class TubePage(
+    val videos: List<TubeVideo>,
+    val next: String?,
+    val channels: List<TubeChannel> = emptyList(),
+    val playlists: List<TubePlaylist> = emptyList(),
+)
 
 /**
  * 고른 곡을 틀 곳 ('듣는 곳' — 처음 곡을 틀 때 한 번 묻고 기억). 워치 화면 플레이어는 삼성 인터넷 안의 유튜브 임베드라
@@ -79,8 +113,18 @@ data class PlayPlaces(
 
 object TubeLinks {
     private val ID = Regex("[A-Za-z0-9_-]{11}")
+    private val CHANNEL = Regex("UC[A-Za-z0-9_-]{22}")
+    /** 재생목록 번호: PL…(34자)·UU…(업로드)·OLAK5uy_…(앨범)·LL(좋아요) 등 */
+    private val PLAYLIST = Regex("[A-Za-z0-9_-]{2,64}")
 
     fun isId(s: String?): Boolean = s != null && ID.matches(s)
+
+    fun isChannelId(s: String?): Boolean = s != null && CHANNEL.matches(s)
+
+    fun isPlaylistId(s: String?): Boolean = s != null && PLAYLIST.matches(s)
+
+    /** 채널의 '업로드' 재생목록 = 채널 번호의 UC 를 UU 로 (채널 정보를 따로 받지 않고 최신 영상을 받을 때) */
+    fun uploadsOf(channelId: String): String? = if (isChannelId(channelId)) "UU" + channelId.substring(2) else null
 
     /** 유튜브 주소에서 영상 번호(11자). 유튜브 영상이 아니면 null */
     fun videoId(url: String): String? {
@@ -206,10 +250,55 @@ object TubeText {
         return if (one.codePointCount(0, one.length) <= max) one else one.substring(0, one.offsetByCodePoints(0, max)).trim()
     }
 
-    /** 검색 결과 제목의 강조 태그(<b>)를 떼고 &amp;·&#39; 같은 글자를 되돌린다 */
+    /** 카카오 검색 결과 제목의 강조 태그(<b>)를 떼고 &amp;·&#39; 같은 글자를 되돌린다 */
     fun plain(s: String): String {
         val decoded = ENTITY.replace(TAG.replace(s, "")) { m -> decode(m.groupValues[1]) ?: m.value }
         return SPACES.replace(decoded, " ").trim()
+    }
+
+    /** 유튜브에서 받은 제목·이름의 최대 글자 수 (유튜브 재생목록 제목 한도) */
+    const val MAX_TEXT = 150
+
+    /**
+     * 유튜브 Data API 의 글: search.list 는 &#39;·&amp;·&lt; 로 바꿔 보내고 다른 목록은 쓴 그대로 보낸다 → 글자 표시만 되돌린다.
+     * 꺾쇠 속 글은 지우지 않는다 ('드라마 <도깨비> OST' — [plain] 은 태그로 보고 지움). 그다음 [clean] 으로 다듬는다
+     */
+    fun unescape(s: String?, max: Int = MAX_TEXT): String =
+        clean(ENTITY.replace(s.orEmpty()) { m -> decode(m.groupValues[1]) ?: m.value }, max)
+
+    /** 유튜브 앱처럼 줄인 수 (반올림 없이 버림): 999 · 1.2천 · 1.2만 · 12만 · 1234만 · 5.1억 · 12억 */
+    fun compact(n: Long): String {
+        if (n < 1_000) return n.coerceAtLeast(0).toString()
+        val (unit, name) = when {
+            n >= 100_000_000 -> 100_000_000L to "억"
+            n >= 10_000 -> 10_000L to "만"
+            else -> 1_000L to "천"
+        }
+        val whole = n / unit
+        val tenth = n % unit * 10 / unit
+        return if (whole >= 10 || tenth == 0L) "$whole$name" else "$whole.$tenth$name"
+    }
+
+    /** 조회수 1.2만회 (0 이면 '조회수 없음' — 유튜브 앱처럼) */
+    fun views(n: Long): String = if (n <= 0) "조회수 없음" else "조회수 ${compact(n)}회"
+
+    /** 구독자 120만명 */
+    fun subscribers(n: Long): String = "구독자 ${compact(n)}명"
+
+    private const val DAY_MS = 86_400_000L
+
+    /** 올린 때 → '방금 전 · 5분 전 · 3시간 전 · 6일 전 · 2주 전 · 11개월 전 · 8년 전'. 시계가 어긋나 미래면 '방금 전' */
+    fun ago(ms: Long, now: Long): String {
+        val diff = now - ms
+        return when {
+            diff < 60_000 -> "방금 전"
+            diff < 3_600_000 -> "${diff / 60_000}분 전"
+            diff < DAY_MS -> "${diff / 3_600_000}시간 전"
+            diff < 7 * DAY_MS -> "${diff / DAY_MS}일 전"
+            diff < 30 * DAY_MS -> "${diff / (7 * DAY_MS)}주 전"
+            diff < 365 * DAY_MS -> "${(diff / (30 * DAY_MS)).coerceIn(1, 11)}개월 전"
+            else -> "${diff / (365 * DAY_MS)}년 전"
+        }
     }
 
     private fun decode(e: String): String? {
@@ -236,68 +325,6 @@ object TubeText {
         val m = seconds % 3600 / 60
         val s = seconds % 60
         return if (h > 0) "%d:%02d:%02d".format(h, m, s) else "%d:%02d".format(m, s)
-    }
-}
-
-object TubeParsers {
-
-    /** 카카오(다음) 동영상 검색 결과에서 유튜브 영상만 (같은 영상은 한 번) */
-    fun kakaoVclip(json: JSONObject): KakaoPage {
-        val docs = json.optJSONArray("documents") ?: JSONArray()
-        val seen = HashSet<String>()
-        val videos = (0 until docs.length()).mapNotNull { i ->
-            val d = docs.optJSONObject(i) ?: return@mapNotNull null
-            val id = TubeLinks.videoId(d.optString("url")) ?: return@mapNotNull null
-            if (!seen.add(id)) return@mapNotNull null
-            TubeVideo(
-                id = id,
-                title = TubeText.plain(d.optString("title")).ifBlank { "제목 없음" },
-                channel = TubeText.plain(d.optString("author")),
-                durationSec = d.optInt("play_time", 0).takeIf { it > 0 },
-            )
-        }
-        return KakaoPage(videos, isEnd = json.optJSONObject("meta")?.optBoolean("is_end", true) ?: true)
-    }
-
-    class KakaoPage(val videos: List<TubeVideo>, val isEnd: Boolean)
-
-    /** 유튜브 Data API 검색 결과. 아직 시작 안 한 생방송·채널·재생목록은 틀 수 없으니 뺀다 */
-    fun youtubeSearch(json: JSONObject): TubePage {
-        val items = json.optJSONArray("items") ?: JSONArray()
-        val videos = (0 until items.length()).mapNotNull { i ->
-            val item = items.optJSONObject(i) ?: return@mapNotNull null
-            val id = item.optJSONObject("id")?.optString("videoId")?.takeIf(TubeLinks::isId) ?: return@mapNotNull null
-            val sn = item.optJSONObject("snippet") ?: return@mapNotNull null
-            val state = sn.optString("liveBroadcastContent")
-            if (state == "upcoming") return@mapNotNull null
-            TubeVideo(
-                id = id,
-                title = TubeText.plain(sn.optString("title")).ifBlank { "제목 없음" },
-                channel = TubeText.plain(sn.optString("channelTitle")),
-                live = state == "live",
-            )
-        }
-        return TubePage(videos.distinctBy { it.id }, json.optString("nextPageToken").ifBlank { null })
-    }
-
-    /** videos.list(contentDetails) → 영상별 길이(초, 생방송은 null) */
-    fun youtubeDurations(json: JSONObject): Map<String, Int?> {
-        val items = json.optJSONArray("items") ?: return emptyMap()
-        return (0 until items.length()).mapNotNull { i ->
-            val item = items.optJSONObject(i) ?: return@mapNotNull null
-            val id = item.optString("id").takeIf(TubeLinks::isId) ?: return@mapNotNull null
-            id to TubeText.isoSeconds(item.optJSONObject("contentDetails")?.optString("duration"))
-        }.toMap()
-    }
-
-    fun withDurations(videos: List<TubeVideo>, durations: Map<String, Int?>): List<TubeVideo> =
-        videos.map { v -> if (durations.containsKey(v.id)) v.copy(durationSec = durations[v.id]) else v }
-
-    /** 유튜브 API 오류의 이유 (quotaExceeded·keyInvalid 등). 읽을 수 없으면 null */
-    fun youtubeErrorReason(body: String): String? = try {
-        JSONObject(body).optJSONObject("error")?.optJSONArray("errors")?.optJSONObject(0)?.optString("reason")?.ifBlank { null }
-    } catch (e: JSONException) {
-        null
     }
 }
 
@@ -328,7 +355,10 @@ object SearchHistory {
 /** 워치에서 튼 곡 */
 data class Played(val video: TubeVideo, val atMs: Long)
 
-/** 최근 들은 곡 — 유튜브 API 로 받은 정보는 30일까지만 보관할 수 있어서 그보다 오래된 건 지운다 */
+/**
+ * 최근 본 영상 — 유튜브 API 로 받은 정보는 30일까지만 보관할 수 있어서 그보다 오래된 건 지운다.
+ * 조회수·올린 때 같은 통계는 남기지 않는다 (볼 때마다 새로 받음). 채널 번호는 '채널로 가기'에 쓰려고 남긴다
+ */
 object PlayedHistory {
     const val MAX = 30
     const val KEEP_MS = 30L * 24 * 3_600_000
@@ -344,8 +374,10 @@ object PlayedHistory {
                 put("id", p.video.id)
                 put("title", p.video.title)
                 put("channel", p.video.channel)
+                p.video.channelId?.let { put("cid", it) }
                 p.video.durationSec?.let { put("sec", it) }
                 if (p.video.live) put("live", true)
+                if (!p.video.embeddable) put("emb", false)
                 put("at", p.atMs)
             })
         }
@@ -371,6 +403,8 @@ object PlayedHistory {
                     channel = o.optString("channel"),
                     durationSec = if (o.has("sec")) o.optInt("sec") else null,
                     live = o.optBoolean("live", false),
+                    channelId = o.optString("cid").takeIf(TubeLinks::isChannelId),
+                    embeddable = o.optBoolean("emb", true),
                 ),
                 o.optLong("at"),
             )
