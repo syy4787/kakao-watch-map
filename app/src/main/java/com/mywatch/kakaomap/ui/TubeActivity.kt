@@ -17,6 +17,7 @@ import androidx.annotation.VisibleForTesting
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.OrientationHelper
+import androidx.recyclerview.widget.RecyclerView
 import androidx.wear.input.RemoteInputIntentHelper
 import androidx.wear.widget.ConfirmationOverlay
 import com.mywatch.kakaomap.BuildConfig
@@ -130,6 +131,12 @@ class TubeActivity : ComponentActivity() {
             if (!isFinishing) render()
         }
         onBackPressedDispatcher.addCallback(this, back)
+        // 베젤·크라운으로 끝까지 내리면 다음 쪽을 저절로 (싼 목록만)
+        ui.list.addOnScrollListener(object : RecyclerView.OnScrollListener() {
+            override fun onScrolled(recyclerView: RecyclerView, dx: Int, dy: Int) {
+                if (dy > 0) autoMore()
+            }
+        })
         ambient = AmbientCover(this, ::ambientSummary)
         wasSignedIn = signedIn
         // 재생 화면을 보는 사이 이 화면이 정리됐다가 다시 만들어졌으면 다녀온 화면들 그대로 (데이터는 새로 받는다)
@@ -286,6 +293,29 @@ class TubeActivity : ComponentActivity() {
             nav.dropMine()
         }
         wasSignedIn = nowSignedIn
+    }
+
+    /** 저절로 더 받은 쪽 (같은 쪽을 두 번 저절로 묻지 않게 — 실패하면 '더 보기'를 눌러서) */
+    private var autoAsked: String? = null
+
+    /**
+     * 목록 끝 몇 줄이 보이면 다음 쪽을 저절로 — 1~2단위로 싼 목록(차트·채널·재생목록·좋아요·구독)만.
+     * 검색 '더 보기'는 100단위(하루 100번 한도)라 누를 때만
+     */
+    private fun autoMore() {
+        if (opening) return
+        val feed = moreFeed(nav.top) ?: return
+        if (feed is Feed.Search) return
+        val slot = loader.slot(feed)
+        val token = slot.page?.next ?: return
+        if (slot.loading || slot.loadingMore) return
+        val lm = ui.list.layoutManager as? LinearLayoutManager ?: return
+        val last = lm.findLastVisibleItemPosition()
+        if (last < 0 || last < ui.rows.size - AUTO_MORE_ROWS) return
+        val key = feed.key + "@" + token
+        if (autoAsked == key) return
+        autoAsked = key
+        loader.more(feed)
     }
 
     /** 지금 화면을 받을 것을 받고(없거나 오래됐으면) 그린다. 약관에 동의하기 전엔 약관 화면만 (유튜브에 묻지 않음) */
@@ -895,6 +925,8 @@ class TubeActivity : ComponentActivity() {
         private const val MUSIC = "10"
         /** 구글 계정 > 서드 파티 연결 (이 앱의 접근 권한을 끊는 곳) */
         private const val PERMISSIONS_URL = "https://myaccount.google.com/connections"
+        /** 목록 끝에서 이만큼 안쪽 줄이 보이면 다음 쪽을 저절로 */
+        private const val AUTO_MORE_ROWS = 4
         /** 공개 범위가 이것이면 재생 화면이 목록(list=)으로 열 수 있다 */
         private val OPEN_PLAYLISTS = setOf("public", "unlisted")
         /** 비공개 내 재생목록 '모두 재생'에서 더 받는 쪽 수 (20개씩 — 재생 화면이 받는 50개까지) */

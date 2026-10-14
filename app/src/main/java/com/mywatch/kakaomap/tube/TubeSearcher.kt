@@ -30,6 +30,10 @@ class TubeSearcher(
     private val youtube: (query: String, pageToken: String?) -> TubePage,
     private val kakao: (query: String, page: Int) -> TubeParsers.KakaoPage,
     private val log: (String, Throwable) -> Unit = { _, _ -> },
+    /**
+     * 유튜브 영상 정보 (videos.list — 검색 한도와 따로인 1단위). 카카오 결과엔 워치에서 틀 수 있는지·길이·생방송이 없어 채운다
+     */
+    private val details: ((List<String>) -> Map<String, TubeVideo>)? = null,
 ) {
 
     /** [next]·[source] = '더 보기'일 때 앞 결과의 다음 쪽과 출처 */
@@ -57,7 +61,23 @@ class TubeSearcher(
                 note = "${e.message} · 카카오 동영상 검색으로 찾았어요"
             }
         }
-        return TubeResult(kakaoPages(query, next?.toIntOrNull() ?: 1), TubeSource.KAKAO, note)
+        return TubeResult(filledIn(kakaoPages(query, next?.toIntOrNull() ?: 1)), TubeSource.KAKAO, note)
+    }
+
+    /**
+     * 카카오 결과를 유튜브 영상 정보로 채운다 (워치에서 틀 수 있는지 · 길이 · 생방송 · 채널 · 조회수). 유튜브에 없는 영상
+     * (지워짐·비공개·아직 시작 안 한 생방송)은 빼고 카카오 순서 그대로. 키가 없거나 못 물으면 카카오 결과 그대로
+     */
+    private fun filledIn(page: TubePage): TubePage {
+        val ask = details ?: return page
+        if (youtubeKey.isBlank() || page.videos.isEmpty()) return page
+        val found = try {
+            ask(page.videos.map { it.id })
+        } catch (e: Exception) {
+            log("유튜브 검색·카카오 영상 정보", e)
+            return page
+        }
+        return page.copy(videos = page.videos.mapNotNull { found[it.id] })
     }
 
     /**

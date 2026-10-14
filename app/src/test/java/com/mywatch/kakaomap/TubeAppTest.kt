@@ -487,6 +487,49 @@ class TubeAppTest {
         assertTrue(backend.asked.contains(Feed.Popular("10").key + "@M2"))
     }
 
+    /**
+     * 베젤·크라운으로 끝까지 내리면 다음 쪽을 저절로 (1단위로 싼 목록만 — 100단위인 검색 '더 보기'는 누를 때만).
+     * 같은 쪽을 두 번 저절로 묻지는 않는다 (실패하면 '더 보기'를 눌러서)
+     */
+    @Test
+    fun scrollingToTheEndLoadsTheNextPageByItselfButNotForSearches() {
+        backend.pages[Feed.Popular("10").key] = { token ->
+            val n = if (token == null) 0 else 1
+            Fetched(TubePage((1..12).map { v("music%02d%04d".format(n, it)) }, if (token == null) "M2" else null))
+        }
+        val a = open()
+        tapAction(a, TubeRows.A_CHART_MUSIC)
+        assertFalse(backend.asked.contains(Feed.Popular("10").key + "@M2"))
+        scrollToEnd(a)
+        assertTrue("끝까지 내리면 다음 쪽", backend.asked.contains(Feed.Popular("10").key + "@M2"))
+        assertEquals(24, rows(a).filterIsInstance<Row.VideoCard>().size)
+
+        backend.pages[Feed.Search("아이유").key] = { token ->
+            Fetched(TubePage((1..12).map { v("search%05d".format(it)) }, if (token == null) "S2" else null), TubeSource.YOUTUBE)
+        }
+        a.onBackPressedDispatcher.onBackPressed()
+        settle()
+        tapAction(a, TubeRows.A_SEARCH)
+        val input = shadowOf(a).nextStartedActivityForResult
+        val result = Intent()
+        RemoteInput.addResultsToIntent(arrayOf(RemoteInput.Builder("query").build()), result, Bundle().apply { putCharSequence("query", "아이유") })
+        shadowOf(a).receiveResult(input.intent, Activity.RESULT_OK, result)
+        settle()
+        scrollToEnd(a)
+        assertFalse("검색은 저절로 더 묻지 않는다", backend.asked.any { it.startsWith(Feed.Search("아이유").key + "@") })
+    }
+
+    private fun scrollToEnd(a: TubeActivity) {
+        val rv = a.findViewById<RecyclerView>(R.id.list)
+        val spec = View.MeasureSpec.makeMeasureSpec(480, View.MeasureSpec.EXACTLY)
+        repeat(30) {
+            rv.measure(spec, spec)
+            rv.layout(0, 0, 480, 480)
+            rv.scrollBy(0, 400)
+            settle()
+        }
+    }
+
     // ---------------- 로그인 ----------------
 
     @Test

@@ -172,6 +172,7 @@ object TubeApi {
             youtube = { q, token -> data.search(q, token) },
             kakao = { q, page -> KakaoApi.videos(q, page) },
             log = { where, e -> ErrorLog.record(where, e) },
+            details = { ids -> data.details(ids) },
         ).search(query, next, source)
     }
 

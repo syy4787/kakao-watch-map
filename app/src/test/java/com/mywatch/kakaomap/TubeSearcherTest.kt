@@ -25,17 +25,56 @@ class TubeSearcherTest {
     private val youtubeCalls = mutableListOf<String?>()
     private val kakaoCalls = mutableListOf<Int>()
 
+    private val detailCalls = mutableListOf<List<String>>()
+
     private fun searcher(
         key: String = "KEY",
         youtube: (String, String?) -> TubePage = { _, _ -> TubePage(videos(1..20), "TOKEN2") },
         kakao: (String, Int) -> TubeParsers.KakaoPage = { _, page -> TubeParsers.KakaoPage(videos(page * 100..page * 100 + 11), isEnd = false) },
+        details: ((List<String>) -> Map<String, TubeVideo>)? = null,
     ) = TubeSearcher(
         youtubeKey = key,
         youtubeBlocked = { blocked },
         blockYoutube = { blocked = true },
         youtube = { q, token -> youtubeCalls += token; youtube(q, token) },
         kakao = { q, page -> kakaoCalls += page; kakao(q, page) },
+        details = details?.let { d -> { ids -> detailCalls += ids; d(ids) } },
     )
+
+    /**
+     * 유튜브 검색 한도(하루 100번)를 다 써 카카오로 찾은 결과엔 워치에서 틀 수 있는지·길이·생방송이 없어,
+     * 누르면 못 트는 영상이 섞였다 — 영상 정보(videos.list, 검색 한도와 따로인 1단위)를 한 번 물어 채운다.
+     * 유튜브에 없는 영상(지워짐·비공개)은 빼고, 못 물으면 카카오 결과 그대로
+     */
+    @Test
+    fun kakaoResultsAreFilledInWithYouTubesOwnDetails() {
+        blocked = true
+        val kakaoList = listOf(TubeVideo("BzYnNdJhZQw", "밤편지 (카카오 제목)", "1theK"), TubeVideo("goneeeeeeee", "지워진 영상", "누군가"), TubeVideo("pSUydWEqKwE", "라일락", "1theK"))
+        val r = searcher(
+            kakao = { _, _ -> TubeParsers.KakaoPage(kakaoList, isEnd = true) },
+            details = { ids ->
+                mapOf(
+                    "BzYnNdJhZQw" to TubeVideo("BzYnNdJhZQw", "[MV] 아이유 밤편지", "1theK (원더케이)", 254, channelId = "UCweOkPb1wVVH0Q0Tlj4a5Pw", views = 512_000_000),
+                    "pSUydWEqKwE" to TubeVideo("pSUydWEqKwE", "라일락", "1theK (원더케이)", 214, embeddable = false),
+                ).filterKeys { it in ids }
+            },
+        ).search("밤편지")
+        assertEquals(TubeSource.KAKAO, r.source)
+        assertEquals(listOf(listOf("BzYnNdJhZQw", "goneeeeeeee", "pSUydWEqKwE")), detailCalls)
+        assertEquals("유튜브에 없는 영상은 빼고 카카오 순서 그대로", listOf("BzYnNdJhZQw", "pSUydWEqKwE"), r.page.videos.map { it.id })
+        assertEquals(254, r.page.videos[0].durationSec)
+        assertEquals("UCweOkPb1wVVH0Q0Tlj4a5Pw", r.page.videos[0].channelId)
+        assertFalse("워치에서 못 트는 것은 표시", r.page.videos[1].embeddable)
+    }
+
+    @Test
+    fun ifTheDetailsCannotBeFetchedKakaoResultsStayAsTheyAre() {
+        blocked = true
+        val r = searcher(details = { throw ApiException("유튜브 사용 한도를 다 썼어요") }).search("밤편지")
+        assertEquals(12, r.page.videos.size)
+        val noKey = searcher(key = "", details = { error("키가 없으면 묻지 않는다") }).search("밤편지")
+        assertEquals(12, noKey.page.videos.size)
+    }
 
     @Test
     fun withoutAKeyItUsesKakao() {
