@@ -138,6 +138,49 @@ class StallClockTest {
         assertFalse(c.shouldGiveUp(waiting.copy(onRide = true, waitingBus = false, boardingStep = null), 300 * min))
     }
 
+    private val atBusStop = walking(4_000, step = 0).copy(toStepEndM = 0, toActionM = 0, boardingStep = 1, waitingBus = true)
+    /** 정류장에서 걸어온 길 쪽으로 45m — GPS 가 튀었거나 정류장을 떠남 */
+    private val offTheStop = walking(4_000, step = 0).copy(toStepEndM = 45, toActionM = 45, boardingStep = 1)
+
+    /** 재검토에서 찾음: 정류장에서 GPS 가 한 번 튀어 '기다림'이 잠깐 꺼지면 2시간을 처음부터 셌다 (잊고 둔 안내가 끝나지 않음) */
+    @Test
+    fun aStrayFixAtTheStopDoesNotRestartTheTwoHourWait() {
+        val c = StallClock()
+        c.start(0)
+        for (t in 0L..60L step 10) c.update(atBusStop, t * min)
+        c.update(offTheStop, 60 * min + 30_000)
+        for (t in 61L..120L step 10) c.update(atBusStop, t * min)
+        c.update(atBusStop, 121 * min)
+        assertTrue(c.shouldGiveUp(atBusStop, 121 * min))
+    }
+
+    @Test
+    fun walkingAwayFromTheStopForAWhileStartsTheWaitAfresh() {
+        val c = StallClock()
+        c.start(0)
+        for (t in 0L..20L step 10) c.update(atBusStop, t * min)
+        for (t in 30L..36L step 3) c.update(offTheStop, t * min)   // 6분 넘게 정류장을 떠나 있음
+        for (t in 60L..120L step 10) c.update(atBusStop, t * min)  // 다시 와서 기다림
+        c.update(atBusStop, 121 * min)
+        assertFalse("다시 기다리기 시작한 때부터", c.shouldGiveUp(atBusStop, 121 * min))
+        for (t in 130L..180L step 10) c.update(atBusStop, t * min)
+        c.update(atBusStop, 181 * min)
+        assertTrue(c.shouldGiveUp(atBusStop, 181 * min))
+    }
+
+    /** 재검토에서 찾음: 기차역에 2시간 넘게 일찍 와서 기다리면 타기 전에 안내가 끝났다 — 시간표가 있으면 놓침은 엔진이 알아챈다 */
+    @Test
+    fun waitingForATimetabledTrainIsNotCutAtTwoHours() {
+        val c = StallClock()
+        c.start(0)
+        val station = walking(40_000, step = 0).copy(
+            toStepEndM = 0, toActionM = 0, boardingStep = 1, waitingLongRide = true, longRideAtMs = 1_760_000_000_000L,
+        )
+        for (t in 0L..150L step 10) c.update(station, t * min)
+        assertFalse(c.shouldGiveUp(station, 150 * min))
+        assertNull(c.nextDeadline(150 * min))
+    }
+
     @Test
     fun waitingForTheSubwayUsesCellAndWifiInsteadOfGps() {
         // 승강장(지하)에선 GPS 가 위성을 찾느라 전기만 쓴다 — 타는 중처럼 기지국·Wi-Fi 위치 10초 (코드 설명엔 그렇게 적혀 있었지만

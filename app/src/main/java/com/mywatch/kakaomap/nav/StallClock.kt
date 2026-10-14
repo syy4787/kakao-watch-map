@@ -12,7 +12,8 @@ import com.mywatch.kakaomap.model.Geo
  *  · 목적지 60m 안에서 3분 넘게 진척이 없음 → 도착으로 보고 끝냄 (도착 판단은 정확도 30m 이내 위치 두 번이 필요해 실내에선 안 됨)
  * 버스·지하철·기차를 타는 동안은 오래 걸려도 정상이라 진척으로 본다. 타려고 기다리는 동안([NavState.waitingToBoard] —
  * 지하철 승강장(지하)·정류장 30m 안 포함)도 멈춤이 아니지만, 정류장 옆에서 '안내 시작'만 누르고 잊은 경우를 위해
- * 2시간 넘게 기다리기만 하면 끝낸다. 벗어남·지나침·놓침은 [LostClock] 몫
+ * 2시간 넘게 기다리기만 하면 끝낸다 (시간표가 있는 기차·고속버스는 빼고 — 놓치면 엔진이 알아챈다).
+ * 벗어남·지나침·놓침은 [LostClock] 몫
  */
 class StallClock {
     private var progressAt = 0L
@@ -22,6 +23,8 @@ class StallClock {
     private var last: NavState? = null
     /** 타려고 기다리기 시작한 시각 (기다리는 중이 아니면 null) */
     private var waitingSince: Long? = null
+    /** 기다리다 정류장을 벗어난 시각 — [WAIT_AWAY_MS] 넘게 계속 벗어나 있어야 기다림을 처음부터 센다 */
+    private var awaySince: Long? = null
 
     /** 안내(새 여정)를 시작함. [now] = 부팅 후 ms */
     fun start(now: Long) {
@@ -31,6 +34,7 @@ class StallClock {
         step = -1
         last = null
         waitingSince = null
+        awaySince = null
     }
 
     /** 쓸 만한(정확도 50m 이내) 위치를 받음 */
@@ -42,7 +46,7 @@ class StallClock {
         // 시작 뒤 처음이거나 다시 찾아 경로가 바뀜(구간 0 부터, 남은 거리도 새로) — 지난 경로의 기준과 비교하지 않는다
         val first = last?.routeVersion != s.routeVersion
         last = s
-        waitingSince = if (s.waitingToBoard) waitingSince ?: now else null
+        trackWaiting(s, now, first)
         if (riding(s) || outOfRoute(s) || s.arrived) {
             progressAt = now
             bestRemaining = s.remainingM
@@ -63,6 +67,31 @@ class StallClock {
         if (remaining != null && (best == null || progressed)) bestRemaining = remaining
     }
 
+    /** 언제부터 기다렸는지 — 타거나 도착하거나 경로가 바뀌면 끝, 정류장에서 GPS 가 잠깐 튄 것은 이어서 센다 */
+    private fun trackWaiting(s: NavState, now: Long, first: Boolean) {
+        when {
+            s.onRide || s.arrived || first -> {
+                waitingSince = if (s.waitingToBoard) now else null
+                awaySince = null
+            }
+            s.waitingToBoard -> {
+                if (waitingSince == null) waitingSince = now
+                awaySince = null
+            }
+            waitingSince != null -> {
+                // 5분 넘게 계속 정류장을 벗어나 있으면 정말로 떠난 것 — 다시 와서 기다리면 그때부터
+                val away = awaySince ?: now.also { awaySince = it }
+                if (now - away >= WAIT_AWAY_MS) {
+                    waitingSince = null
+                    awaySince = null
+                }
+            }
+        }
+    }
+
+    /** 오래 기다리면 끝내는지 — 시간표가 있는 기차·고속버스는 끝내지 않는다 (놓치면 엔진이 알아채 다음 편으로 다시 찾음) */
+    private fun waitCapped(s: NavState) = !(s.waitingLongRide && s.longRideAtMs != null)
+
     fun stalledMs(now: Long): Long {
         val s = last ?: return 0L
         if (riding(s) || outOfRoute(s) || s.arrived) return 0L
@@ -71,7 +100,7 @@ class StallClock {
 
     /** 안내를 스스로 끝낼 때 */
     fun shouldGiveUp(s: NavState, now: Long): Boolean {
-        if (s.waitingToBoard) return waitingSince?.let { now - it >= WAIT_GIVE_UP_MS } == true
+        if (s.waitingToBoard) return waitCapped(s) && waitingSince?.let { now - it >= WAIT_GIVE_UP_MS } == true
         if (riding(s) || outOfRoute(s) || s.arrived) return false
         if (now - progressAt >= GIVE_UP_MS) return true
         return s.matched && now - fixAt >= NO_FIX_MS
@@ -90,7 +119,10 @@ class StallClock {
     /** 위치가 안 들어와도 다시 판단할 다음 시각 (부팅 후 ms), 없으면 null */
     fun nextDeadline(now: Long): Long? {
         val s = last ?: return null
-        if (s.waitingToBoard) return waitingSince?.let { it + WAIT_GIVE_UP_MS + 1_000 }?.takeIf { it > now }
+        if (s.waitingToBoard) {
+            if (!waitCapped(s)) return null
+            return waitingSince?.let { it + WAIT_GIVE_UP_MS + 1_000 }?.takeIf { it > now }
+        }
         if (riding(s) || outOfRoute(s) || s.arrived) return null
         return listOfNotNull(
             (progressAt + NEAR_STOP_MS + 1_000).takeIf { (s.remainingM ?: Int.MAX_VALUE) <= NEAR_CHECK_REMAINING_M },
@@ -111,6 +143,8 @@ class StallClock {
         const val GIVE_UP_MS = 60 * 60_000L
         /** 타지 않고 이만큼 기다리기만 하면 끝냄 (버스 간격이 길어도·지하철을 탄 걸 지하에서 못 알아채도 충분히) */
         const val WAIT_GIVE_UP_MS = 2 * 60 * 60_000L
+        /** 기다리다 이만큼 넘게 계속 정류장을 벗어나 있어야 정말로 떠난 것 (GPS 가 한 번 튄 것과 구별) */
+        private const val WAIT_AWAY_MS = 5 * 60_000L
         const val NO_FIX_MS = 30 * 60_000L
         const val NEAR_STOP_MS = 3 * 60_000L
         const val NEAR_M = 60.0
