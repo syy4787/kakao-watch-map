@@ -111,28 +111,28 @@
 ## Part M1 — Search & routes
 
 ### Task R1: Timetable routes come back (A1)
-- [ ] When a timetable kind ran out within the 5-min refetch gap, mark `refetchDue` and refetch once the gap passes (also when no timetable route remains). Test via DirectionsActivity logic helper.
+- [x] When a timetable kind ran out within the 5-min refetch gap, mark `refetchDue` and refetch once the gap passes (also when no timetable route remains). Test via DirectionsActivity logic helper. → `model/TimetableRefresh.kt`, tests in `IntercityRoutesTest`.
 
 ### Task R2: Search is near me (A2)
-- [ ] No fresh fix → get a coarse fix (≤3 s) before searching; with a fix send `x,y,radius=20000,sort=distance`, fall back to nationwide accuracy search when empty. Tests on `KakaoApi` URL building + SearchActivity flow with fakes.
+- [x] No fresh fix → get a coarse fix (≤3 s, `Locator.rough`) before searching. **Changed after live probing (2026-10-14, 대전시청):** with x,y the default accuracy sort is already local ('스타벅스' → 0.2 km stores, '부산역' → 부산역 203 km); `sort=distance`/`radius` broke '대전역' (렌터카 픽업존) and '부산역' (0건), so the query stays accuracy + x,y. Nationwide fallback is labelled. → `net/PlaceSearch.kt`, `PlaceSearchTest`, `SearchFlowTest`.
 
 ### Task R3: Intercity failures are not silent (A3, A4)
-- [ ] Access-leg network errors: retry once, else estimated leg + problem note; "no route" stays dropped. When city transit is empty and timetables failed, show the intercity failure row with 다시 시도. Tests in `IntercityPlannerTest`.
+- [x] Access-leg network errors: retry once, else the station is dropped **with a problem note** (no invented 'walk 10 km' leg); "no route" stays dropped silently. When city transit is empty and timetables failed, the error says so (다시 시도); city failures with trains present are noted; incomplete results get '다시 찾기'. → `net/TransitAnswers.kt`, `IntercityPlannerTest`, `TransitAnswersTest`.
 
 ### Task R4: Night runs after midnight (A5)
-- [ ] Before 04:00 KST also query the previous service day and keep runs with departure ≥ now. Test.
+- [x] Before 04:00 KST also query the previous service day and keep runs with departure ≥ now. Test in `IntercityPlannerTest`.
 
 ### Task R5: Transit card meta not cut (A6)
-- [ ] Meta allows 2 lines; render test (font 1.0/1.3) shows "도보 N분" fully.
+- [x] Meta allows 2 lines, items glued with no-break spaces; `TransitCardFitTest` (font 1.0/1.3).
 
 ### Task R6: Back steps inside Search (A8)
-- [ ] OnBackPressedCallback steps back: menu → results → home; test with Robolectric `onBackPressedDispatcher`.
+- [x] OnBackPressedCallback steps back: menu → results → home. Plus swipe: Wear OS swipe-to-dismiss finishes the activity without calling back handlers, so `activity_list` is wrapped in `SwipeDismissFrameLayout` that is swipeable only while there is an in-app step (Search + YouTube). `SearchFlowTest`, `TubeAppTest`.
 
 ### Task R7: Bus card catchability (feature)
-- [ ] If live `soonestSec` < walk-to-stop time → "놓칠 수 있어요 · 다음 n분"; tests in `LiveBusTest`.
+- [x] If the first bus arrives before you can walk to the stop (1 min grace) → "놓칠 수 있어요 · 다음 n분"; tests in `LiveBusTest`.
 
 ### Task R8: Nearby chips on search home (feature)
-- [ ] Chips 편의점·약국·화장실·카페·지하철역 → Kakao category/keyword search with radius 1 km, distance sort; tests on request building + rows.
+- [x] '내 주변' row → 편의점·약국·화장실·카페·지하철역 (rows, not chips: 5 chips don't fit 176 dp at font 1.3) → Kakao category search (화장실: keyword + category filter, renovation shops excluded) within 5 km, distance sort. `PlaceSearchTest`, `SearchFlowTest`.
 
 ## Part T — YouTube
 
