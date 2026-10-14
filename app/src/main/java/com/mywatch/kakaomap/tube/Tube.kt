@@ -47,8 +47,8 @@ data class TubePlaylist(
     val count: Int? = null,
 )
 
-/** 워치 재생 화면의 '폰에서 이어 듣기'가 맡긴 일: 이 곡을 [startSec] 초부터, [mix] 면 믹스로 */
-data class Handoff(val video: TubeVideo, val startSec: Int, val mix: Boolean)
+/** 워치 재생 화면의 '폰에서 이어 보기'가 맡긴 일: 이 동영상을 [startSec] 초부터, [mix] 면 믹스로, [list] 면 그 재생목록으로 */
+data class Handoff(val video: TubeVideo, val startSec: Int, val mix: Boolean, val list: String? = null)
 
 /**
  * 받은 목록 한 쪽. [next] = 다음 쪽을 받을 값(유튜브 토큰 또는 카카오 쪽 번호), 없으면 끝.
@@ -152,12 +152,15 @@ object TubeLinks {
     }
 
     /**
-     * 폰에서 열 주소. [mix] = 이 곡으로 시작하는 유튜브 '믹스' — 로그인된 폰 유튜브 앱이
+     * 폰에서 열 주소. [list] = 그 재생목록 속에서 (믹스보다 먼저), [mix] = 이 곡으로 시작하는 유튜브 '믹스' — 로그인된 폰 유튜브 앱이
      * 내 시청 기록으로 비슷한 곡을 끝없이 이어 준다 (평소 폰에서 듣던 그 알고리즘)
      */
-    fun watchUrl(id: String, mix: Boolean, startSec: Int = 0): String =
-        (if (mix) "https://www.youtube.com/watch?v=$id&list=RD$id&start_radio=1" else "https://www.youtube.com/watch?v=$id") +
-            (if (startSec > 0) "&t=${startSec}s" else "")
+    fun watchUrl(id: String, mix: Boolean, startSec: Int = 0, list: String? = null): String =
+        when {
+            isPlaylistId(list) -> "https://www.youtube.com/watch?v=$id&list=$list"
+            mix -> "https://www.youtube.com/watch?v=$id&list=RD$id&start_radio=1"
+            else -> "https://www.youtube.com/watch?v=$id"
+        } + (if (startSec > 0) "&t=${startSec}s" else "")
 
     /**
      * YouTube Music 앱(휴대폰·워치)에서 열 주소 — 로그인된 내 계정(프리미엄)으로 튼다.
@@ -180,7 +183,8 @@ object TubeLinks {
         val start = param(uri.rawQuery, "t")?.toIntOrNull()?.takeIf { it in 0..MAX_START_SEC } ?: 0
         val title = TubeText.clean(param(uri.rawQuery, "title"), 100)
         val channel = TubeText.clean(param(uri.rawQuery, "channel"), 40)
-        return Handoff(TubeVideo(id, title, channel), start, param(uri.rawQuery, "mix") == "1")
+        val list = param(uri.rawQuery, "list")?.takeIf(::isPlaylistId)
+        return Handoff(TubeVideo(id, title, channel), start, param(uri.rawQuery, "mix") == "1", list)
     }
 
     /** 폰 유튜브 앱의 검색 결과 (워치 검색이 안 될 때) */
@@ -207,13 +211,30 @@ object TubeLinks {
      * [nonce] = 고른 시각(ms). 같은 곡을 다시 골라도 주소가 달라지게 (같은 탭에서 주소가 똑같으면 화면이 그대로라 다시 틀지 않음),
      * 재생 화면은 이 시각이 최근인 것만 바로 튼다 (뒤로 가기로 온 예전 주소·며칠 뒤 되살아난 탭은 ▶ 를 기다림)
      */
-    fun playerUrl(base: String, video: TubeVideo, mix: Boolean, nonce: Long? = null): String = buildString {
+    fun playerUrl(base: String, video: TubeVideo, mix: Boolean, nonce: Long? = null): String =
+        playerUrl(base, video, if (mix) Queue.Mix else Queue.Single, nonce)
+
+    /**
+     * 재생 화면 주소 — [queue] 로 무엇을 이어 틀지: 믹스(mix=1) · 앱의 목록 그대로(ids=다음 동영상들, 처음 것까지 50개) ·
+     * 재생목록(list=). [inApp] = 워치 앱 안의 엔진으로 연다(app=1 — 아래 링크가 앱의 목록으로 돌아감)
+     */
+    fun playerUrl(base: String, video: TubeVideo, queue: Queue, nonce: Long? = null, inApp: Boolean = false): String = buildString {
         append(base).append("#v=").append(video.id)
-        if (mix) append("&mix=1")
+        when (queue) {
+            Queue.Mix -> append("&mix=1")
+            Queue.Single -> Unit
+            is Queue.Ids -> queue.next.filter { isId(it) && it != video.id }.distinct().take(MAX_QUEUE - 1)
+                .takeIf { it.isNotEmpty() }?.let { append("&ids=").append(it.joinToString(",")) }
+            is Queue.Playlist -> if (isPlaylistId(queue.id)) append("&list=").append(queue.id)
+        }
         takeChars(video.title.trim(), MAX_TITLE).takeIf { it.isNotEmpty() }?.let { append("&t=").append(encode(it)) }
         takeChars(video.channel.trim(), MAX_CHANNEL).takeIf { it.isNotEmpty() }?.let { append("&c=").append(encode(it)) }
         if (nonce != null) append("&n=").append(nonce)
+        if (inApp) append("&app=1")
     }
+
+    /** 재생 화면이 한 번에 받는 목록 (처음 동영상 포함) */
+    const val MAX_QUEUE = 50
 
     /** 글자 수로 자르기 — 이모지(두 칸짜리 글자)를 반으로 잘라 '?'가 되지 않게 */
     private fun takeChars(s: String, max: Int): String =
