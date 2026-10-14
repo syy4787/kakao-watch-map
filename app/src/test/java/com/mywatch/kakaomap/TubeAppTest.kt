@@ -510,6 +510,25 @@ class TubeAppTest {
         assertEquals(listOf("likedbbbbb1"), ids)
     }
 
+    /**
+     * 점검 C2: 구글 계정에서 접근을 끊은 뒤(앱은 다음 받기에서 알아차리고 토큰을 지움) 구독 화면의 '로그인'을 누르면
+     * 내 화면을 걷어 내는 일이 '로그인' 화면까지 걷어 내 홈으로 튀었다 — 처음 누를 땐 안 되고 두 번째에야 됐다
+     */
+    @Test
+    fun afterAccessWasRemovedTheLoginButtonWorksTheFirstTime() {
+        signIn()
+        backend.pages[Feed.Account.key] = { Fetched(TubePage(emptyList(), null, channels = listOf(channel))) }
+        val a = open()
+        store.t = null   // 다른 화면의 받기에서 접근이 끊긴 것을 알아차림
+        tapAction(a, TubeRows.A_SUBS)
+        assertEquals("구독 화면은 열린다", "구독", titles(a).first())
+        assertTrue(rows(a).any { it is Row.Note && it.text == context.getString(R.string.tube_subs_need_login) })
+        tapAction(a, TubeRows.A_LOGIN)
+        settle { rows(a).any { it is Row.Code } }
+        assertEquals("로그인", titles(a).first())
+        assertTrue(posts.any { it.first.endsWith("/device/code") })
+    }
+
     @Test
     fun ifSignInFinishedWhileTheScreenWasOffItSaysSoInsteadOfCodeExpired() {
         val a = open()

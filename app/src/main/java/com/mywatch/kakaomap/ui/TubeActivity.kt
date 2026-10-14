@@ -267,6 +267,19 @@ class TubeActivity : ComponentActivity() {
         else -> null
     }
 
+    /**
+     * 로그인이 풀렸으면(로그아웃 · 구글 계정에서 접근을 끊어 다음 받기에서 토큰이 지워짐) 내 데이터·내 화면을 걷어 낸다.
+     * 새 화면을 쌓기 전에 해야 한다 — 쌓은 뒤에 하면 방금 연 '로그인' 화면까지 걷어 내 처음 누른 '로그인'이 홈으로 튀었다
+     */
+    private fun syncSignIn() {
+        val nowSignedIn = signedIn
+        if (wasSignedIn && !nowSignedIn) {
+            loader.clearMine()
+            nav.dropMine()
+        }
+        wasSignedIn = nowSignedIn
+    }
+
     /** 지금 화면을 받을 것을 받고(없거나 오래됐으면) 그린다. 약관에 동의하기 전엔 약관 화면만 (유튜브에 묻지 않음) */
     private fun show() {
         if (!state.agreed && nav.top != Page.Terms) {
@@ -274,12 +287,7 @@ class TubeActivity : ComponentActivity() {
             nav.reset(Page.Terms)
             scrolls.clear()
         }
-        val nowSignedIn = signedIn
-        if (wasSignedIn && !nowSignedIn) {
-            loader.clearMine()
-            nav.dropMine()
-        }
-        wasSignedIn = nowSignedIn
+        syncSignIn()
         feedsOf(nav.top).forEach { loader.load(it) }
         render()
         if (nav.top == Page.Login && login == LoginState.Starting && loginJob == null) startLogin()
@@ -355,6 +363,11 @@ class TubeActivity : ComponentActivity() {
         if (p == nav.top) return
         spot()?.let { scrolls[nav.top] = it }
         if (nav.top == Page.Login) stopLogin()
+        syncSignIn()
+        if (p == nav.top) {
+            show()
+            return
+        }
         nav.push(p)
         if (p == Page.Login) login = LoginState.Starting
         show()
@@ -386,6 +399,7 @@ class TubeActivity : ComponentActivity() {
      */
     private fun replaceMenu(p: Page) {
         nav.back()
+        syncSignIn()
         val same = nav.top == p || (p is Page.Channel && (nav.top as? Page.Channel)?.id == p.id)
         if (same) {
             show()
