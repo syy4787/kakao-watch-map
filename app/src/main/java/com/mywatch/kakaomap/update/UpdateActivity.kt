@@ -221,7 +221,8 @@ class UpdateActivity : ComponentActivity() {
             var deferred: String? = null
             val error = withContext(Dispatchers.IO) {
                 runCatching {
-                    val file = UpdateManager.download(app, info) { pct ->
+                    // 기다리는 사람이 있으니 Wi-Fi 는 조금만 기다려 본다 (없으면 바로 폰으로)
+                    val file = UpdateManager.download(app, info, UpdateManager.MANUAL_WIFI_WAIT_MS) { pct ->
                         runOnUiThread {
                             busy = "내려받는 중… $pct%"
                             render()

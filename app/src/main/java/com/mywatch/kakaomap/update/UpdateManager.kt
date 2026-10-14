@@ -17,6 +17,7 @@ import java.io.FileOutputStream
 import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
+import java.net.URLConnection
 import java.security.MessageDigest
 
 /** GitHub Releases 에 올라간 update.json 내용 */
@@ -145,16 +146,25 @@ object UpdateManager {
 
     private val downloadLock = Any()
 
-    /** 자동 업데이트와 화면의 '지금 업데이트'가 동시에 같은 파일을 받지 않게 한 번에 하나씩 */
+    /**
+     * 자동 업데이트와 화면의 '지금 업데이트'가 동시에 같은 파일을 받지 않게 한 번에 하나씩.
+     * 워치 Wi-Fi 를 [wifiWaitMs] 까지 기다려 보고([UpdateNet]) 오면 그쪽으로, 아니면 늘 쓰던 망(폰 블루투스 등)으로
+     */
     @Throws(IOException::class)
-    fun download(c: Context, info: UpdateInfo, onProgress: (Int) -> Unit = {}): File = synchronized(downloadLock) {
+    fun download(c: Context, info: UpdateInfo, wifiWaitMs: Long = WIFI_WAIT_MS, onProgress: (Int) -> Unit = {}): File = synchronized(downloadLock) {
         downloading = true
         try {
-            downloadLocked(c, info, onProgress)
+            downloadLocked(c, info, wifiWaitMs, onProgress)
         } finally {
             downloading = false
         }
     }
+
+    /** 워치가 저장된 Wi-Fi 를 켜고 붙는 데 걸리는 시간만큼은 기다려 준다 (찾고·붙고·주소 받기 몇 초) */
+    const val WIFI_WAIT_MS = 10_000L
+
+    /** '지금 업데이트'(사람이 기다림)는 조금만 */
+    const val MANUAL_WIFI_WAIT_MS = 6_000L
 
     /**
      * 자동 업데이트가 이 릴리스를 (다시) 받아도 되는지 — 받을 때마다 손상된 파일이면(update.json 과 다름)
@@ -177,25 +187,28 @@ object UpdateManager {
 
     private fun cacheDir(c: Context) = File(c.cacheDir, "update")
 
-    private fun downloadLocked(c: Context, info: UpdateInfo, onProgress: (Int) -> Unit): File {
+    private fun downloadLocked(c: Context, info: UpdateInfo, wifiWaitMs: Long, onProgress: (Int) -> Unit): File {
         val dir = cacheDir(c).apply { mkdirs() }
         val name = cacheFileName(info)
         // 다른 버전·다른 APK 의 옛 파일은 지운다
         dir.listFiles()?.filter { it.name != name }?.forEach { it.delete() }
         val file = File(dir, name)
         if (file.exists() && sha256(file) == info.sha256) return file
-        var attempt = 0
-        while (true) {
-            try {
-                fetchOrRestart(info, file, onProgress)
-                break
-            } catch (e: IOException) {
-                // 폰 블루투스로 받을 땐 잠깐씩 끊긴다 — 받은 데까지는 두고 이어받는다.
-                // 서버가 없다고 한 것(4xx)은 다시 물어도 같으니 바로 알린다
-                if (e is HttpStatusException && e.code in 400..499) throw e
-                val wait = RETRY_DELAYS_MS.getOrNull(attempt++) ?: throw e
-                if (wait > 0) Thread.sleep(wait)
+        val wifi = UpdateNet.wifi(c, wifiWaitMs)
+        try {
+            if (wifi == null) {
+                fetchWithRetries(info, file, onProgress, null, RETRY_DELAYS_MS)
+            } else {
+                try {
+                    fetchWithRetries(info, file, onProgress, wifi::open, WIFI_RETRY_DELAYS_MS)
+                } catch (e: IOException) {
+                    // Wi-Fi 가 끊겼으면(집을 나섬 등) 받은 데까지는 두고 늘 쓰던 망으로 이어받는다. 없는 파일(4xx)은 어디서나 같다
+                    if (e is HttpStatusException && e.code in 400..499) throw e
+                    fetchWithRetries(info, file, onProgress, null, RETRY_DELAYS_MS)
+                }
             }
+        } finally {
+            wifi?.close()
         }
         if (sha256(file) != info.sha256) {
             file.delete()
@@ -206,27 +219,49 @@ object UpdateManager {
         return file
     }
 
-    private fun fetchOrRestart(info: UpdateInfo, file: File, onProgress: (Int) -> Unit) {
+    /**
+     * 끊기면 [delays] 만큼 쉬며 받은 데부터 이어받는다 (폰 블루투스로 받을 땐 잠깐씩 끊긴다).
+     * 서버가 없다고 한 것(4xx)은 다시 물어도 같으니 바로 알린다. [open] = 이 망으로 연결 (null 이면 늘 쓰던 망)
+     */
+    private fun fetchWithRetries(info: UpdateInfo, file: File, onProgress: (Int) -> Unit, open: ((URL) -> URLConnection)?, delays: List<Long>) {
+        var attempt = 0
+        while (true) {
+            try {
+                fetchOrRestart(info, file, onProgress, open)
+                return
+            } catch (e: IOException) {
+                if (e is HttpStatusException && e.code in 400..499) throw e
+                val wait = delays.getOrNull(attempt++) ?: throw e
+                if (wait > 0) Thread.sleep(wait)
+            }
+        }
+    }
+
+    private fun fetchOrRestart(info: UpdateInfo, file: File, onProgress: (Int) -> Unit, open: ((URL) -> URLConnection)?) {
         try {
-            fetch(info, file, resume = file.exists() && file.length() > 0, onProgress)
+            fetch(info, file, resume = file.exists() && file.length() > 0, onProgress, open)
         } catch (e: RangeNotUsable) {
             // 이어받기가 안 되는 조각 파일(손상·크기 초과 등)이면 지우고 처음부터
             file.delete()
-            fetch(info, file, resume = false, onProgress)
+            fetch(info, file, resume = false, onProgress, open)
         }
     }
 
     /** 끊긴 내려받기를 다시 잇기 전 쉬는 시간 — 첫 번은 바로 (블루투스가 잠깐 끊긴 경우가 대부분) */
     private val RETRY_DELAYS_MS = listOf(0L, 3_000L, 10_000L)
 
+    /** Wi-Fi 로 받다 끊기면 한 번만 바로 다시 — 그래도 안 되면 Wi-Fi 가 사라진 것으로 보고 늘 쓰던 망으로 */
+    private val WIFI_RETRY_DELAYS_MS = listOf(0L)
+
     private class RangeNotUsable : IOException("이어받기 불가")
 
     private class HttpStatusException(val code: Int) : IOException("다운로드 실패 ($code)")
 
     /** 받다 만 파일이 있으면 Range 요청으로 이어받는다 */
-    private fun fetch(info: UpdateInfo, file: File, resume: Boolean, onProgress: (Int) -> Unit) {
+    private fun fetch(info: UpdateInfo, file: File, resume: Boolean, onProgress: (Int) -> Unit, open: ((URL) -> URLConnection)?) {
         val already = if (resume) file.length() else 0L
-        val conn = (URL(info.apkUrl).openConnection() as HttpURLConnection).apply {
+        val url = URL(info.apkUrl)
+        val conn = ((open?.invoke(url) ?: url.openConnection()) as HttpURLConnection).apply {
             connectTimeout = 20_000
             readTimeout = 30_000
             instanceFollowRedirects = true

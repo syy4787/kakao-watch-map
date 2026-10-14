@@ -25,6 +25,8 @@
     <!-- 지도·검색·길찾기·업데이트 다운로드 -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- 큰 업데이트를 받을 때 워치 Wi-Fi 를 잠깐 켜 달라고 부탁 (UpdateNet — 일반 권한, 묻지 않음) -->
+    <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
     <!-- 내 위치 (출발지·안내) -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />

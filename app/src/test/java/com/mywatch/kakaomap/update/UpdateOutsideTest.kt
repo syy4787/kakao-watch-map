@@ -33,8 +33,11 @@ import org.robolectric.annotation.Config
 import org.robolectric.shadows.ShadowNetworkCapabilities
 import org.robolectric.shadows.ShadowSystemClock
 import java.io.IOException
+import java.net.URL
+import java.net.URLConnection
 import java.time.Duration
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.concurrent.thread
 
 /**
@@ -58,12 +61,25 @@ class UpdateOutsideTest {
         UpdateManager.setOwner(context, "tester")
         shadowOf(context.packageManager).setCanRequestPackageInstalls(true)
         outsideOnPhoneBluetooth()
+        UpdateNet.override = { _, _ -> null }   // 밖: 저장된 Wi-Fi 가 가까이 없음
     }
 
     @After
     fun tearDown() {
         UpdateManager.baseUrl = UpdateManager.GITHUB
+        UpdateNet.override = null
         server.close()
+    }
+
+    /** 집: 워치가 저장된 Wi-Fi 를 잠깐 켤 수 있다 — 그 망으로 연 연결 수를 센다. [failAfter] 번째부터는 Wi-Fi 가 사라진 것처럼 */
+    private class FakeWifi(val failAfter: Int = Int.MAX_VALUE) : UpdateNet.Lease {
+        val opened = AtomicInteger()
+        @Volatile var closed = false
+        override fun open(url: URL): URLConnection {
+            if (opened.incrementAndGet() > failAfter) throw IOException("Wi-Fi 끊김")
+            return url.openConnection()
+        }
+        override fun close() { closed = true }
     }
 
     /** 폰 블루투스로 인터넷 (Wi-Fi 아님 — 무제한으로 잡혀도), 충전 중 아님 */
@@ -249,6 +265,42 @@ class UpdateOutsideTest {
         ShadowSystemClock.advanceBy(Duration.ofMinutes(11))
         runBlocking { TestListenableWorkerBuilder<UpdateInstallWorker>(context).build().doWork() }
         assertEquals(1, server.apkRequests.size)
+    }
+
+    @Test
+    fun atHomeABigDownloadGoesOverTheWatchsOwnWifiAndLetsItGo() {
+        // APK 가 커서(재생 엔진 포함 약 110MB) 블루투스로는 10분 넘게 걸린다 — 저장된 Wi-Fi 를 잠깐 켜서 받는다
+        val wifi = FakeWifi()
+        var asked = 0L
+        UpdateNet.override = { _, waitMs -> asked = waitMs; wifi }
+        val file = UpdateManager.download(context, info())
+        assertEquals(FakeReleaseServer.sha256Hex(server.apk), UpdateManager.sha256(file))
+        assertEquals("APK 요청은 모두 Wi-Fi 로", server.apkRequests.size, wifi.opened.get())
+        assertTrue("다 받으면 Wi-Fi 를 놓아준다 (배터리)", wifi.closed)
+        assertTrue("Wi-Fi 를 켜는 데 몇 초는 기다려 준다: $asked", asked >= 5_000)
+    }
+
+    @Test
+    fun ifTheWifiGoesAwayMidwayTheDownloadCarriesOnOverThePhone() {
+        // 집을 나서며 Wi-Fi 가 끊김 → 받은 데까지는 두고 폰 블루투스로 이어받는다
+        server.cutFirstApkAt = 120_000
+        val wifi = FakeWifi(failAfter = 1)
+        UpdateNet.override = { _, _ -> wifi }
+        val file = UpdateManager.download(context, info())
+        assertEquals(FakeReleaseServer.sha256Hex(server.apk), UpdateManager.sha256(file))
+        assertTrue("이어받기: ${server.apkRequests}", server.apkRequests.drop(1).all { Regex("""bytes=[1-9]\d*-""").containsMatchIn(it) })
+        assertTrue(wifi.closed)
+    }
+
+    @Test
+    fun aFileThatIsNotThereIsNotAskedForAgainOverThePhone() {
+        // 없는 파일(404)은 Wi-Fi 든 폰이든 같다 — 폰으로 또 묻지 않는다
+        server.apkMissing = true
+        val wifi = FakeWifi()
+        UpdateNet.override = { _, _ -> wifi }
+        assertThrows(IOException::class.java) { UpdateManager.download(context, info()) }
+        assertEquals(1, server.apkRequests.size)
+        assertTrue(wifi.closed)
     }
 
     @Test
