@@ -56,11 +56,13 @@ object TubeThumbs {
 
     /**
      * 시스템이 메모리를 돌려 달라고 할 때 ([android.content.ComponentCallbacks2.onTrimMemory]):
-     * 화면을 다 닫았거나(UI_HIDDEN) 뒤로 갔으면 비우고, 앞에 있는데 모자라다면(RUNNING_LOW·CRITICAL) 반으로
+     * 시스템이 이 프로세스를 뒤로 돌렸으면(BACKGROUND 이상) 비우고, 화면이 가려졌거나(UI_HIDDEN — 동영상을 열면 재생 화면이
+     * 다른 프로세스라 늘 이렇다) 앞에 있는데 모자라면(RUNNING_LOW·CRITICAL) 최근 본 것 반만 남긴다 — 목록으로 돌아와 다시 받지 않게.
+     * Android 14+ 는 UI_HIDDEN·BACKGROUND 만 보낸다
      */
     fun trim(level: Int) {
         when {
-            level >= android.content.ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN -> cache.evictAll()
+            level >= android.content.ComponentCallbacks2.TRIM_MEMORY_BACKGROUND -> cache.evictAll()
             level >= android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW -> cache.trimToSize(cache.maxSize() / 2)
         }
     }

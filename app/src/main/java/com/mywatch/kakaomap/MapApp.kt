@@ -44,7 +44,7 @@ class MapApp : Application() {
             }
             ProcessRole.MAIN -> Unit
         }
-        // 화면을 다 닫거나 메모리가 모자라면 유튜브 미리보기 그림을 돌려준다 (2GB 워치 — 길 안내가 대신 정리되지 않게)
+        // 화면이 가려지면 미리보기 그림을 반으로, 시스템이 뒤로 돌리면 다 돌려준다 (2GB 워치 — 길 안내가 대신 정리되지 않게)
         registerComponentCallbacks(object : ComponentCallbacks2 {
             override fun onTrimMemory(level: Int) = TubeThumbs.trim(level)
             override fun onConfigurationChanged(newConfig: Configuration) = Unit

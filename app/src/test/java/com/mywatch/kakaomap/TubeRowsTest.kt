@@ -74,17 +74,28 @@ class TubeRowsTest {
         assertEquals("아무리 작아도 4MB", 4 * mb, TubeThumbs.cacheBytes(16 * mb).toLong())
     }
 
+    /**
+     * 리뷰에서 찾음: 동영상을 열 때마다(재생 화면은 다른 프로세스라 이쪽 화면이 '가려짐' = UI_HIDDEN) 미리보기 그림을 다 버려
+     * 목록으로 돌아오면 블루투스로 다시 받았다 → 가려지면 반만(최근 본 것은 남김), 시스템이 뒤로 돌린(BACKGROUND) 뒤에야 비운다
+     * (Android 14+ 는 UI_HIDDEN·BACKGROUND 만 보낸다)
+     */
     @Test
-    fun picturesAreGivenBackWhenTheScreensCloseOrMemoryRunsLow() {
+    fun picturesAreHalvedWhenHiddenAndGivenBackWhenSentToTheBackground() {
         val bmp = Bitmap.createBitmap(480, 360, Bitmap.Config.RGB_565)
-        TubeThumbs.trim(android.content.ComponentCallbacks2.TRIM_MEMORY_COMPLETE)
-        val n = (TubeThumbs.maxBytes() / bmp.byteCount).coerceAtMost(40)
-        repeat(n) { TubeThumbs.preload("https://i.ytimg.com/vi/trim$it/hqdefault.jpg", bmp) }
-        assertTrue("가득 참", TubeThumbs.cachedBytes() > TubeThumbs.maxBytes() / 2)
-        TubeThumbs.trim(android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW)
-        assertTrue("모자라면 반으로", TubeThumbs.cachedBytes() <= TubeThumbs.maxBytes() / 2)
+        fun fill() {
+            TubeThumbs.trim(android.content.ComponentCallbacks2.TRIM_MEMORY_COMPLETE)
+            val n = (TubeThumbs.maxBytes() / bmp.byteCount).coerceAtMost(40)
+            repeat(n) { TubeThumbs.preload("https://i.ytimg.com/vi/trim$it/hqdefault.jpg", bmp) }
+            assertTrue("가득 참", TubeThumbs.cachedBytes() > TubeThumbs.maxBytes() / 2)
+        }
+        fill()
         TubeThumbs.trim(android.content.ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN)
-        assertEquals("화면을 다 닫으면 비운다", 0, TubeThumbs.cachedBytes())
+        assertTrue("동영상을 열어 가려지면 반으로", TubeThumbs.cachedBytes() in 1..TubeThumbs.maxBytes() / 2)
+        fill()
+        TubeThumbs.trim(android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW)
+        assertTrue("앞에 있는데 모자라면 반으로", TubeThumbs.cachedBytes() in 1..TubeThumbs.maxBytes() / 2)
+        TubeThumbs.trim(android.content.ComponentCallbacks2.TRIM_MEMORY_BACKGROUND)
+        assertEquals("뒤로 돌려지면 비운다", 0, TubeThumbs.cachedBytes())
     }
 
     @Test
