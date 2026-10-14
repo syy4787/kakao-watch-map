@@ -6,10 +6,20 @@ import android.view.View
 import android.view.Window
 import androidx.activity.ComponentActivity
 import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.RecyclerView
+import com.mywatch.kakaomap.model.RouteChoice
+import com.mywatch.kakaomap.model.RouteOption
+import com.mywatch.kakaomap.model.SimpleRoute
+import com.mywatch.kakaomap.model.TransitRoute
+import com.mywatch.kakaomap.model.TransitStep
+import com.mywatch.kakaomap.model.TransitStepType
+import com.mywatch.kakaomap.model.TravelMode
+import com.mywatch.kakaomap.model.Vehicle
 import com.mywatch.kakaomap.tube.Queue
 import com.mywatch.kakaomap.tube.TubeVideo
 import com.mywatch.kakaomap.ui.Look
 import com.mywatch.kakaomap.ui.Row
+import com.mywatch.kakaomap.ui.RowAdapter
 import com.mywatch.kakaomap.ui.WearList
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -69,6 +79,32 @@ class ListStaysPutTest {
         ui.rows = listOf(Row.Header("유튜브"), Row.Header("인기 음악")) + music + Row.Header("인기 동영상") + below
         layout(ui)
         assertEquals("보던 동영상이 그대로 맨 위에", looking, firstShown(ui))
+    }
+
+    /**
+     * 리뷰에서 찾음: 바뀐 줄만 고치게 한 뒤로 경로 카드의 'HH:MM 도착'이 그대로 남았다 — 그 시각은 그릴 때 시계로 정해지는데
+     * 카드 내용(경로)은 같아서 1분마다 목록을 다시 넣어도 다시 그리지 않았다 (10:00 에 연 목록이 10:20 에도 '10:25 도착')
+     */
+    @Test
+    fun cardsThatShowAnArrivalClockAreRedrawnWhenTheListIsSetAgain() {
+        val adapter = RowAdapter({})
+        val redrawn = ArrayList<Int>()
+        adapter.registerAdapterDataObserver(object : RecyclerView.AdapterDataObserver() {
+            override fun onItemRangeChanged(positionStart: Int, itemCount: Int) {
+                repeat(itemCount) { redrawn += positionStart + it }
+            }
+            override fun onItemRangeChanged(positionStart: Int, itemCount: Int, payload: Any?) = onItemRangeChanged(positionStart, itemCount)
+        })
+        val bus = TransitRoute(
+            "BUS", 1_000, 1_200, 0, 1_500,
+            listOf(TransitStep(TransitStepType.BUS, "", 1_000, 1_200, emptyList(), listOf(Vehicle("간선", "106")), emptyList())),
+        )
+        val walk = RouteChoice(listOf(RouteOption.WALK_BROAD), SimpleRoute(TravelMode.WALK, 800, 600, emptyList()))
+        val rows = listOf(Row.Header("→ 대전역"), Row.TransitCard(0, bus), Row.OptionCard(0, walk, selected = false, fastest = true), Row.Note("끝"))
+        adapter.rows = rows
+        redrawn.clear()
+        adapter.rows = rows.toList()   // 1분마다 같은 경로로 다시 넣음
+        assertEquals("도착 시각을 보여 주는 카드만 다시 그림", listOf(1, 2), redrawn)
     }
 
     @Test

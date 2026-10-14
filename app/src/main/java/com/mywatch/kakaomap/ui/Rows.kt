@@ -170,9 +170,15 @@ class RowAdapter(
                 override fun getOldListSize() = old.size
                 override fun getNewListSize() = value.size
                 override fun areItemsTheSame(o: Int, n: Int) = oldKeys[o] == newKeys[n]
-                override fun areContentsTheSame(o: Int, n: Int) = old[o] == value[n]
+                override fun areContentsTheSame(o: Int, n: Int) = old[o] == value[n] && !showsClock(value[n])
             }, false).dispatchUpdatesTo(this)
         }
+
+    /**
+     * 그릴 때 시계로 'HH:MM 도착'을 정하는 카드 — 내용이 같아도 목록을 다시 넣을 때마다(1분마다 등) 다시 그린다
+     * (안 그러면 10:00 에 연 목록이 10:20 에도 '10:25 도착')
+     */
+    private fun showsClock(row: Row) = row is Row.TransitCard || row is Row.OptionCard
 
     /** 줄마다 '같은 줄' 열쇠 (같은 것이 여러 번 나오면 몇 번째인지 붙임) */
     private var keys: List<String> = emptyList()
