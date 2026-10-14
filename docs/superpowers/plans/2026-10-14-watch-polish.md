@@ -137,34 +137,34 @@
 ## Part T — YouTube
 
 ### Task T1: Lists don't shrink or burn quota on back/resume (C1 + cache idea)
-- [ ] Extended (더 보기) pages and search pages are not auto-refreshed on back/resume; search pages cached 3 h per normalised query; `more()` during a refresh is queued; nav stack + spots saved in `onSaveInstanceState`. Tests in `TubeAppTest`/`TubeNavTest`.
+- [x] Extended (더 보기) pages and search pages are not auto-refreshed on back/resume (3 h, memory only); `more()` during a refresh is queued; nav stack saved in `onSaveInstanceState` (spots not restored: data is refetched after process death). Tests in `TubeAppTest`/`TubeNavTest`.
 
 ### Task T2: Revoked access → 로그인 works first time (C2)
-- [ ] Apply the sign-out transition as soon as `signedIn` flips (loader callback / SignInNeeded), before `nav.push`. Test: revoke then tap 로그인 → Login page with a code request.
+- [x] Apply the sign-out transition before any `nav.push` (`syncSignIn`) — not in the loader callback (that would yank the page from under the user). Test: revoke then tap 구독 → 로그인 → Login page with a code request.
 
 ### Task T3: Lists don't jump under the finger (C3)
-- [ ] Row keys + DiffUtil in RowAdapter; skeleton count = final count; page-2 channels/playlists appended after existing rows. Test: first visible item stays the same when a section above finishes loading.
+- [x] Row keys + DiffUtil in RowAdapter (no item animator); skeleton count = final count on Home; search page-2 channels/playlists appended after existing rows (`TubePage.parts`); Search screen restores per-page scroll. `ListStaysPutTest`, `TubeRowsTest`, `SearchFlowTest`.
 
 ### Task T4: Logout offline still revokes (C4)
-- [ ] Keep the refresh token in an encrypted pending-revoke entry; WorkManager retries with network constraint; drop on 200/invalid_token. Tests.
+- [x] `forget()` writes the refresh token to an encrypted pending-revoke list before revoking; `TubeRevokeWorker` (network constraint, exponential backoff) retries; dropped on 2xx/4xx (except 429). `TubeAuthTest`, `TubeTokenStoreTest`, `TubeRevokeWorkerTest`.
 
 ### Task T5: Login code stays visible (C6)
-- [ ] Ambient summary on the Login page shows code + URL; "폰에서 주소 열기" shows an inline note (not a full-screen status) and says "폰에서 주소를 열었어요". Tests.
+- [x] Ambient summary on the Login page shows code (large) + URL; "폰에서 주소 열기" shows an inline note (sending → opened / no phone / failed) and no overlay. `TubeRowsTest`, `TubeAppTest`.
 
 ### Task T6: Polling robustness (C7)
-- [ ] 5xx/429/unknown → keep polling with backoff until expiry; re-check `signedIn` before showing Expired/Denied/Failed; keep slow_down interval in state; `poll()` save bumps generation and revokes a replaced refresh token. Tests in `TubeAuthTest`.
+- [x] 5xx/429 → SlowDown (keep polling); re-check `signedIn` before showing Expired/Denied/Failed; slow_down interval kept in `LoginState.Waiting`; `poll()` save bumps generation and revokes a replaced refresh token (in-flight renewals return the new token). Tests in `TubeAuthTest`, `TubeAppTest`.
 
 ### Task T7: Own playlists play fully; private-only first pages (C8, C9)
-- [ ] 모두 재생 on own playlist collects up to 200 ids (≤4 pages) before starting; phone handoff passes `list=`. `videosOf` keeps paging (≤3) until a playable video. Tests.
+- [x] Own playlists carry `privacy` (part=status, same 1 unit): public/unlisted → `list=` (YouTube plays to the end); private → 모두 재생 collects up to the player page's 50 ids (2 more pages) — **not 200**: the page and IFrame queue are capped at 50. Phone handoff passes `list=`. `videosOf` keeps paging (≤3) until a playable video. Tests.
 
 ### Task T8: Token store survives transient keystore errors (C10)
-- [ ] Wipe only on AEADBadTag/UnrecoverableKey/KeyPermanentlyInvalidated; load off main thread at start. Tests.
+- [x] Wipe only on bad tag/padding, unrecoverable/invalid key, or corrupt data; transient keystore errors keep the blob. Hub pre-reads the token on IO. Tests.
 
 ### Task T9: Thumbnails give memory back (C5)
-- [ ] Cache 12 MB max; `MapApp.onTrimMemory` evicts on UI_HIDDEN/BACKGROUND, halves on RUNNING_LOW. Test.
+- [x] Cache 12 MB max; main-process `onTrimMemory` evicts on UI_HIDDEN+ and halves on RUNNING_LOW/CRITICAL. Test.
 
 ### Task T10: Bezel-friendly paging + richer Kakao fallback (features)
-- [ ] Auto-load the next page when the last rows come into view for 1-unit feeds (not search). Kakao fallback results enriched with one `videos.list` (embeddable, duration, live). Tests.
+- [x] Auto-load the next page when the last 4 rows come into view while scrolling down, cheap feeds only (never search), once per token. Kakao fallback results enriched with one `videos.list` (embeddable, duration, live; gone videos dropped). Tests.
 
 ## Part Z — Ship
 
