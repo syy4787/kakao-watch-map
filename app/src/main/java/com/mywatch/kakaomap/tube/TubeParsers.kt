@@ -144,6 +144,7 @@ object TubeParsers {
                 channel = TubeText.unescape(sn.optString("channelTitle")),
                 thumb = thumb(sn),
                 count = if (details?.has("itemCount") == true) details.optInt("itemCount").coerceAtLeast(0) else null,
+                privacy = item.optJSONObject("status")?.optString("privacyStatus")?.ifBlank { null },
             ))
         }
         return out.values.toList() to next(json)

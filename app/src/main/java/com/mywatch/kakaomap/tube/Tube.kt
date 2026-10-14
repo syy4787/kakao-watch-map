@@ -45,6 +45,8 @@ data class TubePlaylist(
     val channel: String,
     val thumb: String?,
     val count: Int? = null,
+    /** 내 재생목록의 공개 범위 (public · unlisted · private) — 비공개면 재생 화면이 목록으로 못 열어 동영상 번호로 넘긴다 */
+    val privacy: String? = null,
 )
 
 /** 워치 재생 화면의 '폰에서 이어 보기'가 맡긴 일: 이 동영상을 [startSec] 초부터, [mix] 면 믹스로, [list] 면 그 재생목록으로 */

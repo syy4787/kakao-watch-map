@@ -16,8 +16,11 @@ sealed interface Queue {
     /** 이 동영상만 */
     data object Single : Queue
 
-    /** 앱의 목록 그대로 (검색 결과·구독 피드·좋아요·기록·채널 동영상 등) — [next] = 이 동영상 다음에 틀 것들 */
-    data class Ids(val next: List<String>) : Queue
+    /**
+     * 앱의 목록 그대로 (검색 결과·구독 피드·좋아요·기록·채널 동영상 등) — [next] = 이 동영상 다음에 틀 것들.
+     * [list] = 비공개 내 재생목록에서 왔으면 그 번호 (워치 재생 화면은 비공개 목록을 못 열어 번호로 넘기고, 폰에선 그 목록으로)
+     */
+    data class Ids(val next: List<String>, val list: String? = null) : Queue
 
     /** 재생목록 — 이 동영상의 자리부터 유튜브가 목록 끝까지 이어 준다 */
     data class Playlist(val id: String) : Queue

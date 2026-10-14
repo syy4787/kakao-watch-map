@@ -151,6 +151,14 @@ class TubeLoader(
         }
     }
 
+    /** 다른 곳에서 더 받은 목록으로 바꾼다 ('모두 재생'이 비공개 재생목록을 더 받았을 때 — 목록에도 보이게) */
+    fun offer(feed: Feed, page: TubePage) {
+        val s = slot(feed)
+        if (s.page == null || s.loading || s.loadingMore) return
+        slots[feed.key] = s.copy(page = page, extended = s.extended || page.parts.size > 1)
+        changed(feed)
+    }
+
     /** 더 보기 실패 알림 (한 번만) */
     fun takeMoreError(feed: Feed): String? = moreErrors.remove(feed.key)
 

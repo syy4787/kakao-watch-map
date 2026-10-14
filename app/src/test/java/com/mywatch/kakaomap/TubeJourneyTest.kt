@@ -438,7 +438,8 @@ class TubeJourneyTest {
                     check(url == TubeLinks.playerUrl(base, v, row.queue, inApp = true), "재생 주소가 그 동영상과 목록 그대로: $url")
                 } else {
                     check(started == null, "못 트는 동영상은 워치에서 열지 않는다")
-                    val list = (row.queue as? Queue.Playlist)?.id
+                    // 재생목록에서 왔으면 폰에서도 그 목록으로 (비공개 내 재생목록이면 번호 목록에 실린 재생목록 번호)
+                    val list = (row.queue as? Queue.Playlist)?.id ?: (row.queue as? Queue.Ids)?.list
                     check(phoneOpened == listOf(TubeLinks.watchUrl(v.id, row.queue == Queue.Mix, list = list)), "못 트는 동영상은 폰 유튜브로: $phoneOpened")
                 }
                 check(TubeState(context).lastPlayed()?.id == v.id, "튼 동영상이 '이어서 보기' 맨 앞에")

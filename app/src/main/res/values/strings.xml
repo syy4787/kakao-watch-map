@@ -111,6 +111,7 @@
     <string name="tube_prompt">무엇을 볼까요?</string>
     <string name="tube_loading_more">더 불러오는 중…</string>
     <string name="tube_sending">폰 유튜브에서 여는 중…</string>
+    <string name="tube_opening_list">목록을 받는 중…</string>
     <string name="tube_opening">여는 중…</string>
     <string name="tube_recent_searches">최근 검색</string>
     <string name="tube_clear">기록 지우기</string>

@@ -312,6 +312,53 @@ class TubeAppTest {
         assertTrue("홈에서 뒤로 = 닫기", a.isFinishing)
     }
 
+    /**
+     * 점검 C8: 비공개 내 재생목록의 '모두 재생'은 받은 첫 쪽(20개)만 이어 틀고 멈췄다 → 재생 화면이 받는 만큼(50개)
+     * 더 받아서 튼다. 폰에서 열 땐 그 재생목록으로 (폰 유튜브는 로그인돼 있어 비공개 목록도 열린다)
+     */
+    @Test
+    fun playingAllOfMyPrivatePlaylistQueuesMoreThanTheFirstPage() {
+        signIn()
+        backend.pages[Feed.Account.key] = { Fetched(TubePage(emptyList(), null, channels = listOf(channel))) }
+        backend.pages[Feed.MyPlaylists.key] = {
+            Fetched(TubePage(emptyList(), null, playlists = listOf(TubePlaylist("PLmine0000001", "드라이브", "나", null, 30, privacy = "private"))))
+        }
+        val first = (1..20).map { v("mine%07d".format(it)) }
+        val second = (21..30).map { v("mine%07d".format(it)) }
+        backend.pages[Feed.PlaylistVideos("PLmine0000001", own = true).key] = { token ->
+            if (token == null) Fetched(TubePage(first, "M2")) else Fetched(TubePage(second, null))
+        }
+        val a = open()
+        tapAction(a, TubeRows.A_LIBRARY)
+        tapAction(a, TubeRows.A_MY_PLAYLISTS)
+        tap(a) { it is Row.PlaylistItem }
+        tapAction(a, TubeRows.A_PLAY_ALL)
+        settle { shadowOf(a).peekNextStartedActivity() != null }
+        val s = started(a)
+        val ids = Uri.parse(s?.getStringExtra(TubePlayerActivity.EXTRA_URL)?.replace("#", "?")).getQueryParameter("ids").orEmpty().split(',')
+        assertEquals("처음 것 다음 29개 (둘째 쪽까지)", (2..30).map { "mine%07d".format(it) }, ids)
+        assertTrue(backend.asked.contains(Feed.PlaylistVideos("PLmine0000001", own = true).key + "@M2"))
+    }
+
+    @Test
+    fun aVideoFromMyPlaylistThatOnlyPlaysOnThePhoneOpensThatPlaylistThere() {
+        signIn()
+        backend.pages[Feed.Account.key] = { Fetched(TubePage(emptyList(), null, channels = listOf(channel))) }
+        backend.pages[Feed.MyPlaylists.key] = {
+            Fetched(TubePage(emptyList(), null, playlists = listOf(TubePlaylist("PLmine0000001", "드라이브", "나", null, 2, privacy = "private"))))
+        }
+        backend.pages[Feed.PlaylistVideos("PLmine0000001", own = true).key] = {
+            Fetched(TubePage(listOf(v("phoneonly01", embeddable = false), v("mine0000002")), null))
+        }
+        val a = open()
+        tapAction(a, TubeRows.A_LIBRARY)
+        tapAction(a, TubeRows.A_MY_PLAYLISTS)
+        tap(a) { it is Row.PlaylistItem }
+        tapCard(a, "phoneonly01")
+        settle { phoneOpened.isNotEmpty() }
+        assertEquals(listOf("https://www.youtube.com/watch?v=phoneonly01&list=PLmine0000001"), phoneOpened)
+    }
+
     /** 재생 화면을 보는 사이 이 화면이 정리됐다가 다시 만들어져도 보던 화면 그대로 (예전엔 홈부터) */
     @Test
     fun theTrailComesBackWhenTheScreenIsRecreated() {

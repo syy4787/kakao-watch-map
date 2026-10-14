@@ -34,6 +34,7 @@ import com.mywatch.kakaomap.tube.Queue
 import com.mywatch.kakaomap.tube.SearchHistory
 import com.mywatch.kakaomap.tube.TubeAccount
 import com.mywatch.kakaomap.tube.TubeLinks
+import com.mywatch.kakaomap.tube.TubePage
 import com.mywatch.kakaomap.tube.TubePlay
 import com.mywatch.kakaomap.tube.TubeRevokeWorker
 import com.mywatch.kakaomap.tube.TubeState
@@ -68,6 +69,7 @@ class TubeActivity : ComponentActivity() {
     private lateinit var ui: WearList
     private lateinit var state: TubeState
     private lateinit var loader: TubeLoader
+    private lateinit var backend: TubeBackend
     private val phone by lazy { PhoneOpener(this) }
     private val auth by lazy { TubeAccount.auth(this) }
     /** 화면 쌓기 (시험에서 지금 어느 화면인지 본다) */
@@ -122,7 +124,8 @@ class TubeActivity : ComponentActivity() {
         setContentView(R.layout.activity_list)
         state = TubeState(this)
         ui = WearList(this, ::onRow, ::onLongRow, Look.TUBE)
-        loader = TubeLoader(lifecycleScope, backendOverride ?: LiveBackend(applicationContext)) { feed ->
+        backend = backendOverride ?: LiveBackend(applicationContext)
+        loader = TubeLoader(lifecycleScope, backend) { feed ->
             loader.takeMoreError(feed)?.let(::toast)
             if (!isFinishing) render()
         }
@@ -330,7 +333,7 @@ class TubeActivity : ComponentActivity() {
             is Page.Channel -> TubeRows.channel(
                 this, p.title, loader.slot(Feed.ChannelInfo(p.id)), loader.slot(Feed.ChannelVideos(p.id)), loader.slot(Feed.ChannelPlaylists(p.id)), now,
             )
-            is Page.Playlist -> TubeRows.playlist(this, p.title, p.id, p.own, loader.slot(Feed.PlaylistVideos(p.id, p.own)), now)
+            is Page.Playlist -> TubeRows.playlist(this, p.title, p.id, p.own, loader.slot(Feed.PlaylistVideos(p.id, p.own)), now, p.private)
             is Page.Menu -> TubeRows.menu(this, p.video, inHistory = state.played(now).any { it.video.id == p.video.id })
             Page.Login -> TubeRows.login(this, login)
             Page.Account -> TubeRows.account(this, account())
@@ -454,7 +457,9 @@ class TubeActivity : ComponentActivity() {
         when (row) {
             is Row.VideoCard -> play(PlayRequest(row.video, row.queue))
             is Row.ChannelItem -> go(Page.Channel(row.channel.id, row.channel.title))
-            is Row.PlaylistItem -> go(Page.Playlist(row.playlist.id, row.playlist.title, row.own))
+            is Row.PlaylistItem -> go(
+                Page.Playlist(row.playlist.id, row.playlist.title, row.own, private = row.own && row.playlist.privacy !in OPEN_PLAYLISTS),
+            )
             is Row.Action -> onAction(row.id)
             else -> Unit
         }
@@ -701,10 +706,52 @@ class TubeActivity : ComponentActivity() {
 
     // ---------------- 재생 ----------------
 
+    /**
+     * '모두 재생': 공개·일부 공개 목록은 유튜브가 끝까지 이어 준다. 비공개 내 재생목록은 재생 화면이 목록을 못 열어
+     * 동영상 번호로 넘기는데, 받은 첫 쪽(20개)만 이어 틀고 멈췄다(점검 C8) — 재생 화면이 받는 만큼(50개) 더 받아서 튼다
+     */
     private fun playAll(p: Page.Playlist) {
-        val videos = loader.slot(Feed.PlaylistVideos(p.id, p.own)).page?.videos.orEmpty()
-        val first = videos.firstOrNull { it.embeddable } ?: videos.firstOrNull() ?: return
-        play(PlayRequest(first, if (p.own) TubePlay.fromList(videos, videos.indexOf(first)).queue else Queue.Playlist(p.id)))
+        val feed = Feed.PlaylistVideos(p.id, p.own)
+        val page = loader.slot(feed).page ?: return
+        val first = page.videos.firstOrNull { it.embeddable } ?: page.videos.firstOrNull() ?: return
+        if (!(p.own && p.private)) {
+            play(PlayRequest(first, Queue.Playlist(p.id)))
+            return
+        }
+        if (page.next == null || page.videos.count { it.embeddable } >= TubeLinks.MAX_QUEUE) {
+            playPrivate(page, p.id)
+            return
+        }
+        if (opening) return
+        opening = true
+        openingText = R.string.tube_opening_list
+        render()
+        lifecycleScope.launch {
+            var all: TubePage = page
+            try {
+                for (k in 0 until PLAY_ALL_MORE_PAGES) {
+                    val token = all.next ?: break
+                    if (all.videos.count { it.embeddable } >= TubeLinks.MAX_QUEUE) break
+                    all = TubePage.append(all, backend.fetch(feed, token, null).page)
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                ErrorLog.record("유튜브·모두 재생", e)   // 받은 만큼만 튼다
+            } finally {
+                opening = false
+            }
+            loader.offer(feed, all)
+            playPrivate(all, p.id)
+        }
+    }
+
+    /** 비공개 내 재생목록을 받은 동영상 번호로 (폰에선 그 재생목록으로) */
+    private fun playPrivate(page: TubePage, id: String) {
+        val videos = page.videos
+        val i = videos.indexOfFirst { it.embeddable }.takeIf { it >= 0 } ?: 0
+        val next = (TubePlay.fromList(videos, i).queue as? Queue.Ids)?.next.orEmpty()
+        play(PlayRequest(videos[i], Queue.Ids(next, list = id)))
     }
 
     /**
@@ -777,7 +824,7 @@ class TubeActivity : ComponentActivity() {
 
     /** 폰 유튜브에서 (믹스·재생목록이면 그대로) */
     private fun playOnPhone(req: PlayRequest) {
-        val list = (req.queue as? Queue.Playlist)?.id
+        val list = (req.queue as? Queue.Playlist)?.id ?: (req.queue as? Queue.Ids)?.list
         openOnPhone(TubeLinks.watchUrl(req.video.id, req.queue == Queue.Mix, list = list), R.string.tube_opened_on_phone) { played(req.video) }
     }
 
@@ -848,6 +895,10 @@ class TubeActivity : ComponentActivity() {
         private const val MUSIC = "10"
         /** 구글 계정 > 서드 파티 연결 (이 앱의 접근 권한을 끊는 곳) */
         private const val PERMISSIONS_URL = "https://myaccount.google.com/connections"
+        /** 공개 범위가 이것이면 재생 화면이 목록(list=)으로 열 수 있다 */
+        private val OPEN_PLAYLISTS = setOf("public", "unlisted")
+        /** 비공개 내 재생목록 '모두 재생'에서 더 받는 쪽 수 (20개씩 — 재생 화면이 받는 50개까지) */
+        private const val PLAY_ALL_MORE_PAGES = 2
         /** 타일에서 바로 온 일을 마치고 닫기까지 ('폰에서 열림' 애니메이션 길이쯤) */
         private const val SHORTCUT_CLOSE_MS = 1_800L
 

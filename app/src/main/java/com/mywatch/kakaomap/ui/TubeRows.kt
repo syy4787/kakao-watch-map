@@ -259,12 +259,16 @@ object TubeRows {
      * 재생목록: 제목 · '모두 재생'(흰) · 동영상. 공개 재생목록은 누른 동영상의 자리부터 유튜브가 목록 끝까지 이어 주고,
      * 내 재생목록(비공개일 수 있음)은 받은 목록으로 이어 튼다
      */
-    fun playlist(c: Context, title: String, id: String, own: Boolean, slot: Slot, now: Long): List<Row> {
+    fun playlist(c: Context, title: String, id: String, own: Boolean, slot: Slot, now: Long, private: Boolean = own): List<Row> {
         val rows = mutableListOf<Row>(Row.Header(title))
         rows += slotRows(c, slot) { page ->
             if (page.videos.isEmpty()) return@slotRows listOf(Row.Note(c.getString(R.string.tube_no_videos)))
+            // 비공개 내 재생목록은 받은 동영상 번호로 (폰에선 그 목록으로), 그 밖엔 유튜브가 목록 끝까지
+            fun queue(i: Int): Queue =
+                if (own && private) Queue.Ids((TubePlay.fromList(page.videos, i).queue as? Queue.Ids)?.next.orEmpty(), list = id)
+                else Queue.Playlist(id)
             listOf(Row.Action(A_PLAY_ALL, R.drawable.ic_play, c.getString(R.string.tube_play_all), accent = true)) +
-                cards(c, page.videos, now) { i -> if (own) TubePlay.fromList(page.videos, i).queue else Queue.Playlist(id) }
+                cards(c, page.videos, now, queue = ::queue)
         }
         rows += more(c, slot)
         return rows

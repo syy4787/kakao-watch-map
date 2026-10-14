@@ -29,8 +29,11 @@ sealed class Page {
     /** 인기 차트 전체 ([category] "10" = 음악, null = 전체) */
     data class Chart(val category: String?, val title: String) : Page()
     data class Channel(val id: String, val title: String) : Page()
-    /** 재생목록. [own] = 내 재생목록 (비공개일 수 있어 로그인으로 받는다) */
-    data class Playlist(val id: String, val title: String, val own: Boolean = false) : Page() {
+    /**
+     * 재생목록. [own] = 내 재생목록 (비공개일 수 있어 로그인으로 받는다),
+     * [private] = 비공개(또는 모름) — 재생 화면이 목록으로 못 열어 받은 동영상 번호로 이어 튼다
+     */
+    data class Playlist(val id: String, val title: String, val own: Boolean = false, val private: Boolean = own) : Page() {
         override val mine get() = own
     }
     /** 동영상을 길게 누름 */
@@ -115,7 +118,7 @@ class TubeNav(start: Page = Page.Home) {
             Page.Account -> JSONObject().put("t", "account")
             is Page.Chart -> JSONObject().put("t", "chart").put("c", p.category ?: "").put("title", p.title)
             is Page.Channel -> JSONObject().put("t", "channel").put("id", p.id).put("title", p.title)
-            is Page.Playlist -> JSONObject().put("t", "playlist").put("id", p.id).put("title", p.title).put("own", p.own)
+            is Page.Playlist -> JSONObject().put("t", "playlist").put("id", p.id).put("title", p.title).put("own", p.own).put("private", p.private)
             // 그때뿐인 화면: 메뉴 · 로그인(코드는 새로) · 이어 보기 묻기 · 약관(동의 전엔 어차피 약관부터)
             is Page.Menu, Page.Login, is Page.Handoff, Page.Terms -> null
         }
@@ -131,7 +134,10 @@ class TubeNav(start: Page = Page.Home) {
             "account" -> Page.Account
             "chart" -> Page.Chart(o.optString("c").ifEmpty { null }, o.optString("title"))
             "channel" -> o.optString("id").takeIf { it.isNotBlank() }?.let { Page.Channel(it, o.optString("title")) }
-            "playlist" -> o.optString("id").takeIf { it.isNotBlank() }?.let { Page.Playlist(it, o.optString("title"), o.optBoolean("own")) }
+            "playlist" -> o.optString("id").takeIf { it.isNotBlank() }?.let {
+                val own = o.optBoolean("own")
+                Page.Playlist(it, o.optString("title"), own, o.optBoolean("private", own))
+            }
             else -> null
         }
     }

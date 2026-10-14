@@ -96,19 +96,24 @@ class YouTubeData(
      */
     fun videosOf(playlistId: String, pageToken: String?, mine: Boolean = false): TubePage {
         if (!TubeLinks.isPlaylistId(playlistId)) return TubePage(emptyList(), null)
-        val p = linkedMapOf(
-            "part" to "snippet,contentDetails,status", "playlistId" to playlistId,
-            "maxResults" to "$PAGE", "fields" to ITEM_FIELDS,
-        )
-        pageToken?.let { p["pageToken"] = it }
-        val (ids, next) = try {
-            TubeParsers.playlistItems(call("/playlistItems", p, mine = mine))
-        } catch (e: YouTubeHttpException) {
-            if (e.code == 404) return TubePage(emptyList(), null) else throw e
+        var token = pageToken
+        // 한 쪽이 모두 비공개·삭제된 영상이면 볼 것이 나올 때까지 세 쪽까지 (예전엔 첫 쪽만 보고 '동영상이 없어요')
+        repeat(MAX_EMPTY_PAGES) {
+            val p = linkedMapOf(
+                "part" to "snippet,contentDetails,status", "playlistId" to playlistId,
+                "maxResults" to "$PAGE", "fields" to ITEM_FIELDS,
+            )
+            token?.let { p["pageToken"] = it }
+            val (ids, next) = try {
+                TubeParsers.playlistItems(call("/playlistItems", p, mine = mine))
+            } catch (e: YouTubeHttpException) {
+                if (e.code == 404) return TubePage(emptyList(), null) else throw e
+            }
+            val videos = if (ids.isEmpty()) emptyList() else details(ids).let { d -> ids.mapNotNull { d[it] } }
+            if (videos.isNotEmpty() || next == null) return TubePage(videos, next)
+            token = next
         }
-        if (ids.isEmpty()) return TubePage(emptyList(), next)
-        val details = details(ids)
-        return TubePage(ids.mapNotNull { details[it] }, next)
+        return TubePage(emptyList(), token)
     }
 
     /** 채널이 만든 재생목록 ([TubePage.playlists]) */
@@ -119,7 +124,9 @@ class YouTubeData(
     fun myPlaylists(pageToken: String?): TubePage = playlistPage(linkedMapOf("mine" to "true"), pageToken, mine = true)
 
     private fun playlistPage(filter: Map<String, String>, pageToken: String?, mine: Boolean): TubePage {
-        val p = linkedMapOf("part" to "snippet,contentDetails", "maxResults" to "$PAGE", "fields" to PLAYLIST_FIELDS)
+        // 내 재생목록은 공개 범위도 (비공개면 재생 화면이 목록으로 못 연다 — 값은 같음: 1단위)
+        val p = if (mine) linkedMapOf("part" to "snippet,contentDetails,status", "maxResults" to "$PAGE", "fields" to MY_PLAYLIST_FIELDS)
+        else linkedMapOf("part" to "snippet,contentDetails", "maxResults" to "$PAGE", "fields" to PLAYLIST_FIELDS)
         p.putAll(filter)
         pageToken?.let { p["pageToken"] = it }
         val (lists, next) = TubeParsers.playlists(call("/playlists", p, mine = mine))
@@ -251,6 +258,9 @@ class YouTubeData(
         const val CHANNEL_FIELDS = "items(id,snippet(title,$THUMBS),statistics(subscriberCount,hiddenSubscriberCount,videoCount)," +
             "contentDetails/relatedPlaylists/uploads)"
         const val PLAYLIST_FIELDS = "nextPageToken,items(id,snippet(title,channelTitle,$THUMBS),contentDetails/itemCount)"
+        const val MY_PLAYLIST_FIELDS = "nextPageToken,items(id,snippet(title,channelTitle,$THUMBS),contentDetails/itemCount,status/privacyStatus)"
+        /** 볼 영상이 없는 쪽을 넘겨 가며 보는 수 */
+        private const val MAX_EMPTY_PAGES = 3
         const val ITEM_FIELDS = "nextPageToken,items(snippet(title,resourceId/videoId),contentDetails/videoId,status/privacyStatus)"
         const val SUB_FIELDS = "nextPageToken,items/snippet(title,resourceId/channelId,$THUMBS)"
 

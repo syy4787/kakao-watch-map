@@ -232,7 +232,9 @@ class TubeRowsTest {
         assertTrue(all.accent)
         assertEquals("공개 재생목록은 유튜브가 끝까지 이어 준다", Queue.Playlist("PL1aaaaaaaaaa"), cards(rows)[1].queue)
         val mine = TubeRows.playlist(c, "내 목록", "PLmine0000001", own = true, ready(*videos.take(3).toTypedArray()), now)
-        assertEquals("내 재생목록(비공개일 수 있음)은 받은 목록으로", Queue.Ids(listOf("aaaaaaaaaa2")), cards(mine)[0].queue)
+        assertEquals("비공개 내 재생목록은 받은 목록으로 (폰에선 그 목록으로)", Queue.Ids(listOf("aaaaaaaaaa2"), list = "PLmine0000001"), cards(mine)[0].queue)
+        val shared = TubeRows.playlist(c, "공유 목록", "PLmine0000002", own = true, ready(*videos.take(3).toTypedArray()), now, private = false)
+        assertEquals("공개·일부 공개인 내 재생목록은 유튜브가 끝까지", Queue.Playlist("PLmine0000002"), cards(shared)[0].queue)
     }
 
     @Test

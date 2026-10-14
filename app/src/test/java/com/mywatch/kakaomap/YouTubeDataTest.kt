@@ -187,6 +187,48 @@ class YouTubeDataTest {
         assertEquals(before, g.calls.size)
     }
 
+    /**
+     * 점검 C9: 재생목록 첫 쪽(20개)이 모두 비공개·삭제된 영상이면 뒤에 볼 영상이 있어도 '동영상이 없어요'로 끝났다 →
+     * 볼 영상이 나올 때까지 세 쪽까지 더 본다
+     */
+    @Test
+    fun aPlaylistWhoseFirstPageIsAllGoneKeepsLooking() {
+        val g = FakeGoogle()
+        fun gone(n: Int) = (1..n).joinToString(",") { """{"snippet":{"title":"Private video","resourceId":{"videoId":"private%04d"}}}""".format(it) }
+        g.routes["/playlistItems"] = { c ->
+            when (c.params["pageToken"]) {
+                null -> ok("""{"nextPageToken":"P2","items":[${gone(20)}]}""")
+                "P2" -> ok("""{"nextPageToken":"P3","items":[${gone(3)},{"contentDetails":{"videoId":"BzYnNdJhZQw"}}]}""")
+                else -> ok("""{"items":[]}""")
+            }
+        }
+        g.routes["/videos"] = { videos(video("BzYnNdJhZQw")) }
+        val page = data(g).videosOf("PL1aaaaaaaaaa", null)
+        assertEquals(listOf("BzYnNdJhZQw"), page.videos.map { it.id })
+        assertEquals("P3", page.next)
+        assertEquals(2, g.count("/playlistItems"))
+        // 끝까지 볼 영상이 없으면 세 쪽까지만 보고 (더 보기로 이어서)
+        g.routes["/playlistItems"] = { c -> ok("""{"nextPageToken":"Q${(c.params["pageToken"] ?: "Q1").drop(1).toInt() + 1}","items":[${gone(20)}]}""") }
+        val before = g.count("/playlistItems")
+        val none = data(g).videosOf("PL1aaaaaaaaaa", null)
+        assertTrue(none.videos.isEmpty())
+        assertEquals(3, g.count("/playlistItems") - before)
+        assertEquals("Q4", none.next)
+    }
+
+    @Test
+    fun myPlaylistsSayWhetherTheyArePrivate() {
+        val g = FakeGoogle()
+        g.routes["/playlists"] = {
+            ok("""{"items":[{"id":"PLmine0000001","snippet":{"title":"드라이브","channelTitle":"나"},"contentDetails":{"itemCount":3},"status":{"privacyStatus":"private"}},
+                {"id":"PLmine0000002","snippet":{"title":"공유","channelTitle":"나"},"contentDetails":{"itemCount":3},"status":{"privacyStatus":"unlisted"}}]}""")
+        }
+        val lists = data(g, token = { "AT1" }).myPlaylists(null).playlists
+        assertEquals(listOf("private", "unlisted"), lists.map { it.privacy })
+        assertTrue(g.last("/playlists").params["part"].orEmpty().split(',').contains("status"))
+        assertTrue(g.last("/playlists").params["fields"].orEmpty().contains("status/privacyStatus"))
+    }
+
     @Test
     fun myDataNeedsSignInAndNeverAsksWithoutIt() {
         val g = FakeGoogle()
