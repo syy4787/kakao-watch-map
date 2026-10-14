@@ -107,6 +107,15 @@ class IntercityPlanner(private val source: IntercitySource) {
         val gapDay = pairs.indices.any { i ->
             highSpeedPair(pairs[i]) && todayRuns[i].isNotEmpty() && TimetableFill.needsWeekly(todayRuns[i], bothHighSpeed = true)
         }
+        // 새벽(4시 전)에는 전날 시간표도 — 자정을 넘긴 심야 편은 전날 시간표에 실린다 (못 받아도 오늘 것으로)
+        val night = Instant.ofEpochMilli(nowMs).atZone(SEOUL).hour < NIGHT_UNTIL_HOUR
+        val lateRuns = pairs.map { p ->
+            async(Dispatchers.IO) {
+                if (!night) emptyList()
+                else runCatchingNotCancel { source.runs(p.kind, p.dep.node.id, p.arr.node.id, today.minusDays(1)) }
+                    .orEmpty().filter { it.depAtMs >= nowMs }
+            }
+        }
         val runs = pairs.indices.map { i ->
             val p = pairs[i]
             val list = todayRuns[i]
@@ -118,7 +127,9 @@ class IntercityPlanner(private val source: IntercitySource) {
                     if (nextWeek == null) list else TimetableFill.merge(list, nextWeek)
                 }
             }
-        }.awaitAll()
+        }.awaitAll().zip(lateRuns.awaitAll()) { list, late ->
+            if (late.isEmpty()) list else (late + list).distinctBy { listOf(it.number, it.grade, it.depAtMs, it.arrAtMs) }.sortedBy { it.depAtMs }
+        }
 
         // 4. 아직 탈 편이 남은 역·터미널만 실제 길을 받는다 (역까지·역에서)
         val soon = nowMs + MIN_LEAD_SEC * 1000L
@@ -196,6 +207,15 @@ class IntercityPlanner(private val source: IntercitySource) {
 
     private fun highSpeed(p: Place) = p.category.contains("KTX") || p.category.contains("SRT")
 
+    /** 해 보고 실패하면 null (취소는 그대로 던진다) — 없어도 되는 것을 받을 때 */
+    private inline fun <T> runCatchingNotCancel(block: () -> T): T? = try {
+        block()
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        null
+    }
+
     /** 실패하면 null 을 돌려주고 "열차: 오류 문구" 를 남긴다 */
     private inline fun <T> attempt(problems: MutableList<String>, what: String, block: () -> T): T? = try {
         block()
@@ -220,6 +240,8 @@ class IntercityPlanner(private val source: IntercitySource) {
         /** 지금부터 이 안에 떠나는 편만 남은 역은 길을 받지 않는다 (어차피 못 탐) */
         private const val MIN_LEAD_SEC = 5 * 60
         private const val WALK_FALLBACK_M = 2_500.0
+        /** 이 시각 전이면 전날 시간표도 본다 (심야 편) */
+        private const val NIGHT_UNTIL_HOUR = 4
         /** 역까지 길은 끊기면 한 번 더 */
         private const val LEG_ATTEMPTS = 2
         private const val LEG_RETRY_DELAY_MS = 600L

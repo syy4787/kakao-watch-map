@@ -211,6 +211,41 @@ class IntercityPlannerTest {
         assertEquals(1, fake.transitCalls.count { it == "출발>대전역" })
     }
 
+    /**
+     * 점검 A5: 자정을 넘긴 심야 편은 운행사가 전날 시간표에 싣는다 — 00:30 에 '오늘' 것만 물으면 01:00 심야 고속버스가 안 보였다.
+     * 새벽 4시 전에는 전날 시간표도 함께 묻고, 이미 떠난 편은 뺀다
+     */
+    @Test
+    fun afterMidnightTheLateRunsListedUnderYesterdayStillShow() = runBlocking {
+        val fake = object : Fake() {
+            override fun runs(kind: IntercityKind, depId: String, arrId: String, day: LocalDate): List<ScheduledRun> {
+                runCalls += "$kind $depId>$arrId ${day.dayOfMonth}"
+                if (kind != IntercityKind.EXPRESS || depId != "NAEK300" || arrId != "NAEK010") return emptyList()
+                fun run(dd: Int, dh: Int, dm: Int, ad: Int, ah: Int, am: Int) =
+                    ScheduledRun(IntercityKind.EXPRESS, "", "심야고속", "대전복합", "서울경부", at(dh, dm, dd), at(ah, am, ad), 20000)
+                return when (day.dayOfMonth) {
+                    // 13일 시간표: 23:40 과 (14일) 00:20 · 01:00 심야
+                    13 -> listOf(run(13, 23, 40, 14, 1, 40), run(14, 0, 20, 14, 2, 20), run(14, 1, 0, 14, 3, 0))
+                    14 -> listOf(run(14, 6, 0, 14, 8, 0), run(14, 6, 30, 14, 8, 30))
+                    else -> emptyList()
+                }
+            }
+        }
+        val now = at(0, 10, day = 14)
+        val result = IntercityPlanner(fake).plan(origin, dest, now)
+        val departures = result.routes.filter { it.type == "EXPRESS" }.map { r -> r.steps.first { it.type == TransitStepType.COACH }.departAtMs }
+        // 터미널까지 25분 + 여유 5분 → 00:40 이후 편: 01:00 (전날 시간표) · 06:00 · 06:30
+        assertEquals(listOf(at(1, 0, day = 14), at(6, 0, day = 14), at(6, 30, day = 14)), departures)
+        assertTrue(result.problems.isEmpty())
+    }
+
+    @Test
+    fun inTheDaytimeOnlyTodaysTimetableIsAsked() = runBlocking {
+        val fake = Fake()
+        IntercityPlanner(fake).plan(origin, dest, at(9, 25))
+        assertTrue(fake.runCalls.none { it.endsWith(" 12") })
+    }
+
     @Test
     fun nothingNearbyMeansNoRoutesAndNoComplaints() = runBlocking {
         val fake = object : Fake() {
