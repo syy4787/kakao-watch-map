@@ -24,6 +24,13 @@ dependencyResolutionManagement {
             }
             filter { includeGroup("com.kakao.maps.open") }
         }
+        // 유튜브 재생 엔진(GeckoView, 모질라 공식 저장소) — 워치엔 앱 안에서 웹을 띄우는 시스템 부품(WebView)이 없다
+        exclusiveContent {
+            forRepository {
+                maven { url = uri("https://maven.mozilla.org/maven2/") }
+            }
+            filter { includeGroup("org.mozilla.geckoview") }
+        }
     }
 }
 

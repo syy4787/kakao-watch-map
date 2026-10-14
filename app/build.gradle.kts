@@ -36,7 +36,7 @@ val canSignRelease = releaseStoreFile != null && releasePassword != null && file
 
 android {
     namespace = "com.mywatch.kakaomap"
-    compileSdk = 36
+    compileSdk = 37
 
     defaultConfig {
         // ⚠️ 카카오 디벨로퍼스 > 플랫폼 키 > 네이티브 앱 키 > Android '패키지명'에 이 값을 그대로 등록
@@ -91,6 +91,8 @@ android {
         // 플레이 스토어를 거치지 않고 워치가 APK 를 그대로 받기 때문에 압축하는 쪽이 절반 가까이 작다.
         jniLibs {
             useLegacyPackaging = true
+            // 워치·폰은 ARM — 브라우저 엔진의 x86 용 라이브러리는 넣지 않는다 (모든 CPU 용 APK 크기 절반)
+            excludes += listOf("lib/x86/**", "lib/x86_64/**")
         }
         dex {
             useLegacyPackaging = true
@@ -128,6 +130,7 @@ dependencies {
     implementation("androidx.core:core-ktx:1.17.0")
     implementation("androidx.work:work-runtime-ktx:2.10.5")                 // 자동 업데이트 (확인·내려받기·설치)
     implementation("com.google.android.gms:play-services-location:21.4.0") // 현재 위치
+    implementation("org.mozilla.geckoview:geckoview:158.0.20261007201254")  // 유튜브: 앱 안 재생 화면(공식 플레이어)을 띄우는 브라우저 엔진
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303")                            // 단위 테스트용 JSON 구현

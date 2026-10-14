@@ -77,7 +77,8 @@ class HubActivity : ComponentActivity() {
     private fun runningTask(target: Class<*>): ActivityManager.AppTask? {
         val wantTube = target == TubeActivity::class.java
         return getSystemService(ActivityManager::class.java)?.appTasks?.firstOrNull { task ->
-            val info = task.taskInfo
+            // 작업이 막 끝나는 중이면 정보가 없을 수 있다 (API 37 부터 null 로 표시)
+            val info = runCatching { task.taskInfo }.getOrNull() ?: return@firstOrNull false
             val base = (info.baseActivity ?: info.baseIntent?.component)?.className
             info.numActivities > 0 && base != null && base != HubActivity::class.java.name &&
                 (base == TubeActivity::class.java.name) == wantTube
