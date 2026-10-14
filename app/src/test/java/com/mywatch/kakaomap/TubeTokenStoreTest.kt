@@ -4,12 +4,14 @@ import android.content.Context
 import com.mywatch.kakaomap.net.Http
 import com.mywatch.kakaomap.tube.PrefsTokenStore
 import com.mywatch.kakaomap.tube.TokenCipher
+import com.mywatch.kakaomap.tube.TokenStore
 import com.mywatch.kakaomap.tube.Tokens
 import com.sun.net.httpserver.HttpServer
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.Assert.fail
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -96,11 +98,62 @@ class TubeTokenStoreTest {
     @Test
     fun revokesThatWaitForTheInternetAreKeptEncrypted() {
         val cipher = JvmCipher()
-        PrefsTokenStore(prefs, cipher).setPendingRevokes(listOf("REFRESH-OLD-1", "REFRESH-OLD-2"))
-        assertFalse(prefs.all.values.joinToString().contains("REFRESH-OLD"))
-        assertEquals(listOf("REFRESH-OLD-1", "REFRESH-OLD-2"), PrefsTokenStore(prefs, cipher).pendingRevokes())
-        PrefsTokenStore(prefs, cipher).setPendingRevokes(emptyList())
+        PrefsTokenStore(prefs, cipher).addRevoke("REFRESH-OLD-1")
+        PrefsTokenStore(prefs, cipher).addRevoke("REFRESH-OLD-2")
+        PrefsTokenStore(prefs, cipher).addRevoke("REFRESH-OLD-2")
+        val stored = prefs.all.keys.joinToString() + prefs.all.values.joinToString()
+        assertFalse(stored, stored.contains("REFRESH-OLD"))
+        assertEquals(setOf("REFRESH-OLD-1", "REFRESH-OLD-2"), PrefsTokenStore(prefs, cipher).pendingRevokes().toSet())
+        assertEquals(2, PrefsTokenStore(prefs, cipher).pendingRevokes().size)
+        PrefsTokenStore(prefs, cipher).removeRevoke("REFRESH-OLD-1")
+        assertEquals(listOf("REFRESH-OLD-2"), PrefsTokenStore(prefs, cipher).pendingRevokes())
+        PrefsTokenStore(prefs, cipher).removeRevoke("REFRESH-OLD-2")
         assertTrue(PrefsTokenStore(prefs, cipher).pendingRevokes().isEmpty())
+        assertTrue(prefs.all.isEmpty())
+    }
+
+    /**
+     * 리뷰에서 찾음: 적어 둔 철회 목록을 잠깐 못 읽으면(키 저장소) 빈 목록으로 보고 새 것만 적어 덮어써서 예전 것을 잃었다 →
+     * 철회는 하나씩 따로 적고 지운다(읽고 고쳐 쓰지 않음). 못 읽을 땐 '못 읽음'을 알린다 (빈 목록이 아니라)
+     */
+    @Test
+    fun aKeystoreHiccupNeverLosesARevoke() {
+        val cipher = JvmCipher()
+        PrefsTokenStore(prefs, cipher).addRevoke("REFRESH-1")
+        var hiccup = true
+        val flaky = object : TokenCipher {
+            override fun encrypt(plain: ByteArray) = cipher.encrypt(plain)
+            override fun decrypt(blob: ByteArray): ByteArray =
+                if (hiccup) throw java.security.ProviderException("Keystore operation failed") else cipher.decrypt(blob)
+        }
+        val s = PrefsTokenStore(prefs, flaky)
+        try {
+            s.pendingRevokes()
+            fail("못 읽음을 알려야 한다")
+        } catch (e: TokenStore.Unreadable) {
+            // ok
+        }
+        s.addRevoke("REFRESH-2")   // 그 사이 또 로그아웃
+        hiccup = false
+        assertEquals(setOf("REFRESH-1", "REFRESH-2"), s.pendingRevokes().toSet())
+    }
+
+    @Test
+    fun withoutAWorkingKeyNewRevokesStayInMemoryAndEarlierOnesAreKept() {
+        val cipher = JvmCipher()
+        PrefsTokenStore(prefs, cipher).addRevoke("REFRESH-1")
+        val broken = PrefsTokenStore(prefs, BrokenCipher())
+        broken.addRevoke("REFRESH-2")
+        broken.removeRevoke("REFRESH-1")   // 보냈음 (지우는 데는 키가 필요 없다)
+        assertEquals("이번에 켠 동안은 기억", listOf("REFRESH-2"), broken.pendingRevokes())
+        assertTrue("암호화 못 한 것은 파일에 남기지 않는다", PrefsTokenStore(prefs, cipher).pendingRevokes().isEmpty())
+    }
+
+    @Test
+    fun aRevokeThatCanNeverBeReadIsDropped() {
+        PrefsTokenStore(prefs, JvmCipher()).addRevoke("REFRESH-1")
+        // 다른 키(백업에서 되살린 워치 등)로는 영영 못 읽는다 — 지운다
+        assertTrue(PrefsTokenStore(prefs, JvmCipher()).pendingRevokes().isEmpty())
         assertTrue(prefs.all.isEmpty())
     }
 

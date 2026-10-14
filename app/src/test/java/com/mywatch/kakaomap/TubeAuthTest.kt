@@ -37,11 +37,14 @@ class TubeAuthTest {
     private class MemoryStore : TokenStore {
         var t: Tokens? = null
         var revokes = mutableListOf<String>()
+        /** 키 저장소가 잠깐 안 됨 — 적어 둔 철회를 못 읽는다 */
+        var unreadable = false
         override fun load() = t
         override fun save(t: Tokens) { this.t = t }
         override fun clear() { t = null }
-        override fun pendingRevokes(): List<String> = revokes.toList()
-        override fun setPendingRevokes(tokens: List<String>) { revokes = tokens.toMutableList() }
+        override fun pendingRevokes(): List<String> = if (unreadable) throw TokenStore.Unreadable() else revokes.toList()
+        override fun addRevoke(token: String) { if (token !in revokes) revokes += token }
+        override fun removeRevoke(token: String) { revokes -= token }
     }
 
     private var now = 1_760_000_000_000L
@@ -319,8 +322,13 @@ class TubeAuthTest {
         assertFalse(a.signedIn)
     }
 
+    /**
+     * 리뷰에서 찾음: 구글은 철회를 받으면 이 앱의 접근 권한을 통째로 없앤다 (developers.google.com 'Token revocation' —
+     * 발급한 access·refresh 토큰이 모두 무효). 예전 로그인의 토큰을 새 로그인 뒤에 철회하면 같은 계정일 때 새 로그인까지 끊겼다 →
+     * 바뀐 예전 로그인은 철회하지 않는다 (로그아웃한 게 아니라 철회할 약속도 없다 — 키 저장소가 잠깐 안 돼 로그아웃처럼 보였던 경우 등)
+     */
     @Test
-    fun signingInOverAnOldSignInRevokesTheOldGrant() {
+    fun signingInOverAnOldSignInDoesNotRevokeIt() {
         val a = auth()
         store.t = Tokens("AT0", "RT0", now + 3_600_000)
         g.reply = { r ->
@@ -328,8 +336,100 @@ class TubeAuthTest {
         }
         assertEquals(Poll.Granted, a.poll(code))
         assertEquals("RT1", store.t?.refresh)
-        assertTrue("예전 로그인의 접근 권한은 철회", g.reqs.any { it.url.endsWith("/revoke") && it.form["token"] == "RT0" })
+        assertFalse("새 로그인을 끊을 수 있는 철회는 보내지 않는다", g.reqs.any { it.url.endsWith("/revoke") })
         assertTrue(store.revokes.isEmpty())
+    }
+
+    private val deviceCodeReply = Http.Response(
+        200, """{"device_code":"D","user_code":"GQVQ-JKEC","verification_url":"https://www.google.com/device","expires_in":1800,"interval":5}""",
+    )
+
+    /**
+     * 리뷰에서 찾음: 인터넷 없이 로그아웃해 못 보낸 철회가 남은 채 같은 계정으로 다시 로그인하면, 나중에 그 철회가 가면서
+     * 새 로그인까지 끊겼다 (로그인하자마자 말없이 로그아웃) → 새 로그인 코드를 받기 전에 남은 철회부터 보낸다
+     */
+    @Test
+    fun aRevokeLeftFromAnOfflineSignOutIsSentBeforeTheNextSignIn() {
+        store.revokes += "RT0"
+        g.reply = { r -> if (r.url.endsWith("/device/code")) deviceCodeReply else Http.Response(200, "") }
+        auth().start()
+        assertEquals(listOf(TubeAuth.REVOKE, TubeAuth.DEVICE_CODE), g.reqs.map { it.url })
+        assertEquals("RT0", g.reqs.first().form["token"])
+        assertTrue(store.revokes.isEmpty())
+    }
+
+    @Test
+    fun aNewSignInWaitsUntilTheLeftoverRevokeCanBeSent() {
+        store.revokes += "RT0"
+        g.reply = { r -> if (r.url.endsWith("/device/code")) deviceCodeReply else Http.Response(503, "") }
+        try {
+            auth().start()
+            fail("구글이 잠깐 안 되면 잠시 뒤에")
+        } catch (e: ApiException) {
+            assertFalse(e is NetworkException)
+            assertTrue(e.message, e.message!!.contains("잠시"))
+        }
+        g.reply = { throw IOException("offline") }
+        try {
+            auth().start()
+            fail("인터넷이 없으면")
+        } catch (e: NetworkException) {
+            // ok
+        }
+        assertTrue("코드는 받지 않았다", g.reqs.none { it.url == TubeAuth.DEVICE_CODE })
+        assertEquals(listOf("RT0"), store.revokes)
+    }
+
+    @Test
+    fun aNewSignInIsNotBlockedWhenLeftoverRevokesCannotBeReadRightNow() {
+        // 키 저장소가 잠깐 안 돼 적어 둔 것을 못 읽으면 막지 않는다 (계속 안 되는 워치에서 영영 로그인을 못 하지 않게) — 드문 일
+        store.revokes += "RT0"
+        store.unreadable = true
+        g.reply = { deviceCodeReply }
+        assertEquals("GQVQ-JKEC", auth().start().userCode)
+        assertEquals(listOf("RT0"), store.revokes)
+    }
+
+    @Test
+    fun onlyAnAnswerFromGoogleEndsARevoke() {
+        // 리뷰에서 찾음(사소): 프록시가 막거나(407) 시간이 다 된 것(408)도 '끝'으로 보고 지웠다.
+        // 200·400(이미 끊긴 토큰)·그 밖의 구글 4xx 는 끝, 407·408·429·5xx 는 다음에 다시
+        val a = auth()
+        for ((status, done) in listOf(200 to true, 400 to true, 401 to true, 407 to false, 408 to false, 429 to false, 500 to false, 503 to false)) {
+            store.revokes.clear()
+            store.revokes += "RT$status"
+            g.reply = { Http.Response(status, "") }
+            assertEquals("$status", done, a.retryRevokes())
+            assertEquals("$status", done, store.revokes.isEmpty())
+        }
+    }
+
+    /** 리뷰에서 찾음: 적어 둔 철회를 잠깐 못 읽으면 '없음'으로 보아 작업이 '다 보냄'으로 끝났다 → 다음에 다시 */
+    @Test
+    fun revokesThatCannotBeReadRightNowAreNotReportedAsSent() {
+        store.revokes += "RT0"
+        store.unreadable = true
+        val a = auth()
+        assertFalse(a.retryRevokes())
+        assertTrue(a.hasPendingRevokes)
+        assertTrue(g.reqs.isEmpty())
+        store.unreadable = false
+        g.reply = { Http.Response(200, "") }
+        assertTrue(a.retryRevokes())
+        assertFalse(a.hasPendingRevokes)
+    }
+
+    @Test
+    fun aSignOutWhileRetryingIsNotReportedAsSent() {
+        // 보내는 사이 또 로그아웃(새 토큰을 적어 둠) — 다 보냈다고 하지 않아 작업이 다시 돌아 그것도 보낸다
+        val a = auth()
+        store.revokes += "RT0"
+        g.reply = { r ->
+            if (r.form["token"] == "RT0") store.revokes += "RT1"
+            Http.Response(200, "")
+        }
+        assertFalse(a.retryRevokes())
+        assertEquals(listOf("RT1"), store.revokes)
     }
 
     @Test

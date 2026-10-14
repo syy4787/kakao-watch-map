@@ -50,9 +50,18 @@ interface TokenStore {
     fun save(t: Tokens)
     fun clear()
 
-    /** 로그아웃했지만 아직 구글에 철회를 보내지 못한 refresh 토큰들 (인터넷이 없었을 때 등) */
+    /**
+     * 로그아웃했지만 아직 구글에 철회를 보내지 못한 refresh 토큰들 (인터넷이 없었을 때 등).
+     * 적어 둔 것을 잠깐 못 읽으면(키 저장소) [Unreadable] — 빈 목록이 아니다 (적어 둔 것은 그대로 남는다)
+     */
     fun pendingRevokes(): List<String> = emptyList()
-    fun setPendingRevokes(tokens: List<String>) {}
+    /** 철회할 토큰 하나를 적어 둔다 (다른 것은 건드리지 않는다 — 읽고 고쳐 쓰지 않으므로 못 읽을 때도 잃지 않음) */
+    fun addRevoke(token: String) {}
+    /** 철회를 보냈다 — 그 토큰만 지운다 */
+    fun removeRevoke(token: String) {}
+
+    /** 적어 둔 철회를 지금은 못 읽음 — 다음에 다시 */
+    class Unreadable : Exception()
 }
 
 /**
@@ -81,9 +90,14 @@ class TubeAuth(
 
     val signedIn: Boolean get() = synchronized(lock) { store.load() != null }
 
-    /** 폰에서 넣을 코드를 받는다 */
+    /**
+     * 폰에서 넣을 코드를 받는다. 지난 로그아웃에서 못 보낸 철회가 있으면 먼저 보낸다 — 구글은 철회를 받으면 이 앱의 접근 권한을
+     * 통째로 없애서, 같은 계정으로 다시 로그인한 뒤에 그 철회가 가면 새 로그인까지 끊긴다. 인터넷·구글이 잠깐 안 돼 못 보내면
+     * 로그인도 잠시 뒤에 (코드를 받으려면 어차피 인터넷이 필요하다)
+     */
     fun start(): DeviceCode {
         if (!configured) throw ApiException("유튜브 로그인은 아직 준비 중이에요")
+        sendRevokesFirst()
         val res = send(DEVICE_CODE, linkedMapOf("client_id" to clientId.trim(), "scope" to SCOPE))
         val json = json(res.body)
         if (res.code !in 200..299) {
@@ -115,14 +129,12 @@ class TubeAuth(
             // 승인 화면에서 유튜브 권한을 빼고 줬으면 로그인하지 않는다 (scope 가 없으면 요청한 그대로 준 것)
             val scope = json?.optString("scope").orEmpty()
             if (scope.isNotBlank() && SCOPE !in scope.split(' ')) return Poll.Denied
-            // 새 로그인: 그 전에 시작한 새로 받기의 결과는 버리고(generation), 바뀐 예전 로그인의 권한은 철회한다
-            val replaced = synchronized(lock) {
-                val old = store.load()
+            // 새 로그인: 그 전에 시작한 새로 받기의 결과는 버린다(generation). 바뀐 예전 로그인(키 저장소가 잠깐 안 돼
+            // 로그아웃처럼 보였던 경우 등)은 철회하지 않는다 — 같은 계정이면 새 로그인까지 끊기고, 로그아웃한 것도 아니다
+            synchronized(lock) {
                 store.save(Tokens(access, refresh, now() + expiresMs(json)))
                 generation++
-                old?.refresh?.takeIf { it != refresh }?.also { store.setPendingRevokes(store.pendingRevokes() + it) }
             }
-            if (replaced != null) revokeRefresh(replaced)
             return Poll.Granted
         }
         // 구글이 잠깐 안 되거나(5xx) 너무 많이 물으면(429) 끝내지 말고 천천히 계속 기다린다
@@ -190,34 +202,60 @@ class TubeAuth(
         generation++
         store.load().also { t ->
             store.clear()
-            if (t != null) store.setPendingRevokes(store.pendingRevokes() + t.refresh)
+            if (t != null) store.addRevoke(t.refresh)
         }
     }
 
-    /** 철회를 못 보낸 토큰이 남아 있음 */
-    val hasPendingRevokes: Boolean get() = synchronized(lock) { store.pendingRevokes().isNotEmpty() }
+    /** 철회를 못 보낸 토큰이 남아 있음 (적어 둔 것을 지금 못 읽으면 남은 것으로) */
+    val hasPendingRevokes: Boolean get() = synchronized(lock) { pendingOrNull()?.isNotEmpty() ?: true }
 
     /**
-     * 구글에 접근 권한 철회 (네트워크 — 백그라운드에서). 보냈거나 더 보낼 필요가 없으면(이미 끊긴 토큰 등 4xx) true,
-     * 끊겼거나 구글이 잠깐 안 되면(5xx·429) false — 적어 둔 것은 남는다
+     * 구글에 접근 권한 철회 (네트워크 — 백그라운드에서). 보냈거나 더 보낼 필요가 없으면(이미 끊긴 토큰 등 구글의 4xx) true,
+     * 끊겼거나 구글이 잠깐 안 되면(5xx·429, 프록시 407·408) false — 적어 둔 것은 남는다
      */
-    fun revoke(t: Tokens?): Boolean = t == null || revokeRefresh(t.refresh)
+    fun revoke(t: Tokens?): Boolean = t == null || revokeRefresh(t.refresh) == Sent.DONE
 
-    /** 철회를 못 보낸 것들을 다시 보낸다. 다 끝났으면 true */
+    /**
+     * 철회를 못 보낸 것들을 다시 보낸다. 다 끝났으면 true — 적어 둔 것을 지금 못 읽거나, 보내는 사이 또 로그아웃해
+     * 새로 적힌 것이 있으면 false (작업이 다시 돌아 그것도 보낸다)
+     */
     fun retryRevokes(): Boolean {
-        val pending = synchronized(lock) { store.pendingRevokes() }
-        return pending.map(::revokeRefresh).all { it }
+        val pending = synchronized(lock) { pendingOrNull() } ?: return false
+        val sent = pending.map(::revokeRefresh).all { it == Sent.DONE }
+        return sent && !hasPendingRevokes
     }
 
-    private fun revokeRefresh(refresh: String): Boolean {
-        val done = try {
-            val res = post(REVOKE, mapOf("token" to refresh))
-            res.code in 200..499 && res.code != 429
-        } catch (e: Exception) {
-            false
+    /** [start] 전에: 남은 철회를 보낸다. 못 보내면 로그인도 잠시 뒤에 (적어 둔 것을 지금 못 읽으면 막지 않는다 — 드묾) */
+    private fun sendRevokesFirst() {
+        val pending = synchronized(lock) { pendingOrNull() } ?: return
+        for (token in pending) {
+            when (revokeRefresh(token)) {
+                Sent.DONE -> Unit
+                Sent.OFFLINE -> throw NetworkException()
+                Sent.LATER -> throw ApiException("구글이 잠깐 응답하지 않아요 — 잠시 뒤 다시 해 주세요")
+            }
         }
-        if (done) synchronized(lock) { store.setPendingRevokes(store.pendingRevokes() - refresh) }
-        return done
+    }
+
+    private fun pendingOrNull(): List<String>? = try {
+        store.pendingRevokes()
+    } catch (e: TokenStore.Unreadable) {
+        null
+    }
+
+    private enum class Sent { DONE, OFFLINE, LATER }
+
+    private fun revokeRefresh(refresh: String): Sent {
+        val sent = try {
+            val code = post(REVOKE, mapOf("token" to refresh)).code
+            if (code in 200..299 || (code in 400..499 && code !in RETRY_4XX)) Sent.DONE else Sent.LATER
+        } catch (e: IOException) {
+            Sent.OFFLINE
+        } catch (e: Exception) {
+            Sent.LATER
+        }
+        if (sent == Sent.DONE) synchronized(lock) { store.removeRevoke(refresh) }
+        return sent
     }
 
     private fun send(url: String, form: Map<String, String>): Http.Response = try {
@@ -254,6 +292,8 @@ class TubeAuth(
         private const val RENEW_BEFORE_MS = 60_000L
         /** refresh 가 이렇게 거절되면 로그인이 끝난 것 (계정에서 끊음·오래 안 씀·클라이언트를 지움) */
         private val SIGNED_OUT = setOf("invalid_grant", "invalid_client", "unauthorized_client")
+        /** 철회에서 다시 해 볼 4xx — 프록시가 막음(407)·시간이 다 됨(408)·너무 많이(429). 그 밖의 4xx 는 구글의 답(이미 끊긴 토큰 등) */
+        private val RETRY_4XX = setOf(407, 408, 429)
     }
 }
 
@@ -269,7 +309,8 @@ interface TokenCipher {
  */
 class PrefsTokenStore(private val prefs: SharedPreferences, private val cipher: TokenCipher) : TokenStore {
     private var memory: Tokens? = null
-    private var memoryRevokes: List<String>? = null
+    /** 암호화가 안 돼 파일에 못 남긴 철회 — 이번에 켠 동안만 */
+    private val memoryRevokes = LinkedHashSet<String>()
 
     /**
      * 키가 바뀌었거나(백업에서 되살림 — AEADBadTag) 키를 영영 못 쓰게 됐거나 값이 망가졌으면 지우고 다시 로그인하게.
@@ -293,37 +334,51 @@ class PrefsTokenStore(private val prefs: SharedPreferences, private val cipher: 
         return t
     }
 
+    /**
+     * 철회는 토큰마다 따로 암호화해 적는다 (이름은 토큰의 해시 — 토큰은 드러나지 않는다). 하나씩 적고 지우므로
+     * 키 저장소가 잠깐 안 돼 못 읽을 때 새로 적어도 예전 것을 덮어쓰지 않는다
+     */
     @Synchronized
     override fun pendingRevokes(): List<String> {
-        memoryRevokes?.let { return it }
-        val blob = prefs.getString(KEY_REVOKES, null) ?: return emptyList()
-        val list = try {
-            val a = org.json.JSONArray(String(cipher.decrypt(Base64.decode(blob, Base64.NO_WRAP)), Charsets.UTF_8))
-            (0 until a.length()).map { a.getString(it) }.filter { it.isNotBlank() }
-        } catch (e: Exception) {
-            if (!permanent(e)) return emptyList()
-            prefs.edit { remove(KEY_REVOKES) }
-            emptyList()
+        val out = LinkedHashSet<String>(memoryRevokes)
+        var unreadable = false
+        for ((key, value) in prefs.all) {
+            if (!key.startsWith(REVOKE_PREFIX)) continue
+            try {
+                val token = String(cipher.decrypt(Base64.decode(value as String, Base64.NO_WRAP)), Charsets.UTF_8)
+                require(token.isNotBlank())
+                out += token
+            } catch (e: Exception) {
+                // 영영 못 읽는 값(다른 키·망가짐)은 지우고, 잠깐 못 읽는 것은 남겨 두고 '못 읽음'으로
+                if (permanent(e) || e is ClassCastException) prefs.edit { remove(key) } else unreadable = true
+            }
         }
-        memoryRevokes = list
-        return list
+        if (unreadable) throw TokenStore.Unreadable()
+        return out.toList()
     }
 
     @Synchronized
-    override fun setPendingRevokes(tokens: List<String>) {
-        val list = tokens.distinct()
-        memoryRevokes = list
-        if (list.isEmpty()) {
-            prefs.edit { remove(KEY_REVOKES) }
-            return
-        }
+    override fun addRevoke(token: String) {
+        if (token.isBlank()) return
         try {
-            val blob = cipher.encrypt(org.json.JSONArray(list).toString().toByteArray(Charsets.UTF_8))
-            prefs.edit { putString(KEY_REVOKES, Base64.encodeToString(blob, Base64.NO_WRAP)) }
+            val blob = cipher.encrypt(token.toByteArray(Charsets.UTF_8))
+            prefs.edit { putString(revokeKey(token), Base64.encodeToString(blob, Base64.NO_WRAP)) }
+            memoryRevokes -= token
         } catch (e: Exception) {
             // 암호화가 안 되면 파일에 남기지 않는다 (이번에 켠 동안만 다시 보낸다)
-            prefs.edit { remove(KEY_REVOKES) }
+            memoryRevokes += token
         }
+    }
+
+    @Synchronized
+    override fun removeRevoke(token: String) {
+        memoryRevokes -= token
+        prefs.edit { remove(revokeKey(token)) }
+    }
+
+    private fun revokeKey(token: String): String {
+        val hash = java.security.MessageDigest.getInstance("SHA-256").digest(token.toByteArray(Charsets.UTF_8))
+        return REVOKE_PREFIX + hash.take(8).joinToString("") { "%02x".format(it) }
     }
 
     /** 다시 해도 안 되는 오류 (값을 지워야 함) */
@@ -364,7 +419,7 @@ class PrefsTokenStore(private val prefs: SharedPreferences, private val cipher: 
 
     private companion object {
         const val KEY = "tokens"
-        const val KEY_REVOKES = "revokes"
+        const val REVOKE_PREFIX = "revoke_"
     }
 }
 

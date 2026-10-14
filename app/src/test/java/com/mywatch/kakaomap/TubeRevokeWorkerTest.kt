@@ -29,12 +29,14 @@ class TubeRevokeWorkerTest {
     private val context: Context = RuntimeEnvironment.getApplication()
 
     private class Store : TokenStore {
-        var revokes = listOf("RT-OLD")
+        var revokes = mutableListOf("RT-OLD")
+        var unreadable = false
         override fun load(): Tokens? = null
         override fun save(t: Tokens) = Unit
         override fun clear() = Unit
-        override fun pendingRevokes() = revokes
-        override fun setPendingRevokes(tokens: List<String>) { revokes = tokens }
+        override fun pendingRevokes(): List<String> = if (unreadable) throw TokenStore.Unreadable() else revokes.toList()
+        override fun addRevoke(token: String) { revokes += token }
+        override fun removeRevoke(token: String) { revokes -= token }
     }
 
     @After
@@ -59,5 +61,16 @@ class TubeRevokeWorkerTest {
         assertEquals(ListenableWorker.Result.success(), TestListenableWorkerBuilder<TubeRevokeWorker>(context).build().doWork())
         assertTrue(store.revokes.isEmpty())
         assertEquals(listOf("https://oauth2.googleapis.com/revoke RT-OLD"), sent)
+    }
+
+    /** 리뷰에서 찾음: 적어 둔 철회를 잠깐 못 읽으면(키 저장소) '보낼 것 없음'으로 성공해 버려 다시 돌지 않았다 */
+    @Test
+    fun aKeystoreHiccupMeansTryAgainNotDone() = runBlocking {
+        val store = Store().apply { unreadable = true }
+        TubeAccount.override = TubeAuth("id", "secret", { _, _ -> Http.Response(200, "") }, store)
+        assertEquals(ListenableWorker.Result.retry(), TestListenableWorkerBuilder<TubeRevokeWorker>(context).build().doWork())
+        store.unreadable = false
+        assertEquals(ListenableWorker.Result.success(), TestListenableWorkerBuilder<TubeRevokeWorker>(context).build().doWork())
+        assertTrue(store.revokes.isEmpty())
     }
 }
