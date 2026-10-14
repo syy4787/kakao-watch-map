@@ -20,18 +20,36 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
-      # 서명 비밀번호(Secret)가 아직 없으면 실패 대신 건너뛴다 (등록 후 다음 커밋부터 자동 배포)
-      - name: Check signing secret
+      # 서명 비밀번호(Secret)가 아직 없으면 실패 대신 건너뛴다 (등록 후 다음 커밋부터 자동 배포).
+      # main 의 최신 커밋만 배포한다 — 예전 실행을 다시 돌리거나 다른 가지에서 돌리면 그 옛 코드가 '최신'으로 올라가
+      # 워치가 옛 버전으로 '업데이트'된다
+      - name: Check signing secret and that this is the newest main
         id: check
         env:
           RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           if [ -z "$(printf '%s' "$RELEASE_KEY_PASSWORD" | tr -d '[:space:]')" ]; then
             echo "::warning::저장소 Settings > Secrets and variables > Actions 에 RELEASE_KEY_PASSWORD 를 추가하면 다음 커밋부터 배포돼요"
             echo "ready=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "ready=true" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
+          if [ "$GITHUB_REF" != "refs/heads/main" ]; then
+            echo "::notice::main 이 아닌 곳($GITHUB_REF)에서는 배포하지 않아요"
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          NEWEST=$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq .sha || true)
+          if [ -z "$NEWEST" ]; then
+            echo "::error::main 의 최신 커밋을 알 수 없어 배포하지 않아요"
+            exit 1
+          fi
+          if [ "$NEWEST" != "$GITHUB_SHA" ]; then
+            echo "::notice::이 커밋(${GITHUB_SHA::7})은 main 의 최신(${NEWEST::7})이 아니라 배포하지 않아요 — 최신 커밋의 실행이 배포해요"
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "ready=true" >> "$GITHUB_OUTPUT"
 
       - uses: actions/checkout@v7
         if: steps.check.outputs.ready == 'true'
@@ -165,13 +183,48 @@ jobs:
           cat update.json
           ls -l kakao-watch-map*.apk
 
+      # 작은 업데이트: 최근 릴리스 3개의 CPU 별 APK 에서 새 APK 를 만드는 패치(.kwdelta)를 만들어 update.json 에 적는다.
+      # 재생 엔진(약 100MB)은 그대로라 패치는 몇 MB — 워치가 깔린 APK 와 맞는 패치만 받아 새 APK 를 똑같이 다시 만든다.
+      # 스크립트가 만든 패치를 직접 적용해 새 APK 와 같은지 확인하고, 이 단계가 실패해도 배포는 전체 APK 로 그대로 한다
+      - name: Small updates (deltas)
+        if: steps.check.outputs.ready == 'true'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/test_make_deltas.py
+          BASE="https://github.com/$GITHUB_REPOSITORY/releases/download/v$VERSION_CODE"
+          PREV=$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=20" --jq '.[].tag_name' \
+            | sed -n 's/^v\([0-9][0-9]*\)$/\1/p' | sort -rn | awk -v cur="$VERSION_CODE" '$1 < cur' | head -3)
+          mkdir -p deltas prev
+          for ABI in armeabi-v7a arm64-v8a; do
+            OLDS=()
+            for V in $PREV; do
+              F="prev/v$V-$ABI.apk"
+              if gh release download "v$V" -p "kakao-watch-map-$ABI.apk" -O "$F" --clobber; then
+                OLDS+=(--old "$V=$F")
+              fi
+            done
+            if [ ${#OLDS[@]} -eq 0 ]; then continue; fi
+            python3 .github/scripts/make-deltas.py --new "kakao-watch-map-$ABI.apk" "${OLDS[@]}" \
+              --out-dir deltas --prefix "kakao-watch-map-$ABI" --url-base "$BASE" > "deltas/$ABI.json"
+            jq --arg abi "$ABI" --slurpfile p "deltas/$ABI.json" '.apks[$abi].patches = $p[0]' update.json > update.tmp
+            mv update.tmp update.json
+          done
+          ls -l deltas
+          cat update.json
+          N=$(ls deltas/*.kwdelta 2>/dev/null | wc -l)
+          echo "::notice title=작은 업데이트::패치 ${N}개 — $(ls -l deltas/*armeabi-v7a*.kwdelta 2>/dev/null | awk '{printf "%s %.1fMB  ", $9, $5/1048576}')"
+
       - name: Publish GitHub release
         if: steps.check.outputs.ready == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "v$VERSION_CODE" \
-            kakao-watch-map.apk kakao-watch-map-armeabi-v7a.apk kakao-watch-map-arm64-v8a.apk update.json \
+          shopt -s nullglob
+          FILES=(kakao-watch-map.apk kakao-watch-map-armeabi-v7a.apk kakao-watch-map-arm64-v8a.apk update.json deltas/*.kwdelta)
+          gh release create "v$VERSION_CODE" "${FILES[@]}" \
             --target "$GITHUB_SHA" --title "v$VERSION_NAME" --notes "$NOTES" --latest
 
       - name: Clean up secrets
