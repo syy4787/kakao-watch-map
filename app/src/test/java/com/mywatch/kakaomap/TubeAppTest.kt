@@ -310,6 +310,28 @@ class TubeAppTest {
         assertTrue("홈에서 뒤로 = 닫기", a.isFinishing)
     }
 
+    /** 재생 화면을 보는 사이 이 화면이 정리됐다가 다시 만들어져도 보던 화면 그대로 (예전엔 홈부터) */
+    @Test
+    fun theTrailComesBackWhenTheScreenIsRecreated() {
+        backend.pages[Feed.ChannelInfo(channel.id).key] = { Fetched(TubePage(emptyList(), null, channels = listOf(channel))) }
+        backend.pages[Feed.ChannelVideos(channel.id).key] = { Fetched(TubePage(listOf(v("chanaaaaaa1")), null)) }
+        val controller = Robolectric.buildActivity(TubeActivity::class.java).setup()
+        val a = controller.get()
+        settle { !opening(a) }
+        tapCard(a, "musicaaaaa1", long = true)
+        tapAction(a, TubeRows.A_CHANNEL)
+        assertEquals("1theK (원더케이)", titles(a).first())
+        val saved = Bundle()
+        controller.saveInstanceState(saved)
+        controller.pause().stop().destroy()
+        val again = Robolectric.buildActivity(TubeActivity::class.java).setup(saved).get()
+        settle { !opening(again) }
+        assertEquals("1theK (원더케이)", titles(again).first())
+        again.onBackPressedDispatcher.onBackPressed()
+        idle()
+        assertEquals("유튜브", titles(again).first())
+    }
+
     /** 오른쪽으로 쓸기도 한 화면씩 뒤로 (Wear OS 는 쓸면 액티비티를 그냥 닫아 유튜브가 통째로 닫혔다). 홈에서는 시스템이 닫는다 */
     @Test
     fun swipingRightStepsBackOneScreenAndHomeLeavesItToTheSystem() {

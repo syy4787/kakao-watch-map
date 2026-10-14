@@ -81,6 +81,49 @@ class TubeNavTest {
         assertTrue(nav.top is Page.Handoff)
     }
 
+    /**
+     * 재생 화면을 보는 사이 2GB 워치가 이 앱을 정리하면 돌아왔을 때 홈부터였다 (점검 C1) — 다녀온 화면들을 저장해 두었다가 그대로.
+     * 메뉴·로그인·이어 보기 묻기처럼 그때뿐인 화면은 남기지 않는다
+     */
+    @Test
+    fun theTrailSurvivesTheAppBeingClosedInTheBackground() {
+        val nav = TubeNav()
+        nav.push(Page.Search("아이유 \"밤편지\""))
+        nav.push(Page.Chart("10", "인기 음악"))
+        nav.push(Page.Channel("UCweOkPb1wVVH0Q0Tlj4a5Pw", "1theK (원더케이)"))
+        nav.push(Page.Playlist("PLmine0000001", "내 모음", own = true))
+        nav.push(Page.Library)
+        nav.push(Page.Liked)
+        nav.push(Page.Menu(v))
+        val back = TubeNav()
+        back.restore(nav.save())
+        assertEquals(Page.Liked, back.top)
+        assertEquals(7, back.depth)
+        assertTrue(back.back())
+        assertEquals(Page.Library, back.top)
+        assertTrue(back.back())
+        assertEquals(Page.Playlist("PLmine0000001", "내 모음", own = true), back.top)
+        assertTrue(back.back())
+        assertEquals(Page.Channel("UCweOkPb1wVVH0Q0Tlj4a5Pw", "1theK (원더케이)"), back.top)
+        assertTrue(back.back())
+        assertEquals(Page.Chart("10", "인기 음악"), back.top)
+        assertTrue(back.back())
+        assertEquals(Page.Search("아이유 \"밤편지\""), back.top)
+        assertTrue(back.back())
+        assertEquals(Page.Home, back.top)
+
+        val login = TubeNav()
+        login.push(Page.Subscriptions)
+        login.push(Page.Login)
+        val again = TubeNav()
+        again.restore(login.save())
+        assertEquals("로그인 화면은 새로 열 때 다시", Page.Subscriptions, again.top)
+        val broken = TubeNav()
+        broken.restore("{이상한 값")
+        assertEquals(Page.Home, broken.top)
+        assertEquals(1, broken.depth)
+    }
+
     // ---------------- 받기 ----------------
 
     private var now = 1_000_000L
@@ -165,6 +208,49 @@ class TubeNavTest {
         assertEquals("채널은 같은 것을 두 번 넣지 않는다", 1, page.channels.size)
         l.more(f)
         assertEquals("끝이면 더 묻지 않는다", listOf(null, "T1", "T2"), fake.asked.map { it.second })
+    }
+
+    /**
+     * 점검 C1: 더 보기로 늘린 목록·검색 결과가 뒤로 오거나 다시 볼 때(15분 지나) 첫 쪽으로 줄었고, 그때마다 검색(하루 100번 한도)을 또 썼다.
+     * 검색과 더 보기로 늘린 목록은 3시간 동안 저절로 다시 받지 않는다 (새로 고침·다시 시도는 바로). 메모리에만 둔다
+     */
+    @Test
+    fun anExtendedListOrASearchIsNotShrunkByComingBack() {
+        val fake = Fake()
+        val l = loader(fake)
+        val ch = Feed.ChannelVideos("UCweOkPb1wVVH0Q0Tlj4a5Pw")
+        l.load(ch)
+        l.more(ch)
+        now += Feed.SHORT + 1
+        l.load(ch)   // 뒤로 와서 다시 봄
+        assertEquals("늘린 목록 그대로", 4, l.slot(ch).page?.videos?.size)
+        assertEquals(2, fake.asked.size)
+        val s = Feed.Search("아이유")
+        l.load(s)
+        now += 2 * 60 * 60_000L
+        l.load(s)
+        assertEquals("검색은 3시간 기억", 3, fake.asked.size)
+        now += 60 * 60_000L + 1
+        l.load(s)
+        assertEquals(4, fake.asked.size)
+        l.load(ch, force = true)
+        assertEquals("새로 고침은 바로, 첫 쪽부터", 2, l.slot(ch).page?.videos?.size)
+    }
+
+    @Test
+    fun moreTappedWhileRefreshingRunsAfterwards() {
+        val fake = Fake()
+        val l = loader(fake)
+        val f = Feed.Liked
+        l.load(f)
+        fake.gate = CompletableDeferred()
+        l.load(f, force = true)
+        l.more(f)   // 새로 고치는 중에 누름 — 예전엔 말없이 무시됐다
+        assertTrue("누른 게 보이게", l.slot(f).loadingMore)
+        fake.gate!!.complete(Unit)
+        assertEquals(4, l.slot(f).page?.videos?.size)
+        assertEquals(listOf(null, null, "T1"), fake.asked.map { it.second })
+        assertFalse(l.slot(f).loadingMore)
     }
 
     @Test

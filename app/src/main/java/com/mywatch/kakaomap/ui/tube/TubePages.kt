@@ -1,6 +1,8 @@
 package com.mywatch.kakaomap.ui.tube
 
 import com.mywatch.kakaomap.tube.TubeVideo
+import org.json.JSONArray
+import org.json.JSONObject
 
 /** 유튜브 앱의 화면 하나 */
 sealed class Page {
@@ -43,7 +45,10 @@ sealed class Page {
     data object Terms : Page()
 }
 
-/** 뒤로 가기 쌓기 — 뒤로는 늘 한 칸, 맨 아래는 홈 */
+/**
+ * 뒤로 가기 쌓기 — 뒤로는 늘 한 칸, 맨 아래는 홈.
+ * 재생 화면을 보는 사이 앱 화면이 정리돼도 돌아오면 그대로이게 [save]·[restore] (메뉴·로그인 같은 그때뿐인 화면은 빼고)
+ */
 class TubeNav(start: Page = Page.Home) {
     private val stack = ArrayList<Page>().apply { add(start) }
 
@@ -82,7 +87,52 @@ class TubeNav(start: Page = Page.Home) {
         while (stack.size > first) stack.removeAt(stack.lastIndex)
     }
 
+    /** 지금 쌓인 화면들 (그때뿐인 화면 빼고) — [restore] 로 되살린다 */
+    fun save(): String = JSONArray().apply { stack.mapNotNull(::encode).forEach { put(it) } }.toString()
+
+    /** [save] 한 것으로 바꾼다. 읽을 수 없으면 홈 */
+    fun restore(saved: String) {
+        val pages = runCatching {
+            val a = JSONArray(saved)
+            (0 until a.length()).mapNotNull { decode(a.getJSONObject(it)) }
+        }.getOrNull().orEmpty()
+        stack.clear()
+        stack.add(Page.Home)
+        pages.filter { it != Page.Home }.forEach(::push)
+    }
+
     companion object {
         const val MAX = 16
+
+        private fun encode(p: Page): JSONObject? = when (p) {
+            Page.Home -> JSONObject().put("t", "home")
+            is Page.Search -> JSONObject().put("t", "search").put("q", p.query)
+            Page.Subscriptions -> JSONObject().put("t", "subs")
+            Page.Library -> JSONObject().put("t", "library")
+            Page.History -> JSONObject().put("t", "history")
+            Page.Liked -> JSONObject().put("t", "liked")
+            Page.MyPlaylists -> JSONObject().put("t", "myplaylists")
+            Page.Account -> JSONObject().put("t", "account")
+            is Page.Chart -> JSONObject().put("t", "chart").put("c", p.category ?: "").put("title", p.title)
+            is Page.Channel -> JSONObject().put("t", "channel").put("id", p.id).put("title", p.title)
+            is Page.Playlist -> JSONObject().put("t", "playlist").put("id", p.id).put("title", p.title).put("own", p.own)
+            // 그때뿐인 화면: 메뉴 · 로그인(코드는 새로) · 이어 보기 묻기 · 약관(동의 전엔 어차피 약관부터)
+            is Page.Menu, Page.Login, is Page.Handoff, Page.Terms -> null
+        }
+
+        private fun decode(o: JSONObject): Page? = when (o.optString("t")) {
+            "home" -> Page.Home
+            "search" -> o.optString("q").takeIf { it.isNotBlank() }?.let { Page.Search(it) }
+            "subs" -> Page.Subscriptions
+            "library" -> Page.Library
+            "history" -> Page.History
+            "liked" -> Page.Liked
+            "myplaylists" -> Page.MyPlaylists
+            "account" -> Page.Account
+            "chart" -> Page.Chart(o.optString("c").ifEmpty { null }, o.optString("title"))
+            "channel" -> o.optString("id").takeIf { it.isNotBlank() }?.let { Page.Channel(it, o.optString("title")) }
+            "playlist" -> o.optString("id").takeIf { it.isNotBlank() }?.let { Page.Playlist(it, o.optString("title"), o.optBoolean("own")) }
+            else -> null
+        }
     }
 }

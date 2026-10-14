@@ -128,8 +128,15 @@ class TubeActivity : ComponentActivity() {
         onBackPressedDispatcher.addCallback(this, back)
         ambient = AmbientCover(this, ::ambientSummary)
         wasSignedIn = signedIn
+        // 재생 화면을 보는 사이 이 화면이 정리됐다가 다시 만들어졌으면 다녀온 화면들 그대로 (데이터는 새로 받는다)
+        savedInstanceState?.getString(STATE_NAV)?.let(nav::restore)
         show()
         if (savedInstanceState == null) handleIntent(intent)
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putString(STATE_NAV, nav.save())
     }
 
     private fun ambientSummary(): String =
@@ -514,7 +521,7 @@ class TubeActivity : ComponentActivity() {
         val q = SearchHistory.clean(text)
         if (q.isEmpty()) return
         state.addSearch(q)
-        // 같은 검색을 다시 하면(15분 안) 기억한 결과로 — 검색은 하루 100번까지라 아낀다
+        // 같은 검색을 다시 하면(3시간 안) 기억한 결과로 — 검색은 하루 100번까지라 아낀다
         if (nav.top == Page.Search(q)) show() else go(Page.Search(q))
     }
 
@@ -772,6 +779,7 @@ class TubeActivity : ComponentActivity() {
 
     companion object {
         private const val KEY_QUERY = "query"
+        private const val STATE_NAV = "nav"
         /** 유튜브 '음악' 분류 (인기 음악) */
         private const val MUSIC = "10"
         /** 구글 계정 > 서드 파티 연결 (이 앱의 접근 권한을 끊는 곳) */

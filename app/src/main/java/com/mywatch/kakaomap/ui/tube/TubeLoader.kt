@@ -12,7 +12,8 @@ import kotlinx.coroutines.launch
 /** 받을 거리 — [key] 로 기억한다. [mine] = 내 계정 데이터 (로그아웃하면 지움), [ttlMs] = 이만큼은 다시 받지 않는다 */
 sealed class Feed(val key: String, val mine: Boolean, val ttlMs: Long) {
     class Popular(val category: String?) : Feed("popular/${category ?: "all"}", false, LONG)
-    class Search(val query: String) : Feed("search/$query", false, SHORT)
+    /** 검색은 하루 100번 한도(1번 = 100 단위)라 3시간 기억한다 (같은 검색어를 다시 해도) */
+    class Search(val query: String) : Feed("search/$query", false, EXTENDED)
     data object SubsFeed : Feed("subs/feed", true, SHORT)
     data object SubsChannels : Feed("subs/channels", true, SHORT)
     data object Liked : Feed("liked", true, SHORT)
@@ -31,6 +32,8 @@ sealed class Feed(val key: String, val mine: Boolean, val ttlMs: Long) {
         /** 받은 데이터는 메모리에만 잠깐 (유튜브 정책: 받은 것을 오래 두지 않기) */
         const val SHORT = 15 * 60_000L
         const val LONG = 30 * 60_000L
+        /** 검색 결과와 더 보기로 늘린 목록 — 뒤로 올 때마다 첫 쪽으로 줄이지 않게 (새로 고침은 바로) */
+        const val EXTENDED = 3 * 60 * 60_000L
     }
 }
 
@@ -56,12 +59,14 @@ data class Slot(
     val source: TubeSource? = null,
     val note: String? = null,
     val loadedAt: Long = 0,
+    /** 더 보기로 늘린 목록 (저절로 새로 받으면 첫 쪽으로 줄어드므로 [Feed.EXTENDED] 동안 그대로) */
+    val extended: Boolean = false,
 )
 
 /**
  * 화면들의 데이터를 받아 메모리에 잠깐 기억한다 (메인 스레드에서 쓴다). 받으면 [changed] 로 알린다.
- *  · 없거나 오래됐을 때만 받는다 (15~30분), 받는 중엔 또 묻지 않는다
- *  · 더 보기는 아래에 붙인다 (같은 것은 한 번). 더 보기가 실패하면 보던 것은 그대로, 알림은 [takeMoreError] 로 한 번
+ *  · 없거나 오래됐을 때만 받는다 (15~30분, 검색·더 보기로 늘린 목록은 3시간), 받는 중엔 또 묻지 않는다
+ *  · 더 보기는 아래에 붙인다 (같은 것은 한 번). 새로 고치는 중에 누르면 끝나고 바로. 실패하면 보던 것은 그대로, 알림은 [takeMoreError] 로 한 번
  *  · 로그아웃하면 내 계정 데이터는 지운다 ([clearMine]) — 받는 중이던 것도 버린다
  */
 class TubeLoader(
@@ -73,6 +78,8 @@ class TubeLoader(
     private val slots = HashMap<String, Slot>()
     private val jobs = HashMap<String, Job>()
     private val moreErrors = HashMap<String, String>()
+    /** 새로 고치는 중에 누른 '더 보기' — 끝나면 바로 */
+    private val pendingMore = HashSet<String>()
 
     fun slot(feed: Feed): Slot = slots[feed.key] ?: Slot()
 
@@ -82,9 +89,10 @@ class TubeLoader(
         val s = slot(feed)
         val running = jobs[feed.key]?.isActive == true
         if (running && !force) return
-        if (!force && s.page != null && s.error == null && now() - s.loadedAt < feed.ttlMs) return
+        val ttl = if (s.extended) maxOf(feed.ttlMs, Feed.EXTENDED) else feed.ttlMs
+        if (!force && s.page != null && s.error == null && now() - s.loadedAt < ttl) return
         jobs[feed.key]?.cancel()
-        slots[feed.key] = s.copy(loading = true, loadingMore = false, error = null, signIn = false)
+        slots[feed.key] = s.copy(loading = true, loadingMore = feed.key in pendingMore, error = null, signIn = false)
         changed(feed)
         jobs[feed.key] = scope.launch {
             val next = try {
@@ -93,27 +101,42 @@ class TubeLoader(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: SignInNeededException) {
-                slot(feed).copy(loading = false, error = e.message, signIn = true, page = null)
+                pendingMore.remove(feed.key)
+                slot(feed).copy(loading = false, loadingMore = false, error = e.message, signIn = true, page = null)
             } catch (e: Exception) {
-                slot(feed).copy(loading = false, error = e.message ?: "불러오지 못했어요")
+                pendingMore.remove(feed.key)
+                slot(feed).copy(loading = false, loadingMore = false, error = e.message ?: "불러오지 못했어요")
             }
             slots[feed.key] = next
+            val queued = pendingMore.remove(feed.key)
             changed(feed)
+            if (queued && next.page != null) {
+                // 이 받기는 끝났다 — 기다리던 '더 보기'를 이어서
+                if (jobs[feed.key] === coroutineContext[Job]) jobs.remove(feed.key)
+                more(feed)
+            }
         }
     }
 
-    /** 더 보기: 다음 쪽을 아래에 붙인다 */
+    /** 더 보기: 다음 쪽을 아래에 붙인다 (새로 고치는 중이면 끝나고 바로) */
     fun more(feed: Feed) {
         val s = slot(feed)
         val token = s.page?.next ?: return
-        if (s.loadingMore || jobs[feed.key]?.isActive == true) return
+        if (s.loadingMore && feed.key !in pendingMore) return
+        if (jobs[feed.key]?.isActive == true) {
+            if (s.loading && pendingMore.add(feed.key)) {
+                slots[feed.key] = s.copy(loadingMore = true)
+                changed(feed)
+            }
+            return
+        }
         slots[feed.key] = s.copy(loadingMore = true)
         changed(feed)
         jobs[feed.key] = scope.launch {
             val next = try {
                 val r = backend.fetch(feed, token, s.source)
                 val cur = slot(feed)
-                cur.copy(page = merge(cur.page ?: r.page, r.page), loadingMore = false)
+                cur.copy(page = merge(cur.page ?: r.page, r.page), loadingMore = false, extended = true)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: YouTubeQuotaException) {
@@ -137,6 +160,7 @@ class TubeLoader(
             jobs.remove(key)?.cancel()
             slots.remove(key)
             moreErrors.remove(key)
+            pendingMore.remove(key)
         }
     }
 
