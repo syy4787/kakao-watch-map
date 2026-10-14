@@ -24,7 +24,7 @@ Robolectric 4.17 (+ NATIVE render tests), Playwright 1.56 simulator with the fak
   visible (we use 90%); one auto-playing player per page; thumbnails that start playback ≥ 120×70 px; no background playback (III.I.9).
 - API data only in memory (15 min–3 h TTL); on-device: history 30 d (existing), mix harvest IDs 7 d (≤ 12 harvests × ≤ 49 IDs),
   dismissed videos/channels 30 d, seen Shorts 30 d — all cleared by '기록 지우기'. No scores/metrics from API data (III.E.4.h).
-- Quota: home 전체 refresh ≈ 40 units; search bucket (100/day) only for 실시간·뉴스·Shorts top-up, each cached 3 h, only when opened.
+- Quota: home 전체 refresh ≈ 40 units; search bucket (100/day) only for 실시간 and the Shorts top-up, each cached 3 h, only when needed; 뉴스 = chart 25.
 - Re-consent: `TubeState.TERMS_VERSION` 1 → 2 with updated terms text + `web/privacy.html`.
 - Links page → app: `kakaowatch://tube/recs?seed=<id>&ids=<id,…≤49>` and `kakaowatch://tube/seen?v=<id>` (in-app only, silent),
   `kakaowatch://tube/channel?v=<id>` (opens the app's channel page; browser pages use the `intent://…#Intent;scheme=kakaowatch;package=com.mywatch.kakaomap;end` form).
@@ -68,7 +68,15 @@ Robolectric 4.17 (+ NATIVE render tests), Playwright 1.56 simulator with the fak
       duration, categoryId); `chart=mostPopular regionCode=KR videoCategoryId=20` count. Write rows to `build/youtube-live.md`; assert only that
       calls returned 200 (the report is the result).
 - [ ] Push branch `watch-polish`, dispatch `youtube-api-check.yml` on it (`gh api -X POST …/dispatches -f ref=watch-polish`), read the run summary.
-- [ ] Record the findings in this plan (Task 0 results) and adjust fallbacks if any assumption fails.
+- [x] Record the findings in this plan (Task 0 results) and adjust fallbacks if any assumption fails.
+
+**Task 0 results (run 38652362972, 2026-10-14 23:11 UTC):** all assumptions hold.
+- `UUSH/UULF/UULV` answer 200 for 1theK (218 Shorts · 19 781 long · 2 live) and YTN (1 753 · 17 035 · 1 213); `UU` = everything.
+- `part=player&maxHeight=360`: Short 203×360 (PT13S, PT33S), long 640×360, **live stream 0×0 and `P0D`** → treat ≤ 0 as unknown.
+- `categoryId` present (10 music, 25 news). Charts KR: 10 → 9/10 music, 20 → 10/10 gaming, **25 → 7/10 news** (rest 22),
+  1/17 mixed; no category → music+gaming+entertainment. ⇒ **뉴스 = `chart=mostPopular videoCategoryId=25` filtered to category 25
+  (1 unit) — no search.** 실시간 stays a search (`eventType=live` returned 10).
+- Searches `eventType=live`, `videoCategoryId=25`, `videoDuration=short q=#shorts` all 200 with 10 results.
 
 ### Task 1: Models, parsers, links
 
