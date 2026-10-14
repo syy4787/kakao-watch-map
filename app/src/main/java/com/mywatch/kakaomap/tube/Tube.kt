@@ -61,56 +61,6 @@ data class TubePage(
     val playlists: List<TubePlaylist> = emptyList(),
 )
 
-/**
- * 고른 곡을 틀 곳 ('듣는 곳' — 처음 곡을 틀 때 한 번 묻고 기억). 워치 화면 플레이어는 삼성 인터넷 안의 유튜브 임베드라
- * 유튜브에 로그인할 수 없어 프리미엄(광고 없음·화면이 꺼져도 재생)이 안 된다 — 프리미엄은 YouTube Music 앱(내 계정)으로.
- */
-enum class PlayTarget(val key: String) {
-    /** 워치의 YouTube Music 앱 — 곡 링크를 받을 때만 (프리미엄 · 화면이 꺼져도 계속) */
-    WATCH_MUSIC("watch_music"),
-    /** 휴대폰의 YouTube Music 앱 (프리미엄 · 일시정지·다음 곡은 워치 미디어 조작으로) */
-    PHONE_MUSIC("phone_music"),
-    /** 워치 인터넷 앱의 둥근 재생 화면 — 유튜브 공식 플레이어, 로그인 없이 화면이 켜져 있는 동안 (무료) */
-    WATCH_WEB("watch_web");
-
-    companion object {
-        fun of(key: String?): PlayTarget? = entries.firstOrNull { it.key == key }
-
-        /**
-         * 실제로 틀 곳: 고른 곳이 지금도 되면 그곳, 아니면(그 앱을 지움 · 안 고름) 프리미엄이 되는 곳 —
-         * 워치 YouTube Music 이 곡 링크를 받으면 워치, 아니면 폰 (폰은 늘 고를 수 있다: 연결이 안 되면 누를 때 알림)
-         */
-        fun choose(saved: PlayTarget?, watchMusic: Boolean, watchWeb: Boolean): PlayTarget = when {
-            saved == WATCH_MUSIC && watchMusic -> WATCH_MUSIC
-            saved == WATCH_WEB && watchWeb -> WATCH_WEB
-            saved == PHONE_MUSIC -> PHONE_MUSIC
-            watchMusic -> WATCH_MUSIC
-            else -> PHONE_MUSIC
-        }
-    }
-}
-
-/**
- * 지금 틀 수 있는 곳과 실제로 틀 곳 ([PlayTarget.choose]). [saved] = 사용자가 고른 곳 (아직 안 골랐으면 null — 처음 곡을 틀 때 묻는다).
- * [watchMusic] = 워치 YouTube Music 이 곡 링크를 받음, [musicApp] = 워치에 YouTube Music 이 있음(열 수 있음),
- * [watchWeb] = 워치 인터넷 앱으로 둥근 재생 화면을 열 수 있음
- */
-data class PlayPlaces(
-    val saved: PlayTarget?,
-    val target: PlayTarget,
-    val watchMusic: Boolean,
-    val musicApp: Boolean,
-    val watchWeb: Boolean,
-) {
-    /** 고른 곳이 있다 (없으면 '듣는 곳 고르기') */
-    val chosen: Boolean get() = saved != null
-
-    companion object {
-        fun of(saved: PlayTarget?, watchMusic: Boolean, musicApp: Boolean, watchWeb: Boolean) =
-            PlayPlaces(saved, PlayTarget.choose(saved, watchMusic, watchWeb), watchMusic, musicApp || watchMusic, watchWeb)
-    }
-}
-
 object TubeLinks {
     private val ID = Regex("[A-Za-z0-9_-]{11}")
     private val CHANNEL = Regex("UC[A-Za-z0-9_-]{22}")
@@ -190,8 +140,12 @@ object TubeLinks {
     /** 폰 유튜브 앱의 검색 결과 (워치 검색이 안 될 때) */
     fun searchUrl(query: String): String = "https://www.youtube.com/results?search_query=" + encode(query.trim())
 
-    /** 320×180 미리보기 그림 */
-    fun thumbnail(id: String): String = "https://i.ytimg.com/vi/$id/mqdefault.jpg"
+    /**
+     * 미리보기 그림: 작은 것 320×180(mqdefault), [big] = 480×360(hqdefault — 위아래 검은 띠를 16:9 로 잘라 내면 480×270,
+     * 화면 폭 카드(약 420px)에 흐리지 않게)
+     */
+    fun thumbnail(id: String, big: Boolean = false): String =
+        if (big) "https://i.ytimg.com/vi/$id/hqdefault.jpg" else "https://i.ytimg.com/vi/$id/mqdefault.jpg"
 
     private val REPO_PART = Regex("[A-Za-z0-9_][A-Za-z0-9._-]*")
 
@@ -211,9 +165,6 @@ object TubeLinks {
      * [nonce] = 고른 시각(ms). 같은 곡을 다시 골라도 주소가 달라지게 (같은 탭에서 주소가 똑같으면 화면이 그대로라 다시 틀지 않음),
      * 재생 화면은 이 시각이 최근인 것만 바로 튼다 (뒤로 가기로 온 예전 주소·며칠 뒤 되살아난 탭은 ▶ 를 기다림)
      */
-    fun playerUrl(base: String, video: TubeVideo, mix: Boolean, nonce: Long? = null): String =
-        playerUrl(base, video, if (mix) Queue.Mix else Queue.Single, nonce)
-
     /**
      * 재생 화면 주소 — [queue] 로 무엇을 이어 틀지: 믹스(mix=1) · 앱의 목록 그대로(ids=다음 동영상들, 처음 것까지 50개) ·
      * 재생목록(list=). [inApp] = 워치 앱 안의 엔진으로 연다(app=1 — 아래 링크가 앱의 목록으로 돌아감)
@@ -305,6 +256,9 @@ object TubeText {
 
     /** 구독자 120만명 */
     fun subscribers(n: Long): String = "구독자 ${compact(n)}명"
+
+    /** 동영상 1.3만개 */
+    fun videoCount(n: Long): String = "동영상 ${compact(n)}개"
 
     private const val DAY_MS = 86_400_000L
 

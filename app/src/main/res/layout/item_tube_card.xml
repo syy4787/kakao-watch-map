@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 유튜브 앱처럼 큰 동영상 카드: 16:9 미리보기(둥근 모서리, 오른쪽 아래 길이·LIVE) + 굵은 제목 두 줄 + '채널 · 조회수 · 언제' -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_marginTop="6dp"
+    android:layout_marginBottom="6dp"
+    android:background="@drawable/bg_tube_card_plain"
+    android:orientation="vertical"
+    android:paddingBottom="8dp">
+
+    <com.mywatch.kakaomap.ui.RatioFrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content">
+
+        <ImageView
+            android:id="@+id/thumb"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:background="@drawable/bg_tube_thumb"
+            android:importantForAccessibility="no"
+            android:scaleType="centerCrop" />
+
+        <TextView
+            android:id="@+id/badge"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="bottom|end"
+            android:layout_margin="6dp"
+            android:background="@drawable/bg_tube_badge"
+            android:importantForAccessibility="no"
+            android:paddingHorizontal="5dp"
+            android:paddingVertical="1dp"
+            android:textColor="@android:color/white"
+            android:textSize="12sp"
+            android:textStyle="bold"
+            android:visibility="gone" />
+    </com.mywatch.kakaomap.ui.RatioFrameLayout>
+
+    <TextView
+        android:id="@+id/title"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="7dp"
+        android:ellipsize="end"
+        android:maxLines="2"
+        android:paddingHorizontal="6dp"
+        android:textColor="@color/text_primary"
+        android:textSize="15sp"
+        android:textStyle="bold" />
+
+    <TextView
+        android:id="@+id/meta"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="2dp"
+        android:ellipsize="end"
+        android:maxLines="2"
+        android:paddingHorizontal="6dp"
+        android:textColor="@color/tube_dim"
+        android:textSize="13sp" />
+</LinearLayout>

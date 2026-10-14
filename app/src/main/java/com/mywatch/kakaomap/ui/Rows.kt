@@ -26,14 +26,19 @@ import com.mywatch.kakaomap.model.TransitGuide
 import com.mywatch.kakaomap.model.TransitRoute
 import com.mywatch.kakaomap.model.TransitSort
 import com.mywatch.kakaomap.model.TravelMode
+import com.mywatch.kakaomap.tube.Queue
+import com.mywatch.kakaomap.tube.TubeChannel
 import com.mywatch.kakaomap.tube.TubeLinks
+import com.mywatch.kakaomap.tube.TubePlaylist
 import com.mywatch.kakaomap.tube.TubeText
 import com.mywatch.kakaomap.tube.TubeVideo
 
 /** 목록 화면에 들어가는 줄 종류 */
 sealed class Row {
-    /** 제목. [art] = 유튜브 영상 번호 — 유튜브 화면에서 제목 위에 그 곡의 큰 그림 */
-    data class Header(val title: String, val subtitle: String? = null, val art: String? = null) : Row()
+    /**
+     * 제목. 유튜브 화면에서만: [art] = 영상 번호 — 제목 위에 그 동영상의 16:9 그림, [avatar] = 채널 사진 주소 — 동그랗게
+     */
+    data class Header(val title: String, val subtitle: String? = null, val art: String? = null, val avatar: String? = null) : Row()
     /**
      * 버튼. [accent] = 눈에 띄는 버튼(지도: 파랑, 유튜브: 흰색). 유튜브 화면에서만: [sub] = 아래 작은 줄,
      * [art] = 아이콘 대신 그 곡(영상 번호)의 그림, [selected] = 고르는 화면에서 지금 고른 것 (읽어 주기에 '선택됨')
@@ -46,6 +51,8 @@ sealed class Row {
         val sub: String? = null,
         val art: String? = null,
         val selected: Boolean = false,
+        /** 아이콘 대신 동그란 사진(채널·계정)의 주소 */
+        val avatar: String? = null,
     ) : Row()
     data class PlaceItem(val place: Place, val recent: Boolean = false) : Row()
     data class FavoriteItem(val slot: FavoriteSlot) : Row()
@@ -85,11 +92,25 @@ sealed class Row {
         val key: String = "",
     ) : Row()
     data class Note(val text: String) : Row()
-    /** 유튜브 영상 (미리보기 + 제목 + 채널). 누르면 폰 유튜브 앱에서 믹스로, 길게 누르면 메뉴 */
-    data class VideoItem(val video: TubeVideo) : Row()
+    /**
+     * 유튜브 동영상 큰 카드 (16:9 미리보기 · 길이 · 굵은 제목 두 줄 · [meta] = '채널 · 조회수 · 언제').
+     * 누르면 이 동영상부터 [queue] 를 이어서, 길게 누르면 메뉴
+     */
+    data class VideoCard(val video: TubeVideo, val meta: String, val queue: Queue) : Row()
+    /** 채널 한 줄 (동그란 사진 · 이름 · [sub] = 구독자) */
+    data class ChannelItem(val channel: TubeChannel, val sub: String?) : Row()
+    /** 재생목록 한 줄 (미리보기 · 제목 · [sub] = '채널 · N개'). [own] = 내 재생목록 */
+    data class PlaylistItem(val playlist: TubePlaylist, val sub: String?, val own: Boolean = false) : Row()
+    /** 불러오는 동안 동영상 카드 자리 */
+    data class Skeleton(val n: Int) : Row()
+    /** 로그인 코드 (크게) + 폰에서 열 주소 */
+    data class Code(val code: String, val url: String) : Row()
+    /** 나란히 놓인 작은 버튼들 (누르면 같은 id 의 [Action] 처럼) */
+    data class Chips(val items: List<Chip>) : Row()
+    data class Chip(val id: String, @param:DrawableRes val icon: Int, val text: String)
 }
 
-/** 목록 모양: 지도(기본) · 유튜브 음악(유튜브 뮤직처럼 — 큰 글씨·흰 주 버튼·어두운 회색 알약·정사각 곡 그림) */
+/** 목록 모양: 지도(기본) · 유튜브(큰 글씨·흰 주 버튼·어두운 회색 알약·16:9 동영상 카드) */
 enum class Look { MAP, TUBE }
 
 /**
@@ -126,7 +147,12 @@ class RowAdapter(
         is Row.OptionCard -> R.layout.item_route_option
         is Row.Step -> R.layout.item_step
         is Row.Note -> if (look == Look.TUBE) R.layout.item_tube_note else R.layout.item_note
-        is Row.VideoItem -> R.layout.item_video
+        is Row.VideoCard -> R.layout.item_tube_card
+        is Row.ChannelItem -> R.layout.item_tube_channel
+        is Row.PlaylistItem -> R.layout.item_tube_playlist
+        is Row.Skeleton -> R.layout.item_tube_skeleton
+        is Row.Code -> R.layout.item_tube_code
+        is Row.Chips -> R.layout.item_tube_chips
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): RecyclerView.ViewHolder =
@@ -139,6 +165,7 @@ class RowAdapter(
                 v.text(R.id.title).text = row.title
                 v.text(R.id.subtitle).show(row.subtitle)
                 v.findViewById<ImageView>(R.id.art)?.art(row.art)
+                v.findViewById<ImageView>(R.id.avatar)?.picture(row.avatar)
                 v.setOnClickListener(null)
                 v.isClickable = false
             }
@@ -256,50 +283,94 @@ class RowAdapter(
             is Row.Note -> {
                 (v as TextView).text = row.text
             }
-            is Row.VideoItem -> bindVideo(v, row)
+            is Row.VideoCard -> bindCard(v, row)
+            is Row.ChannelItem -> {
+                v.findViewById<ImageView>(R.id.avatar).picture(row.channel.thumb, round = true, keepSpace = true)
+                v.text(R.id.title).text = row.channel.title
+                v.text(R.id.sub).show(row.sub)
+                v.contentDescription = listOfNotNull(row.channel.title, row.sub).joinToString(", ")
+                v.setOnClickListener { onClick(row) }
+            }
+            is Row.PlaylistItem -> {
+                v.findViewById<ImageView>(R.id.thumb).picture(row.playlist.thumb, round = false, keepSpace = true)
+                v.text(R.id.title).text = row.playlist.title
+                v.text(R.id.sub).show(row.sub)
+                v.contentDescription = listOfNotNull(v.context.getString(R.string.tube_playlist), row.playlist.title, row.sub).joinToString(", ")
+                v.setOnClickListener { onClick(row) }
+            }
+            is Row.Skeleton -> {
+                v.setOnClickListener(null)
+                v.isClickable = false
+            }
+            is Row.Code -> {
+                v.text(R.id.code).text = row.code
+                v.text(R.id.url).text = row.url
+                // 읽어 주기는 한 글자씩 (대소문자 그대로 넣어야 하는 코드)
+                v.contentDescription = row.url + ", " + row.code.toList().joinToString(" ")
+            }
+            is Row.Chips -> bindChips(v as ViewGroup, row)
         }
     }
 
-    /** 곡 한 줄 — 정사각 곡 그림 + 굵은 제목 + 회색 채널(길면 줄임) · 오른쪽에 길이 (생방송이면 빨간 LIVE) */
-    private fun bindVideo(v: View, row: Row.VideoItem) {
+    /**
+     * 동영상 카드 — 16:9 미리보기(480 크기, 위아래 검은 띠는 잘라 냄) + 오른쪽 아래 길이(생방송이면 빨간 LIVE)
+     * + 굵은 제목 + '채널 · 조회수 · 언제'
+     */
+    private fun bindCard(v: View, row: Row.VideoCard) {
         val video = row.video
-        v.findViewById<ImageView>(R.id.thumb).art(video.id)
+        v.findViewById<ImageView>(R.id.thumb).apply {
+            clipToOutline = true
+            TubeThumbs.into(this, TubeLinks.thumbnail(video.id, big = true))
+        }
         val time = video.durationSec?.let { TubeText.clock(it) }
         val live = if (video.live) v.context.getString(R.string.tube_live) else null
-        v.text(R.id.title).text = video.title
-        v.text(R.id.meta).text = video.channel
-        v.text(R.id.time).apply {
+        v.text(R.id.badge).apply {
             when {
                 live != null -> {
                     visibility = View.VISIBLE
                     text = live
-                    setTextColor(color(v, R.color.tube_live))
-                    setTypeface(null, Typeface.BOLD)
+                    setBackgroundResource(R.drawable.bg_tube_badge_live)
                 }
                 time != null -> {
                     visibility = View.VISIBLE
                     text = time
-                    setTextColor(color(v, R.color.tube_dim))
-                    setTypeface(null, Typeface.NORMAL)
+                    setBackgroundResource(R.drawable.bg_tube_badge)
                 }
                 else -> visibility = View.GONE
             }
         }
-        // 채널도 길이도 없으면 둘째 줄을 비워 두지 않는다
-        (v.text(R.id.meta).parent as View).visibility = if (video.channel.isBlank() && time == null && live == null) View.GONE else View.VISIBLE
-        v.contentDescription = listOfNotNull(video.title, video.channel.ifBlank { null }, time, live).joinToString(", ")
+        v.text(R.id.title).text = video.title
+        v.text(R.id.meta).show(row.meta)
+        v.contentDescription = listOfNotNull(video.title, row.meta.ifBlank { null }, time, live).joinToString(", ")
         v.setOnClickListener { onClick(row) }
         v.longClick(row)
     }
 
-    /** 유튜브 화면 버튼 — 주 버튼은 흰 알약·검은 글자, 나머지는 어두운 회색 알약·흰 글자. 곡 그림이 있으면 아이콘 대신 */
+    /** 나란히 놓인 작은 버튼들 — 누르면 같은 id 의 버튼처럼 */
+    private fun bindChips(group: ViewGroup, row: Row.Chips) {
+        group.removeAllViews()
+        val inflater = LayoutInflater.from(group.context)
+        row.items.forEach { chip ->
+            val item = inflater.inflate(R.layout.item_tube_chip, group, false)
+            item.findViewById<ImageView>(R.id.icon).setImageResource(chip.icon)
+            item.text(R.id.text).text = chip.text
+            item.contentDescription = chip.text
+            item.setOnClickListener { onClick(Row.Action(chip.id, chip.icon, chip.text)) }
+            group.addView(item)
+        }
+    }
+
+    /** 유튜브 화면 버튼 — 주 버튼은 흰 알약·검은 글자, 나머지는 어두운 회색 알약·흰 글자. 그림(동영상·채널 사진)이 있으면 아이콘 대신 */
     private fun bindTubeAction(v: View, row: Row.Action) {
         v.setBackgroundResource(if (row.accent) R.drawable.bg_tube_primary else R.drawable.bg_tube_button)
         val fg = color(v, if (row.accent) R.color.tube_on_primary else R.color.text_primary)
         val icon = v.findViewById<ImageView>(R.id.icon)
         val art = v.findViewById<ImageView>(R.id.art)
-        art.art(row.art)
-        if (row.art != null) {
+        if (row.avatar != null) art.picture(row.avatar, round = true) else {
+            art.setBackgroundResource(R.drawable.bg_tube_art)
+            art.art(row.art)
+        }
+        if (row.art != null || row.avatar != null) {
             icon.visibility = View.GONE
         } else {
             icon.visibility = View.VISIBLE
@@ -321,7 +392,7 @@ class RowAdapter(
         v.setOnClickListener { onClick(row) }
     }
 
-    /** 곡 그림 칸: [id] 영상의 미리보기를 정사각으로(가운데) 넣는다. 없으면 숨기고, 늦게 오는 예전 그림도 안 붙게 */
+    /** 동영상 그림 칸: [id] 영상의 미리보기를 칸 모양대로(가운데) 넣는다. 없으면 숨기고, 늦게 오는 예전 그림도 안 붙게 */
     private fun ImageView.art(id: String?) {
         if (id == null) {
             visibility = View.GONE
@@ -331,7 +402,23 @@ class RowAdapter(
         }
         visibility = View.VISIBLE
         clipToOutline = true   // 둥근 모서리 (배경 모양대로 자르기)
-        TubeThumbs.into(this, TubeLinks.thumbnail(id))
+        TubeThumbs.into(this, TubeLinks.thumbnail(id, big = true))
+    }
+
+    /**
+     * 주소로 받는 그림 (채널 사진·재생목록 미리보기). [round] = 동그랗게. 주소가 없으면 숨기거나([keepSpace] 면 회색 자리만)
+     */
+    private fun ImageView.picture(url: String?, round: Boolean = true, keepSpace: Boolean = false) {
+        if (round) setBackgroundResource(R.drawable.bg_tube_avatar)
+        clipToOutline = true
+        if (url == null) {
+            visibility = if (keepSpace) View.VISIBLE else View.GONE
+            setTag(R.id.thumb, null)
+            setImageDrawable(null)
+            return
+        }
+        visibility = View.VISIBLE
+        TubeThumbs.into(this, url, circle = round)
     }
 
     private fun bindTransit(v: View, row: Row.TransitCard) {

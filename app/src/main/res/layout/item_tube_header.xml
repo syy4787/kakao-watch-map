@@ -9,13 +9,24 @@
     android:paddingTop="8dp"
     android:paddingBottom="8dp">
 
-    <!-- 버튼이 첫 화면에 보이도록 너무 크지 않게 -->
+    <!-- 동영상 메뉴: 그 동영상의 16:9 그림 (버튼이 첫 화면에 보이도록 너무 크지 않게) -->
     <ImageView
         android:id="@+id/art"
-        android:layout_width="60dp"
-        android:layout_height="60dp"
+        android:layout_width="136dp"
+        android:layout_height="77dp"
         android:layout_marginBottom="8dp"
         android:background="@drawable/bg_tube_art_big"
+        android:importantForAccessibility="no"
+        android:scaleType="centerCrop"
+        android:visibility="gone" />
+
+    <!-- 채널·계정: 동그란 사진 -->
+    <ImageView
+        android:id="@+id/avatar"
+        android:layout_width="64dp"
+        android:layout_height="64dp"
+        android:layout_marginBottom="8dp"
+        android:background="@drawable/bg_tube_avatar"
         android:importantForAccessibility="no"
         android:scaleType="centerCrop"
         android:visibility="gone" />

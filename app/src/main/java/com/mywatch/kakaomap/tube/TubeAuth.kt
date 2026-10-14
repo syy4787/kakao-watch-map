@@ -149,8 +149,15 @@ class TubeAuth(
     }
 
     /** 로그아웃: 워치에서 먼저 지우고(인터넷이 없어도), 구글에 접근 권한 철회를 보낸다 (정책 III.D.2) */
-    fun signOut() {
-        val t = synchronized(this) { store.load().also { store.clear() } } ?: return
+    fun signOut() = revoke(forget())
+
+    /** 워치에서 토큰을 지운다 (바로 — 화면이 곧장 로그아웃된 모습이 되게). 지운 토큰을 돌려준다 → [revoke] */
+    @Synchronized
+    fun forget(): Tokens? = store.load().also { store.clear() }
+
+    /** 구글에 접근 권한 철회 (네트워크 — 백그라운드에서). 실패해도 그만 */
+    fun revoke(t: Tokens?) {
+        if (t == null) return
         try {
             post(REVOKE, mapOf("token" to t.refresh))
         } catch (e: Exception) {

@@ -16,10 +16,9 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 
 /**
- * 워치에서 바로 듣기: 워치의 인터넷 앱(삼성 인터넷)으로 둥근 화면용 재생 화면(web/tube, GitHub Pages)을 연다.
+ * 워치 재생 화면(web/tube, GitHub Pages)의 주소와 닿는지 확인, 그리고 앱 안 엔진이 안 될 때 워치 인터넷 앱(삼성 인터넷)으로 여는 링크.
  * 재생은 그 화면 안의 유튜브 공식 플레이어(임베드)가 한다 — 우리 앱이 영상·소리를 직접 받지 않는다 (유튜브 약관).
- * 삼성 인터넷으로 유튜브 사이트를 그대로 열면 폰 화면용이라 둥근 화면 밖으로 삐져나가서, 우리 화면 안에 플레이어만 넣었다.
- * 워치에 링크를 열 앱이 없거나 재생 화면에 닿지 못하면 지금처럼 폰 유튜브로 보낸다.
+ * 재생 화면에 닿지 못하면 폰 유튜브로 보낸다.
  */
 object WatchPlayer {
 
@@ -63,10 +62,10 @@ object WatchPlayer {
     /** 재생 화면 주소의 바탕 (앱 안 재생 화면이 제 주소인지 확인할 때) */
     fun pageBase(): String? = base
 
-    /** 이 곡을 워치 재생 화면으로 여는 링크. 저장소를 모르면 null */
-    fun intent(context: Context, video: TubeVideo, mix: Boolean, nowMs: Long = System.currentTimeMillis()): Intent? {
+    /** 이 동영상(과 [queue])을 워치 인터넷 앱의 재생 화면으로 여는 링크. 저장소를 모르면 null */
+    fun intent(context: Context, video: TubeVideo, queue: Queue, nowMs: Long = System.currentTimeMillis()): Intent? {
         val b = base ?: return null
-        return link(context, TubeLinks.playerUrl(b, video, mix, nonce = nowMs))
+        return link(context, TubeLinks.playerUrl(b, video, queue, nonce = nowMs))
     }
 
     private fun link(context: Context, url: String): Intent = Intent(Intent.ACTION_VIEW, url.toUri())

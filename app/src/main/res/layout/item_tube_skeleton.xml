@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 불러오는 동안 동영상 카드 자리 (회색 모양만) -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_marginTop="6dp"
+    android:layout_marginBottom="6dp"
+    android:importantForAccessibility="noHideDescendants"
+    android:orientation="vertical"
+    android:paddingBottom="8dp">
+
+    <com.mywatch.kakaomap.ui.RatioFrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@drawable/bg_tube_thumb" />
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="14dp"
+        android:layout_marginHorizontal="6dp"
+        android:layout_marginTop="9dp"
+        android:background="@drawable/bg_tube_art" />
+
+    <View
+        android:layout_width="110dp"
+        android:layout_height="12dp"
+        android:layout_marginStart="6dp"
+        android:layout_marginTop="6dp"
+        android:background="@drawable/bg_tube_art" />
+</LinearLayout>

@@ -21,7 +21,7 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 
-/** 검색어·들은 곡 기록 (워치 안에만 저장) */
+/** 검색어·본 동영상 기록 (워치 안에만 저장) */
 class TubeState(context: Context) {
 
     private val prefs = context.applicationContext.getSharedPreferences("tube", Context.MODE_PRIVATE)
@@ -55,18 +55,14 @@ class TubeState(context: Context) {
         prefs.edit { putString(K_PLAYED, PlayedHistory.encode(played(nowMs).filterNot { it.video.id == id })) }
     }
 
-    /** '기록 지우기' — 들은 곡·검색어만 (고른 '듣는 곳'은 설정이라 그대로) */
+    /** '기록 지우기' — 본 동영상·검색어 (예전 버전의 '듣는 곳' 설정도 함께 정리) */
     fun clear() = synchronized(LOCK) {
         prefs.edit {
             remove(K_SEARCHES)
             remove(K_PLAYED)
+            remove(K_TARGET)
         }
     }
-
-    /** 사용자가 고른 '듣는 곳' (안 골랐으면 null — 그땐 프리미엄이 되는 곳, [PlayTarget.choose]) */
-    var target: PlayTarget?
-        get() = PlayTarget.of(prefs.getString(K_TARGET, null))
-        set(value) = prefs.edit { if (value == null) remove(K_TARGET) else putString(K_TARGET, value.key) }
 
     /** 오늘(유튜브 기준 날짜) 유튜브 검색 한도를 다 썼으면 카카오 검색만 쓴다 — 실패할 요청을 계속 보내지 않게 */
     fun youtubeBlocked(day: String = quotaDay(Instant.now()).toString()): Boolean = prefs.getString(K_YT_BLOCKED, null) == day
@@ -77,6 +73,7 @@ class TubeState(context: Context) {
         private const val K_SEARCHES = "searches"
         private const val K_PLAYED = "played"
         private const val K_YT_BLOCKED = "youtube_blocked_day"
+        /** 예전 버전의 '듣는 곳' (지금은 쓰지 않음 — 기록 지우기 때 정리) */
         private const val K_TARGET = "target"
         private val LOCK = Any()
 

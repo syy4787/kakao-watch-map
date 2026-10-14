@@ -32,8 +32,8 @@ import com.mywatch.kakaomap.ui.TubeActivity
 import kotlin.time.Duration.Companion.hours
 
 /**
- * 타일 '유튜브 음악': 노래 검색(말로 바로) · 믹스 이어 듣기(최근 곡으로 폰 유튜브에서 믹스) · 열기.
- * 곡을 틀 때와 하루에 한 번만 다시 그린다 (배터리 거의 0).
+ * 타일 '유튜브': 검색(말로 바로) · 믹스 이어 듣기(최근 동영상으로 믹스 — 앱 안 재생 화면) · 열기.
+ * 동영상을 틀 때와 하루에 한 번만 다시 그린다 (배터리 거의 0).
  */
 class TubeTileService : Material3TileService() {
 

@@ -6,6 +6,7 @@ import android.util.LruCache
 import android.widget.ImageView
 import androidx.annotation.MainThread
 import androidx.annotation.VisibleForTesting
+import androidx.core.graphics.drawable.RoundedBitmapDrawableFactory
 import com.mywatch.kakaomap.R
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -22,8 +23,8 @@ import java.util.Collections
 import java.util.concurrent.ConcurrentHashMap
 
 /**
- * 유튜브 미리보기 그림을 받아 목록에 넣는다 (라이브러리 없이).
- * 워치는 블루투스로 폰 인터넷을 빌려 쓰므로 작은 미리보기(320×180, RGB_565)를 받아 메모리에만 잠깐 둔다 — 파일로 남기지 않는다.
+ * 유튜브 미리보기 그림·채널 사진을 받아 목록에 넣는다 (라이브러리 없이).
+ * 카드 너비(약 450px)에 맞는 480×360 미리보기를 RGB_565 로 풀어 메모리에만 잠깐 둔다 — 파일로 남기지 않는다.
  *  · 같은 그림은 한 번만 받고, 목록을 빨리 넘겨 이미 지나간 칸의 그림은 받지 않는다(지금 보이는 칸 먼저)
  *  · 연결이 잠깐 끊겨 못 받은 그림은 다음에 다시 시도, 없는 그림(404)·깨진 그림만 다시 받지 않는다
  *  · 칸(화면)은 약하게만 잡아 닫힌 화면이 메모리에 남지 않게
@@ -36,13 +37,20 @@ object TubeThumbs {
     var enabled = true
 
     private const val MAX_BYTES = 400 * 1024
-    private val cache = object : LruCache<String, Bitmap>(4 * 1024 * 1024) {
+    /**
+     * 그림 하나가 약 340KB(480×360×2) — 앱이 쓸 수 있는 메모리의 1/8 (4~24MB, 그림 12~70개)만큼 기억해
+     * 목록을 위로 되돌려도 다시 받지 않게
+     */
+    private val cache = object : LruCache<String, Bitmap>(cacheBytes(Runtime.getRuntime().maxMemory())) {
         override fun sizeOf(key: String, value: Bitmap) = value.byteCount
     }
+
+    @VisibleForTesting
+    internal fun cacheBytes(maxHeap: Long): Int = (maxHeap / 8).coerceIn(4L shl 20, 24L shl 20).toInt()
     /** 없거나 깨진 그림 (앱이 살아 있는 동안 다시 받지 않음) */
     private val broken: MutableSet<String> = Collections.newSetFromMap(ConcurrentHashMap())
-    /** 받는 중인 그림 → 그 그림을 기다리는 칸들 (메인 스레드에서만 만짐) */
-    private val waiting = HashMap<String, MutableList<WeakReference<ImageView>>>()
+    /** 받는 중인 그림 → 그 그림을 기다리는 칸들과 동그랗게 넣을지 (메인 스레드에서만 만짐) */
+    private val waiting = HashMap<String, MutableList<Pair<WeakReference<ImageView>, Boolean>>>()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val io = Dispatchers.IO.limitedParallelism(3)
 
@@ -56,21 +64,22 @@ object TubeThumbs {
         object Skipped : Fetch()
     }
 
+    /** [circle] = 동그랗게 (채널 사진) — 그림 자체를 동그랗게 그려서 어디서나 동그랗다 */
     @MainThread
-    fun into(view: ImageView, url: String) {
+    fun into(view: ImageView, url: String, circle: Boolean = false) {
         view.setTag(R.id.thumb, url)
         val hit = cache.get(url)
         if (hit != null) {
-            view.setImageBitmap(hit)
+            view.put(hit, circle)
             return
         }
         view.setImageDrawable(null)
         if (!enabled || url in broken) return
         waiting[url]?.let { views ->
-            views += WeakReference(view)   // 이미 받는 중 — 끝나면 같이 넣는다
+            views += WeakReference(view) to circle   // 이미 받는 중 — 끝나면 같이 넣는다
             return
         }
-        waiting[url] = mutableListOf(WeakReference(view))
+        waiting[url] = mutableListOf(WeakReference(view) to circle)
         scope.launch {
             val result = withContext(io) {
                 // 차례를 기다리는 사이 칸이 지나갔으면 받지 않는다
@@ -80,7 +89,7 @@ object TubeThumbs {
             when (result) {
                 is Fetch.Ok -> {
                     cache.put(url, result.bitmap)
-                    views.forEach { ref -> ref.get()?.takeIf { it.getTag(R.id.thumb) == url }?.setImageBitmap(result.bitmap) }
+                    views.forEach { (ref, circle) -> ref.get()?.takeIf { it.getTag(R.id.thumb) == url }?.put(result.bitmap, circle) }
                 }
                 Fetch.Broken -> broken += url
                 Fetch.Retry, Fetch.Skipped -> Unit
@@ -94,8 +103,16 @@ object TubeThumbs {
         cache.put(url, bitmap)
     }
 
+    private fun ImageView.put(bitmap: Bitmap, circle: Boolean) {
+        if (circle) {
+            setImageDrawable(RoundedBitmapDrawableFactory.create(resources, bitmap).apply { isCircular = true })
+        } else {
+            setImageBitmap(bitmap)
+        }
+    }
+
     @MainThread
-    private fun wanted(url: String): Boolean = waiting[url]?.any { it.get()?.getTag(R.id.thumb) == url } == true
+    private fun wanted(url: String): Boolean = waiting[url]?.any { it.first.get()?.getTag(R.id.thumb) == url } == true
 
     private fun fetch(url: String): Fetch = try {
         // disconnect() 하지 않는다 — 다 읽고 닫으면 연결을 다음 그림에 다시 쓴다(블루투스로 매번 새로 잇는 것보다 빠름)
@@ -115,7 +132,7 @@ object TubeThumbs {
             else -> {
                 val bytes = conn.inputStream.use(::readLimited)
                 val opts = BitmapFactory.Options().apply {
-                    // 320×180 그대로 — 가운데를 정사각(180×180)으로 잘라 곡 그림 칸(50~60dp ≈ 106~128px)에 넣어도 흐리지 않게
+                    // 줄이지 않는다 (카드가 화면 너비만 해서) — 대신 RGB_565 로 절반 크기
                     inSampleSize = 1
                     inPreferredConfig = Bitmap.Config.RGB_565
                 }

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 동영상 카드의 16:9 미리보기 자리 (유튜브 앱처럼 둥근 모서리) — 그림이 오기 전에도 모양이 보이게 -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <solid android:color="@color/tube_art" />
+    <corners android:radius="12dp" />
+</shape>

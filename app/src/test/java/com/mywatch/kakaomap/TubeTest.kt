@@ -1,6 +1,7 @@
 package com.mywatch.kakaomap
 
 import com.mywatch.kakaomap.tube.PlayedHistory
+import com.mywatch.kakaomap.tube.Queue
 import com.mywatch.kakaomap.tube.SearchHistory
 import com.mywatch.kakaomap.tube.TubeLinks
 import com.mywatch.kakaomap.tube.TubeParsers
@@ -70,22 +71,22 @@ class TubeTest {
         val song = TubeVideo("BzYnNdJhZQw", "밤편지 & Night", "IU 아이유")
         assertEquals(
             base + "#v=BzYnNdJhZQw&mix=1&t=%EB%B0%A4%ED%8E%B8%EC%A7%80%20%26%20Night&c=IU%20%EC%95%84%EC%9D%B4%EC%9C%A0",
-            TubeLinks.playerUrl(base, song, mix = true),
+            TubeLinks.playerUrl(base, song, Queue.Mix),
         )
-        assertEquals(base + "#v=BzYnNdJhZQw&t=%EB%B0%A4%ED%8E%B8%EC%A7%80%20%26%20Night&c=IU%20%EC%95%84%EC%9D%B4%EC%9C%A0", TubeLinks.playerUrl(base, song, mix = false))
+        assertEquals(base + "#v=BzYnNdJhZQw&t=%EB%B0%A4%ED%8E%B8%EC%A7%80%20%26%20Night&c=IU%20%EC%95%84%EC%9D%B4%EC%9C%A0", TubeLinks.playerUrl(base, song, Queue.Single))
         // 제목·채널을 모르면 빼고, 너무 긴 제목은 잘라 주소가 끝없이 길어지지 않게
-        assertEquals(base + "#v=BzYnNdJhZQw&mix=1", TubeLinks.playerUrl(base, TubeVideo("BzYnNdJhZQw", " ", ""), mix = true))
-        val long = TubeLinks.playerUrl(base, TubeVideo("BzYnNdJhZQw", "가".repeat(500), "나".repeat(500)), mix = true)
+        assertEquals(base + "#v=BzYnNdJhZQw&mix=1", TubeLinks.playerUrl(base, TubeVideo("BzYnNdJhZQw", " ", ""), Queue.Mix))
+        val long = TubeLinks.playerUrl(base, TubeVideo("BzYnNdJhZQw", "가".repeat(500), "나".repeat(500)), Queue.Mix)
         assertTrue(long.length < 1_500)
         assertFalse(long.substringBefore('#').contains("BzYnNdJhZQw"))
         // 이모지(두 칸짜리 글자)가 잘리는 자리에 걸려도 반쪽('?')이 남지 않는다
-        val emoji = TubeLinks.playerUrl(base, TubeVideo("BzYnNdJhZQw", "가".repeat(99) + "🎵🎵", "📻".repeat(50)), mix = false)
+        val emoji = TubeLinks.playerUrl(base, TubeVideo("BzYnNdJhZQw", "가".repeat(99) + "🎵🎵", "📻".repeat(50)), Queue.Single)
         val t = java.net.URLDecoder.decode(emoji.substringAfter("&t=").substringBefore('&'), "UTF-8")
         val c = java.net.URLDecoder.decode(emoji.substringAfter("&c=").substringBefore('&'), "UTF-8")
         assertEquals("가".repeat(99) + "🎵", t)
         assertEquals("📻".repeat(40), c)
         // 같은 곡을 다시 골라도 주소가 달라지게 (같은 탭에서 다시 틀도록)
-        assertEquals(base + "#v=BzYnNdJhZQw&mix=1&n=1700000000000", TubeLinks.playerUrl(base, TubeVideo("BzYnNdJhZQw", "", ""), mix = true, nonce = 1_700_000_000_000))
+        assertEquals(base + "#v=BzYnNdJhZQw&mix=1&n=1700000000000", TubeLinks.playerUrl(base, TubeVideo("BzYnNdJhZQw", "", ""), Queue.Mix, nonce = 1_700_000_000_000))
     }
 
     @Test

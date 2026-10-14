@@ -27,4 +27,6 @@
     <color name="tube_on_primary">#0F0F0F</color>
     <color name="tube_on_primary_dim">#505050</color>
     <color name="tube_live">#FF5A52</color>
+    <!-- 유튜브 앱의 칩·눌러 고르는 작은 버튼 -->
+    <color name="tube_chip">#272727</color>
 </resources>

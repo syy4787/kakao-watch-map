@@ -9,6 +9,7 @@ import com.mywatch.kakaomap.ui.Row
 import com.mywatch.kakaomap.ui.RowAdapter
 import com.mywatch.kakaomap.ui.TubeActivity
 import com.mywatch.kakaomap.ui.TubeRows
+import com.mywatch.kakaomap.ui.tube.Slot
 import com.mywatch.kakaomap.ui.TubeThumbs
 import com.mywatch.kakaomap.update.FakeReleaseServer
 import com.mywatch.kakaomap.update.UpdateActivity
@@ -46,9 +47,12 @@ class TubeUpdateTest {
 
     @Test
     fun youtubeHomeShowsTheUpdateButtonFirstOnlyWhenANewVersionIsOut() {
-        val withUpdate = TubeRows.home(context, emptyList(), emptyList(), update = true)
+        fun home(update: Boolean) = TubeRows.home(
+            context, TubeRows.HomeData(emptyList(), emptyList(), null, Slot(), Slot(), TubeRows.Account(configured = false, signedIn = false), update, 0L),
+        )
+        val withUpdate = home(update = true)
         assertEquals("새 버전 업데이트", withUpdate.filterIsInstance<Row.Action>().first().text)
-        val without = TubeRows.home(context, emptyList(), emptyList(), update = false)
+        val without = home(update = false)
         assertTrue(without.none { it is Row.Action && it.text == "새 버전 업데이트" })
     }
 
