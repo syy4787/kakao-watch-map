@@ -169,6 +169,11 @@
 ## Part Z — Ship
 
 ### Task Z1: Verify and release
-- [ ] Full unit tests, lint (0 errors), render pass (`-Prender`) reviewed by eye for the changed screens, tube simulator (`node sim.mjs --retry=1` + 30 random users).
-- [ ] Independent read-only reviews of the full diff (3 parallel reviewers: update/CI, map, YouTube/player); fix verified findings.
-- [ ] README/privacy updates (delta updates, new behaviours). Fast-forward `main`, push; verify release assets (APKs, `.kwdelta`, update.json patches + sizes), apply the published patch to the previous APK locally and compare SHA-256; Pages + simulator gate green.
+- [x] Full unit tests (524, 2 skipped, 0 failed), lint (0 errors — only old style/dependency warnings), render pass (`-Prender`, new: real search screen with 내 주변 → kinds → toilets, '놓칠 수 있어요' cards at font 1.3, login phone steps) reviewed by eye, tube simulator 66/66 (`--retry=1`) + 30/30 random users.
+- [x] Independent read-only reviews of the full diff (3 parallel reviewers: update/CI, map, YouTube/player); verified findings fixed test-first:
+  - update/CI (236f5d6): partial patch kept on outage, compare-based release gating, Wi-Fi patience, cancelled manual update → worker.
+  - map: interrupted guidance offered after process-death restore and before the init-error return, forgotten on arrival (be5ea84); waiting at a stop/platform is not a stall, platform uses cell/Wi-Fi (fce54c7); clock cards re-bound (3636b42); stall baseline per route version (2719f66); nearby uses ≤10/15-min location (b1117e9).
+  - YouTube: pending revokes sent before a new sign-in, replaced token not revoked, per-entry encrypted storage (cea6ecc); thumbnails halve on UI_HIDDEN (c7341a1); no player start after leaving, play-all waits for in-flight more (6297b1f).
+- [x] Second review of the fixes (1 reviewer) → 7 findings, all fixed: minute refresh reaches walk/bike/city lists (48d9630); screen-off defers play until looked at again, Home drops it and the tile shortcut (e9bd373); 2-h wait cap survives GPS blips and skips timetabled trains (cf1f303); revoke storage returns readable entries, keeps Android-transient keystore errors, one sender at a time (09196e5); thumbnails cleared when hidden during guidance (d8d7ca3).
+- [x] README/privacy updates (be2073d).
+- [ ] Fast-forward `main`, push; verify release assets (APKs, `.kwdelta`, update.json patches + sizes), apply the published patch to the previous APK locally and compare SHA-256; Pages + simulator gate green.
