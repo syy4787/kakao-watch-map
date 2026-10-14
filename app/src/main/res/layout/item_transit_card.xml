@@ -24,12 +24,13 @@
         android:textColor="@color/text_primary"
         android:textSize="20sp" />
 
+    <!-- 요금 · 환승 · 도보 — 요금이 '1,500~3,150원'처럼 길면 두 줄로 (항목은 코드에서 붙은 빈칸으로 묶어 통째로 줄바꿈) -->
     <TextView
         android:id="@+id/meta"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:ellipsize="end"
-        android:maxLines="1"
+        android:maxLines="2"
         android:textColor="@color/text_secondary"
         android:textSize="12sp" />
 

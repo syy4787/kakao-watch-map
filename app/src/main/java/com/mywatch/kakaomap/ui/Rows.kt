@@ -424,11 +424,12 @@ class RowAdapter(
     private fun bindTransit(v: View, row: Row.TransitCard) {
         val r = row.route
         v.text(R.id.time).text = timeAndArrival(v, r.totalTimeSec)
+        // 항목 안의 빈칸은 붙은 빈칸 — 줄이 넘치면 '·' 에서만 갈라진다 ('도보 / 12분' 처럼 갈라지지 않게)
         v.text(R.id.meta).text = listOfNotNull(
             Format.fare(r),
             Format.transfers(r.transfers),
             "도보 ${Format.duration(r.walkTimeSec)}",
-        ).joinToString(" · ")
+        ).joinToString(" · ") { it.replace(' ', '\u00A0') }
         v.findViewById<SegmentBarView>(R.id.bar).setRoute(r)
         // 기차·고속버스가 있으면 그 출발 시각("KTX 105 · 대전역 09:58 출발"), 없으면 첫 버스·지하철
         v.text(R.id.first).text = TransitGuide.headline(r) ?: "도보로 이동"
