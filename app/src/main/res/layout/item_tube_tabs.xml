@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 맨 위 탭 (유튜브 앱 아래 탭처럼): 홈 · Shorts · 구독 · 나 — 아이콘 + 작은 글자, 고른 탭은 흰색 (색은 코드에서 고름 표시로) -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_marginTop="2dp"
+    android:layout_marginBottom="4dp"
+    android:orientation="horizontal">
+
+    <LinearLayout
+        android:id="@+id/tab_home"
+        style="@style/TubeTab">
+
+        <ImageView
+            style="@style/TubeTabIcon"
+            android:src="@drawable/ic_home" />
+
+        <TextView
+            style="@style/TubeTabLabel"
+            android:text="@string/tube_tab_home" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/tab_shorts"
+        style="@style/TubeTab">
+
+        <ImageView
+            style="@style/TubeTabIcon"
+            android:src="@drawable/ic_shorts" />
+
+        <TextView
+            style="@style/TubeTabLabel"
+            android:text="@string/tube_tab_shorts" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/tab_subs"
+        style="@style/TubeTab">
+
+        <ImageView
+            style="@style/TubeTabIcon"
+            android:src="@drawable/ic_subscriptions" />
+
+        <TextView
+            style="@style/TubeTabLabel"
+            android:text="@string/tube_tab_subs" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/tab_you"
+        style="@style/TubeTab">
+
+        <ImageView
+            style="@style/TubeTabIcon"
+            android:src="@drawable/ic_person" />
+
+        <TextView
+            style="@style/TubeTabLabel"
+            android:text="@string/tube_tab_you" />
+    </LinearLayout>
+</LinearLayout>

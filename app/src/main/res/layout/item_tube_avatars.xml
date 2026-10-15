@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 구독 화면 위의 채널 사진 줄 (가로로 넘김) — 칸은 코드에서 채운다 -->
+<HorizontalScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/avatar_scroll"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_marginTop="2dp"
+    android:layout_marginBottom="4dp"
+    android:fadingEdgeLength="18dp"
+    android:overScrollMode="never"
+    android:requiresFadingEdge="horizontal"
+    android:scrollbars="none">
+
+    <LinearLayout
+        android:id="@+id/avatar_row"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal" />
+</HorizontalScrollView>

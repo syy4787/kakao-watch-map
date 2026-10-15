@@ -10,6 +10,7 @@ import android.text.style.StyleSpan
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.widget.HorizontalScrollView
 import android.widget.ImageView
 import android.widget.TextView
 import androidx.annotation.DrawableRes
@@ -33,6 +34,7 @@ import com.mywatch.kakaomap.tube.TubeLinks
 import com.mywatch.kakaomap.tube.TubePlaylist
 import com.mywatch.kakaomap.tube.TubeText
 import com.mywatch.kakaomap.tube.TubeVideo
+import com.mywatch.kakaomap.ui.tube.TubeTab
 
 /** 목록 화면에 들어가는 줄 종류 */
 sealed class Row {
@@ -95,9 +97,9 @@ sealed class Row {
     data class Note(val text: String) : Row()
     /**
      * 유튜브 동영상 큰 카드 (16:9 미리보기 · 길이 · 굵은 제목 두 줄 · [meta] = '채널 · 조회수 · 언제').
-     * 누르면 이 동영상부터 [queue] 를 이어서, 길게 누르면 메뉴
+     * 누르면 이 동영상부터 [queue] 를 이어서, 길게 누르면 메뉴. [badge] = 길이 대신 오른쪽 아래에 (믹스)
      */
-    data class VideoCard(val video: TubeVideo, val meta: String, val queue: Queue) : Row()
+    data class VideoCard(val video: TubeVideo, val meta: String, val queue: Queue, val badge: String? = null) : Row()
     /** 채널 한 줄 (동그란 사진 · 이름 · [sub] = 구독자) */
     data class ChannelItem(val channel: TubeChannel, val sub: String?) : Row()
     /** 재생목록 한 줄 (미리보기 · 제목 · [sub] = '채널 · N개'). [own] = 내 재생목록 */
@@ -109,6 +111,18 @@ sealed class Row {
     /** 나란히 놓인 작은 버튼들 (누르면 같은 id 의 [Action] 처럼) */
     data class Chips(val items: List<Chip>) : Row()
     data class Chip(val id: String, @param:DrawableRes val icon: Int, val text: String)
+    /** 맨 위 탭 (홈 · Shorts · 구독 · 나) — 누르면 Action("tab:<탭>") */
+    data class Tabs(val selected: TubeTab) : Row()
+    /** 가로로 넘기는 칩 줄 — [bar] 줄 이름(넘긴 자리 기억), [chips] (id, 글), [selected] 고른 칩 id. 누르면 Action("chip:<줄>:<칩>") */
+    data class ChipBar(val bar: String, val chips: List<Pair<String, String>>, val selected: String) : Row()
+    /** Shorts 선반: 제목 + 가로로 넘기는 세로 카드. 누르면 [ShortCard] */
+    data class ShortsShelf(val title: String, val videos: List<TubeVideo>) : Row()
+    /** Shorts 격자 한 줄: [list] 의 [index] 번째와 그다음 (없으면 하나만). 누르면 [ShortCard] */
+    data class ShortsPair(val list: List<TubeVideo>, val index: Int) : Row()
+    /** 세로 카드를 누름 — [list] 를 [index] 번째부터 Shorts 재생 화면으로 (줄로 그리지는 않는다) */
+    data class ShortCard(val list: List<TubeVideo>, val index: Int) : Row()
+    /** 채널 사진 줄 (가로로 넘김). 누르면 [ChannelItem], [more] 면 끝에 '전체' (Action(TubeRows.A_SUBS_CHANNELS)) */
+    data class AvatarStrip(val channels: List<TubeChannel>, val more: Boolean) : Row()
 }
 
 /** 목록 모양: 지도(기본) · 유튜브(큰 글씨·흰 주 버튼·어두운 회색 알약·16:9 동영상 카드) */
@@ -132,6 +146,12 @@ internal fun keyOf(row: Row): String = when (row) {
     is Row.Skeleton -> "sk"
     is Row.Code -> "code"
     is Row.Chips -> "chips:" + row.items.joinToString(",") { it.id }
+    is Row.Tabs -> "ttabs"
+    is Row.ChipBar -> "chipbar:" + row.bar
+    is Row.ShortsShelf -> "shelf:" + row.title
+    is Row.ShortsPair -> "pair:" + row.list.getOrNull(row.index)?.id
+    is Row.ShortCard -> "short:" + row.list.getOrNull(row.index)?.id
+    is Row.AvatarStrip -> "avatars"
 }
 
 /** [keyOf] 를 목록 전체에 — 같은 열쇠가 또 나오면 '#2', '#3' … (같은 동영상이 두 구역에 있을 때 등) */
@@ -207,6 +227,12 @@ class RowAdapter(
         is Row.Skeleton -> R.layout.item_tube_skeleton
         is Row.Code -> R.layout.item_tube_code
         is Row.Chips -> R.layout.item_tube_chips
+        is Row.Tabs -> R.layout.item_tube_tabs
+        is Row.ChipBar -> R.layout.item_tube_chipbar
+        is Row.ShortsShelf -> R.layout.item_tube_shelf
+        is Row.ShortsPair -> R.layout.item_tube_pair
+        is Row.ShortCard -> R.layout.item_tube_short
+        is Row.AvatarStrip -> R.layout.item_tube_avatars
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): RecyclerView.ViewHolder =
@@ -363,7 +389,133 @@ class RowAdapter(
                 v.contentDescription = row.url + ", " + row.code.toList().joinToString(" ")
             }
             is Row.Chips -> bindChips(v as ViewGroup, row)
+            is Row.Tabs -> bindTabs(v, row)
+            is Row.ChipBar -> bindChipBar(v as HorizontalScrollView, row)
+            is Row.ShortsShelf -> {
+                v.text(R.id.title).text = row.title
+                val strip = v.findViewById<ViewGroup>(R.id.shelf_row)
+                strip.removeAllViews()
+                val inflater = LayoutInflater.from(v.context)
+                row.videos.forEachIndexed { i, video ->
+                    val card = inflater.inflate(R.layout.item_tube_short, strip, false)
+                    (card.layoutParams as ViewGroup.MarginLayoutParams).marginEnd = (5 * v.resources.displayMetrics.density).toInt()
+                    bindShort(card, row.videos, i)
+                    strip.addView(card)
+                }
+                keepScroll(v.findViewById(R.id.shelf_scroll), "shelf:" + row.title)
+            }
+            is Row.ShortsPair -> {
+                bindShort(v.findViewById(R.id.left), row.list, row.index)
+                val right = v.findViewById<View>(R.id.right)
+                if (row.index + 1 < row.list.size) bindShort(right, row.list, row.index + 1)
+                else right.visibility = View.INVISIBLE
+            }
+            is Row.ShortCard -> bindShort(v, row.list, row.index)
+            is Row.AvatarStrip -> bindAvatars(v as HorizontalScrollView, row)
         }
+    }
+
+    /** 맨 위 탭: 고른 탭은 흰색 + 읽어 주기에 '선택됨' */
+    private fun bindTabs(v: View, row: Row.Tabs) {
+        val tabs = listOf(
+            Triple(R.id.tab_home, TubeTab.HOME, R.string.tube_tab_home),
+            Triple(R.id.tab_shorts, TubeTab.SHORTS, R.string.tube_tab_shorts),
+            Triple(R.id.tab_subs, TubeTab.SUBS, R.string.tube_tab_subs),
+            Triple(R.id.tab_you, TubeTab.YOU, R.string.tube_tab_you),
+        )
+        tabs.forEach { (id, tab, label) ->
+            val t = v.findViewById<View>(id)
+            val name = v.context.getString(label)
+            val on = tab == row.selected
+            t.isSelected = on
+            t.contentDescription = if (on) name + ", " + v.context.getString(R.string.tube_selected) else name
+            t.setOnClickListener { onClick(Row.Action("tab:" + tab.name, 0, name)) }
+        }
+        v.setOnClickListener(null)
+        v.isClickable = false
+    }
+
+    /** 칩 줄: 고른 칩은 흰 바탕 — 넘긴 자리는 줄마다 기억 (다시 그려도 그대로), 처음엔 고른 칩이 보이게 */
+    private fun bindChipBar(scroll: HorizontalScrollView, row: Row.ChipBar) {
+        val strip = scroll.findViewById<ViewGroup>(R.id.chip_row)
+        strip.removeAllViews()
+        val inflater = LayoutInflater.from(scroll.context)
+        var picked: View? = null
+        row.chips.forEach { (id, label) ->
+            val chip = inflater.inflate(R.layout.item_tube_chipbar_chip, strip, false) as TextView
+            val on = id == row.selected
+            chip.text = label
+            chip.isSelected = on
+            chip.contentDescription = if (on) label + ", " + scroll.context.getString(R.string.tube_selected) else label
+            chip.setOnClickListener { onClick(Row.Action("chip:" + row.bar + ":" + id, 0, label)) }
+            strip.addView(chip)
+            if (on) picked = chip
+        }
+        val key = "chipbar:" + row.bar
+        val saved = scrolls[key]
+        keepScroll(scroll, key)
+        if (saved == null) picked?.let { chip -> scroll.post { if (chip.right > scroll.width) scroll.scrollTo(chip.left - chip.width / 2, 0) } }
+    }
+
+    /** Shorts 세로 카드: 9:16 미리보기 + 제목. 누르면 그 자리부터 Shorts 재생 화면, 길게 누르면 메뉴 */
+    private fun bindShort(card: View, list: List<TubeVideo>, index: Int) {
+        val video = list[index]
+        card.visibility = View.VISIBLE
+        card.findViewById<ImageView>(R.id.thumb).apply {
+            clipToOutline = true
+            TubeThumbs.into(this, TubeLinks.thumbnail(video.id, big = true))
+        }
+        card.text(R.id.title).text = video.title
+        card.contentDescription = video.title
+        card.isClickable = true
+        card.setOnClickListener { onClick(Row.ShortCard(list, index)) }
+        val handler = onLongClick
+        if (handler == null) card.setOnLongClickListener(null)
+        else card.setOnLongClickListener { handler(Row.VideoCard(video, video.channel, Queue.Single)); true }
+    }
+
+    /** 채널 사진 줄: 누르면 그 채널, 끝의 '전체'는 구독 채널 모두 */
+    private fun bindAvatars(scroll: HorizontalScrollView, row: Row.AvatarStrip) {
+        val strip = scroll.findViewById<ViewGroup>(R.id.avatar_row)
+        strip.removeAllViews()
+        val inflater = LayoutInflater.from(scroll.context)
+        row.channels.forEach { ch ->
+            val item = inflater.inflate(R.layout.item_tube_avatar, strip, false)
+            item.findViewById<ImageView>(R.id.avatar).picture(ch.thumb, round = true, keepSpace = true)
+            item.text(R.id.name).text = ch.title
+            item.contentDescription = ch.title
+            item.isClickable = true
+            item.setOnClickListener { onClick(Row.ChannelItem(ch, null)) }
+            strip.addView(item)
+        }
+        if (row.more) {
+            val all = scroll.context.getString(R.string.tube_all)
+            val item = inflater.inflate(R.layout.item_tube_avatar, strip, false)
+            item.findViewById<ImageView>(R.id.avatar).apply {
+                setImageDrawable(null)
+                setBackgroundResource(R.drawable.bg_tube_round_more)
+            }
+            item.findViewById<ImageView>(R.id.icon).apply {
+                visibility = View.VISIBLE
+                setImageResource(R.drawable.ic_subscriptions)
+            }
+            item.text(R.id.name).text = all
+            item.contentDescription = all
+            item.isClickable = true
+            item.setOnClickListener { onClick(Row.Action(TubeRows.A_SUBS_CHANNELS, R.drawable.ic_subscriptions, all)) }
+            strip.addView(item)
+        }
+        keepScroll(scroll, "avatars")
+    }
+
+    /** 가로로 넘기는 줄의 넘긴 자리 (줄마다) — 목록을 다시 그려도 보던 칩·카드가 그대로 */
+    private val scrolls = HashMap<String, Int>()
+
+    private fun keepScroll(scroll: HorizontalScrollView, key: String) {
+        scroll.setOnScrollChangeListener(null)
+        val x = scrolls[key] ?: 0
+        if (x > 0) scroll.post { scroll.scrollTo(x, 0) } else scroll.scrollTo(0, 0)
+        scroll.setOnScrollChangeListener { _, sx, _, _, _ -> scrolls[key] = sx }
     }
 
     /**
@@ -380,6 +532,11 @@ class RowAdapter(
         val live = if (video.live) v.context.getString(R.string.tube_live) else null
         v.text(R.id.badge).apply {
             when {
+                row.badge != null -> {
+                    visibility = View.VISIBLE
+                    text = row.badge
+                    setBackgroundResource(R.drawable.bg_tube_badge)
+                }
                 live != null -> {
                     visibility = View.VISIBLE
                     text = live
@@ -395,7 +552,7 @@ class RowAdapter(
         }
         v.text(R.id.title).text = video.title
         v.text(R.id.meta).show(row.meta)
-        v.contentDescription = listOfNotNull(video.title, row.meta.ifBlank { null }, time, live).joinToString(", ")
+        v.contentDescription = listOfNotNull(video.title, row.meta.ifBlank { null }, row.badge ?: time, live).joinToString(", ")
         v.setOnClickListener { onClick(row) }
         v.longClick(row)
     }

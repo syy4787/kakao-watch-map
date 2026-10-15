@@ -42,6 +42,8 @@ object TubeRows {
     const val A_CHART_MUSIC = "chart_music"
     const val A_CHART_POPULAR = "chart_popular"
     const val A_SUBS_MORE = "subs_more"
+    /** 구독 채널 모두 (채널 사진 줄 끝의 '전체') */
+    const val A_SUBS_CHANNELS = "subs_channels"
     const val A_PLAY_ALL = "play_all"
     const val A_PLAY = "play"
     const val A_CHANNEL = "channel"

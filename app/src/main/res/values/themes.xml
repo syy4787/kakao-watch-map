@@ -61,6 +61,40 @@
         <item name="android:importantForAccessibility">no</item>
     </style>
 
+    <!-- 유튜브 맨 위 탭 (홈 · Shorts · 구독 · 나): 넷이 목록 폭을 똑같이 나눠 쓴다. 고른 탭은 흰색(tube_tab_tint) -->
+    <style name="TubeTab">
+        <item name="android:layout_width">0dp</item>
+        <item name="android:layout_weight">1</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:minHeight">50dp</item>
+        <item name="android:orientation">vertical</item>
+        <item name="android:gravity">center</item>
+        <item name="android:paddingVertical">4dp</item>
+        <item name="android:background">@drawable/bg_tube_tab</item>
+        <item name="android:clickable">true</item>
+        <item name="android:focusable">true</item>
+    </style>
+
+    <style name="TubeTabIcon">
+        <item name="android:layout_width">22dp</item>
+        <item name="android:layout_height">22dp</item>
+        <item name="android:tint">@color/tube_tab_tint</item>
+        <item name="android:importantForAccessibility">no</item>
+        <item name="android:duplicateParentState">true</item>
+    </style>
+
+    <style name="TubeTabLabel">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_marginTop">2dp</item>
+        <item name="android:gravity">center</item>
+        <item name="android:maxLines">1</item>
+        <item name="android:textColor">@color/tube_tab_tint</item>
+        <item name="android:textSize">11sp</item>
+        <item name="android:importantForAccessibility">no</item>
+        <item name="android:duplicateParentState">true</item>
+    </style>
+
     <!-- '가장 빠름' 작은 표시 (경로 옵션 카드·대중교통 카드) -->
     <style name="FastestBadge">
         <item name="android:layout_width">wrap_content</item>
