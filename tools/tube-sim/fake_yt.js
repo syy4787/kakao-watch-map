@@ -89,6 +89,9 @@
     host.replaceWith(f);
     this.el = f;
     this.elId = elId;
+    // 유튜브 규칙: 플레이어 칸은 200×200 이상 (만들 때·setSize 때 모두)
+    this.size = [+f.width, +f.height];
+    if (!(this.size[0] >= 200 && this.size[1] >= 200)) reg.violations.push({ kind: 'player-too-small', w: this.size[0], h: this.size[1] });
     this.opts = opts;
     this.vars = opts.playerVars || {};
     this.events = opts.events || {};
@@ -421,6 +424,17 @@
   P.setLoop = function (b) { call(this, 'setLoop', arguments); this.loop = !!b; };
   P.setShuffle = function (b) { call(this, 'setShuffle', arguments); };
   P.getIframe = function () { return this.el; };
+  // 문서에 있는 setSize: 플레이어 칸(iframe) 크기를 바꾼다 — 200×200 보다 작으면 규칙 위반
+  P.setSize = function (w, h) {
+    call(this, 'setSize', arguments);
+    w = +w; h = +h;
+    if (!(w >= 200 && h >= 200)) reg.violations.push({ kind: 'player-too-small', w: w, h: h });
+    this.el.width = String(w);
+    this.el.height = String(h);
+    this.size = [w, h];
+    reg.sizes = (reg.sizes || []).concat([[w, h]]);
+    return this;
+  };
   P.destroy = function () {
     call(this, 'destroy', arguments);
     this.destroyed = true;

@@ -66,6 +66,20 @@ class TubePlayerTest {
         })
     }
 
+    /**
+     * 재생 화면은 폭 480 으로 고정(워치 화면과 1:1) — 엔진의 화면 밀도를 1 로 두어 CSS 1px = 화면 1px.
+     * 밀도를 그대로(2.125) 두면 유튜브가 칸 크기 × 밀도로 화질을 골라, 같은 크기에 두 배 해상도(데이터·배터리·열)를 받는다.
+     * 글자 크기는 손대지 않는다(페이지가 정한 크기 그대로)
+     */
+    @Test
+    fun theEngineDrawsOneCssPixelPerScreenPixel() {
+        val s = TubePlayerActivity.engineSettings()
+        assertEquals(1f, s.displayDensityOverride)
+        assertFalse(s.fontInflationEnabled)
+        assertEquals(1f, s.fontSizeFactor)
+        assertFalse("두 번 눌러 확대 안 함", s.doubleTapZoomingEnabled)
+    }
+
     @Test
     fun aPageFromSomewhereElseIsNeverOpened() {
         val a = Robolectric.buildActivity(TubePlayerActivity::class.java, TubePlayerActivity.intent(context, "https://evil.example/tube/#v=x")).setup().get()

@@ -2,8 +2,9 @@
 <html lang="ko">
 <head>
 <meta charset="utf-8">
-<!-- 화면 폭을 284 로 고정: 플레이어 200×200 이 가운데 — 대각선(283)까지 둥근 화면 안에 다 보이게, 위아래 42px 띠. 세로 Shorts 는 상자 안 112×200 -->
-<meta name="viewport" content="width=284, viewport-fit=cover">
+<!-- 화면 폭을 480 으로 고정(갤럭시워치 44mm 화면과 1:1): 플레이어 칸은 세로(9:16) 229×407 — 모서리까지 둥근 화면 안에 들어가는
+     가장 큰 크기(200×200 이상, 스크립트가 화면에 맞춰 정함). 칸 왼쪽 빈 곳 = 안내 글, 오른쪽 = 채널 단추 -->
+<meta name="viewport" content="width=480, viewport-fit=cover">
 <!-- 유튜브 임베드는 Referer 로 어디서 트는지 확인한다(없으면 153 오류) — 기본값을 그대로 쓴다고 못 박아 둔다 -->
 <meta name="referrer" content="strict-origin-when-cross-origin">
 <meta name="color-scheme" content="dark">
@@ -14,7 +15,8 @@
 <style>
   /*
    * 갤럭시워치(둥근 화면)용 Shorts 재생 화면: 한 Shorts = 화면 한 장, 위아래로 넘기면(손가락·베젤) 한 장씩.
-   * 장 = 위 띠(제목) / 가운데 200×200 상자(지금 장만 유튜브 공식 플레이어, 다른 장은 미리보기 그림) / 아래 띠(채널 알약).
+   * 장 = 가운데 세로 칸(지금 장만 유튜브 공식 플레이어, 다른 장은 미리보기 그림 — 둥근 화면 높이 가득) + 칸 왼쪽 빈 곳(안내 글) +
+   * 오른쪽 빈 곳(채널 단추). 제목은 유튜브 플레이어 위 줄이 보여 주고, 장 이름(읽어 주기)으로도 둔다.
    * 플레이어 앞에는 아무것도 겹치지 않는다. 장 맞추기는 스크립트가 한다 (CSS scroll-snap 은 스크립트와 싸워서 쓰지 않음).
    * 무엇을 볼지 (# 뒤): ids=Shorts 번호들(50개까지) · i=처음 볼 자리 · n=앱에서 고른 시각 · app=1 (워치 앱 안)
    */
@@ -28,9 +30,12 @@
     --on-primary: #0f0f0f;
     --focus: #8ab4f8;
     --warn: #ff9e80;
-    --box: 200px;
+    --bw: 229px;                                 /* 플레이어 칸 (세로 9:16 — 스크립트가 화면에 맞춰) */
+    --bh: 407px;
     --h: 100vh;                                  /* 장 높이 = 화면 높이 (스크립트가 px 로) */
-    --band: calc((100vh - var(--box)) / 2);      /* 위·아래 띠 */
+    --band: calc((100vh - var(--bh)) / 2);       /* 칸 위·아래 남는 곳 */
+    --sx: 16px;                                  /* 옆 자리(왼쪽 안내 · 오른쪽 채널): 가장자리에서 거리 · 너비 (스크립트가) */
+    --sw: 102px;
   }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   html { background: var(--bg); overflow-anchor: none; overscroll-behavior-y: none; scrollbar-width: none; }
@@ -44,50 +49,45 @@
   }
   p { margin: 0; }
   button { font: inherit; color: inherit; border: 0; background: none; padding: 0; margin: 0; cursor: pointer; touch-action: manipulation; }
-  button:focus-visible, a:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+  button:focus-visible, a:focus-visible { outline: 3px solid var(--focus); outline-offset: 3px; }
 
   .slide { position: relative; height: var(--h); display: flex; flex-direction: column; align-items: center; overflow: hidden; }
-  .band { flex: none; width: 100%; height: var(--band); display: flex; flex-direction: column; align-items: center; overflow: hidden; }
-  .top { justify-content: flex-end; padding-bottom: 2px; }
-  .bot { justify-content: flex-start; padding-top: 3px; }
-  .box { flex: none; width: var(--box); height: var(--box); background: #000; }
-  .box iframe { display: block; width: var(--box); height: var(--box); border: 0; }
-  /* 다른 장: 미리보기 그림 120×200 (재생을 시작하는 그림은 120×70 이상 — 유튜브 규칙). 누르면 그 장으로 */
-  .ph { display: grid; place-items: center; width: var(--box); height: var(--box); background: #000; }
-  .ph img { display: block; width: 120px; height: 200px; object-fit: cover; background: #111; }
+  .band { flex: none; width: 100%; height: var(--band); }
+  .box { flex: none; width: var(--bw); height: var(--bh); background: #000; }
+  .box iframe { display: block; width: var(--bw); height: var(--bh); border: 0; }
+  /* 다른 장: 미리보기 그림 = 칸 크기 (재생을 시작하는 그림은 120×70 이상 — 유튜브 규칙). 누르면 그 장으로 */
+  .ph { display: grid; place-items: center; width: var(--bw); height: var(--bh); background: #000; }
+  .ph img { display: block; width: var(--bw); height: var(--bh); object-fit: cover; background: #111; }
 
-  /* 띠 글: 줄마다 둥근 화면 폭에 맞춘 너비 (위 줄은 짧다) — 줄 나누기·크기는 스크립트가 */
-  .ttl, .st, .sub { width: 100%; text-align: center; }
-  .ttl { font-weight: 700; }
+  /* 칸 옆 빈 곳 (칸과 겹치지 않음): 왼쪽 = 안내 글, 오른쪽 = 채널 단추. 위아래 가운데 */
+  .side { position: absolute; top: 0; bottom: 0; width: var(--sw); overflow: hidden; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; text-align: center; }
+  .side.l { left: var(--sx); }
+  .side.r { right: var(--sx); }
+  .st, .sub { width: 100%; font-size: 20px; line-height: 1.25; }
   .st { color: var(--warn); }
   .st.info, .sub { color: #e8e8e8; }
-  .ln { display: block; width: fit-content; max-width: 100%; margin: 0 auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  /* 채널 알약 — 누르면 워치 앱의 채널 화면 */
-  .ch {
-    flex: none; display: inline-flex; align-items: center; justify-content: center; gap: 3px;
-    height: 28px; max-width: 100%; padding: 0 10px; border-radius: 14px;
-    background: var(--card); font-size: 12px; font-weight: 700;
-  }
-  .ch:active { background: var(--chip); }
-  .ch .nm { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .ch .go { flex: none; font-size: 15px; line-height: 1; color: var(--dim); }
+  /* 채널 단추 — 누르면 워치 앱의 채널 화면 (동그란 그림 + 채널 이름, 누르는 자리는 단추 전체) */
+  .ch { flex: none; width: 100%; display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 6px 0; border-radius: 24px; }
+  .ch .av { width: 76px; height: 76px; border-radius: 50%; background: var(--card); display: grid; place-items: center; }
+  .ch .av svg { width: 44px; height: 44px; fill: currentColor; }
+  .ch:active .av { background: var(--chip); }
+  .ch .nm { max-width: 100%; font-size: 18px; font-weight: 700; line-height: 1.25; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
   /* 끝 장·안내 장: 가운데 */
-  .msgc { width: 100%; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 0 12%; text-align: center; }
-  .big { width: fit-content; max-width: 100%; font-size: 16px; line-height: 1.35; font-weight: 700; }
-  .sm { width: fit-content; max-width: 100%; font-size: 13px; line-height: 1.35; color: var(--dim); }
+  .msgc { width: 100%; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 17px; padding: 0 12%; text-align: center; }
+  .big { width: fit-content; max-width: 100%; font-size: 27px; line-height: 1.35; font-weight: 700; }
+  .sm { width: fit-content; max-width: 100%; font-size: 22px; line-height: 1.35; color: var(--dim); }
   .pill {
-    display: inline-flex; align-items: center; justify-content: center; min-height: 44px;
-    font-size: 15px; font-weight: 700; color: var(--fg); text-decoration: none;
-    background: var(--card); border-radius: 22px; padding: 10px 18px;
+    display: inline-flex; align-items: center; justify-content: center; min-height: 74px;
+    font-size: 25px; font-weight: 700; color: var(--fg); text-decoration: none;
+    background: var(--card); border-radius: 37px; padding: 17px 30px;
   }
   .pill.accent { background: var(--primary); color: var(--on-primary); }
 
-  /* 둥근 화면 밖으로 나가면 줄인다 (.fit) — 위 띠는 아래 가운데, 아래 띠는 위 가운데를 기준으로 (플레이어 쪽으로) */
+  /* 둥근 화면 밖으로 나가면 줄인다 (.fit) — 옆 자리는 칸 쪽을 기준으로 */
   .fit { transform-origin: 50% 50%; }
-  .top .fit { transform-origin: 50% 100%; }
-  .bot .fit { transform-origin: 50% 0; }
-  .meter { position: absolute; left: -10000px; top: 0; visibility: hidden; white-space: pre; pointer-events: none; }
+  .side.l .fit { transform-origin: 100% 50%; }
+  .side.r .fit { transform-origin: 0 50%; }
   [hidden] { display: none !important; }
 </style>
 </head>
@@ -100,9 +100,15 @@
   var ID = /^[A-Za-z0-9_-]{11}$/;
   var MAX_IDS = 50;            // 앱이 넘기는 Shorts 는 50개까지
   var APP = 'com.mywatch.kakaomap';
-  var BOX = 200;               // 플레이어 상자 (유튜브 최소 200×200)
+  var BOX_MIN = 200;           // 유튜브 규칙: 플레이어 칸은 200×200 이상
+  var TALL = 9 / 16;           // Shorts 칸 모양 (가로÷세로)
+  var BOX_EDGE = 6;            // 칸 모서리를 둥근 화면 가장자리에서 띄우는 거리
+  var SIDE_GAP = 8;            // 칸과 옆 자리 사이
+  var SIDE_HALF = 70;          // 옆 자리 내용이 화면 가운데에서 위아래로 차지하는 만큼 (그 높이까지 둥근 화면 안에)
+  var CH_MIN = 76;             // 채널 단추를 두려면 옆 자리가 이만큼 넓어야 (동그란 그림 — 누르는 자리는 단추 전체)
+  var SIDE_MIN = 40;           // 안내 글을 두려면 옆 자리가 이만큼 넓어야
   var VISIBLE = 0.9;           // 플레이어 상자가 이만큼 보여야 재생 시작 (규칙은 절반 — 둥근 화면이라 넉넉히)
-  var NUDGE = 8;               // 이만큼 이하로 움직이면 제자리
+  var NUDGE = 14;              // 이만큼 이하로 움직이면 제자리 (장 높이의 3%)
   var SETTLE_MS = 120;         // 굴림이 이만큼 멈추면 장을 맞춘다
   var SKIP_MS = 2500;          // 못 트는 Shorts 를 알리고 다음 장으로 넘어가기까지
   var HINT_MS = 2500;          // 시작을 부탁하고 이만큼 안 나오면 '▶ 를 눌러'
@@ -115,15 +121,13 @@
   var LOOP_IDLE_MS = window.__kwLoopIdleMs || 2 * 60000;
   var THUMB_AROUND = 2;        // 미리보기 그림은 지금 장 앞뒤 둘까지만 (2GB 워치 메모리)
   var INFO_AROUND = 1;         // 제목·채널은 앞뒤 하나까지 미리
-  var EDGE = 3;                // 둥근 화면 가장자리에서 띄우는 거리
-  var LH = 1.2;                // 띠 글 줄 높이
-  var TOP_GAP = 2, BOT_GAP = 3, PILL_H = 28;
-  var HINT = '가운데 ▶ 를 눌러 시작하세요';
-  var PAUSED = '멈췄어요 · ▶ 로 이어서';
-  var LOOP_STOP = '멈췄어요 · ▶ 로 다시';
+  var EDGE = 5;                // 둥근 화면 가장자리에서 띄우는 거리
+  var HINT = '가운데 ▶\u00a0를 눌러 시작하세요';
+  var PAUSED = '멈췄어요 · ▶\u00a0로 이어서';
+  var LOOP_STOP = '멈췄어요 · ▶\u00a0로 다시';
   var NEXT = '다음으로 넘어가요';
   var SWIPE = '넘기면 다음 Shorts';
-  // 동영상 화면과 같은 말투, 띠에 들어가게 짧게
+  // 동영상 화면과 같은 말투, 칸 옆 좁은 자리에 들어가게 짧게
   var ERRORS = {
     2: '주소가 잘못됐어요',
     5: '이 워치에선 못 틀어요',
@@ -149,14 +153,13 @@
   var active = -1;             // 지금 장 (플레이어가 있는 장)
   var cur = null;              // 지금 장의 플레이어
   var geo = null;              // 화면·둥근 화면 크기
-  var pillMax = 0;             // 채널 알약 최대 너비 (0 = 자리 없음)
   var titles = {}, pending = {};
   var seenSent = {};           // 앱에 이미 알린 '본 Shorts'
   var newest = readNewest();   // 이 탭이 받은 가장 최근 '고른 시각' (동영상 화면과 함께 씀)
   var wake = null, wakePending = false;
   var apiReady = false, apiDead = false, apiTimer = 0;
   var lastInteraction = Date.now();   // 이 화면을 마지막으로 만진 때 (반복 멈춤)
-  var hostSeq = 0, meter = null, resizeQueued = false;
+  var hostSeq = 0, resizeQueued = false;
   // 장 넘기기
   var seq = newSeq();          // 지난 맞춤 뒤의 굴림 (손가락 몸짓·사용자 굴림)
   var touching = false, touchAt = 0, gesture = null;
@@ -209,97 +212,26 @@
 
   // ---------- 둥근 화면 (장마다 같은 자리: 장이 화면에 맞춰졌을 때 기준) ----------
   function measureGeo() {
-    var W = window.innerWidth || 284;
-    var H = Math.max(BOX, window.innerHeight || 284);
+    var W = window.innerWidth || 480;
+    var vh = window.innerHeight || 480;
+    // 칸: 둥근 화면(지름 = 짧은 쪽)에 모서리까지 들어가는 가장 큰 세로 칸 — 폭이 200 이 안 되면 200 으로 (유튜브 규칙이 먼저)
+    var d = Math.min(W, vh) - 2 * BOX_EDGE;
+    var hRaw = d / Math.sqrt(1 + TALL * TALL), bh = Math.floor(hRaw), bw = Math.floor(hRaw * TALL);
+    if (bw < BOX_MIN) { bw = BOX_MIN; bh = Math.round(BOX_MIN / TALL); }
+    var H = Math.max(bh, vh);
     var R = Math.min(W, H) / 2;
-    geo = { W: W, H: H, R: R, r: R - EDGE, cx: W / 2, cy: H / 2, B: Math.max(0, (H - BOX) / 2) };
+    // 옆 자리: 가운데 높이에서 위아래 SIDE_HALF 까지 둥근 화면 안 — 칸 옆에서 가장자리까지
+    var half = Math.sqrt(Math.max(0, R * R - SIDE_HALF * SIDE_HALF));
+    var sx = Math.ceil(W / 2 - half + EDGE);
+    var sw = Math.max(0, Math.floor(W / 2 - bw / 2 - SIDE_GAP - sx));
+    geo = { W: W, H: H, R: R, cx: W / 2, cy: H / 2, BW: bw, BH: bh, B: Math.max(0, (H - bh) / 2), sx: sx, sw: sw };
     var root = document.documentElement.style;
     root.setProperty('--h', H + 'px');
     root.setProperty('--band', geo.B + 'px');
-    pillMax = pillWidth();
-  }
-  // 장 안 높이 y 에서 쓸 수 있는 폭 (둥근 화면 안, 가장자리에서 EDGE 만큼 띄움)
-  function chordAt(y) {
-    var dy = Math.abs(y - geo.cy);
-    if (dy >= geo.r) return 0;
-    return Math.max(0, Math.min(geo.W - 2 * EDGE, 2 * Math.sqrt(geo.r * geo.r - dy * dy)));
-  }
-  // 채널 알약(양끝이 둥근 막대)이 둥근 화면 안에 들어가는 가장 긴 너비
-  function pillWidth() {
-    if (geo.B < PILL_H + BOT_GAP) return 0;
-    var yc = geo.B + BOX + BOT_GAP + PILL_H / 2, dy = Math.abs(yc - geo.cy), rr = geo.r - PILL_H / 2;
-    if (rr <= dy) return 0;
-    var w = Math.floor(2 * Math.sqrt(rr * rr - dy * dy) + PILL_H);
-    return w < 64 ? 0 : Math.min(w, geo.W - 2 * EDGE, 220);
-  }
-  function textWidth(text, size, weight) {
-    if (!meter) { meter = el('span', 'meter'); meter.setAttribute('aria-hidden', 'true'); document.body.appendChild(meter); }
-    meter.style.fontSize = size + 'px';
-    meter.style.fontWeight = weight;
-    meter.textContent = text;
-    return meter.getBoundingClientRect().width;
-  }
-  // 위 줄(짧은 줄)에 들어가는 가장 긴 앞부분: ' · ' 앞, 아니면 띄어쓰기에서 ('▶ 로' 처럼 ▶ 뒤는 붙여 둠), 단어 하나도 안 되면 글자에서
-  function splitHead(text, size, weight, w0) {
-    var dot = text.indexOf(' · ');
-    if (dot > 0 && textWidth(text.slice(0, dot + 2), size, weight) <= w0) return { head: text.slice(0, dot + 2), rest: text.slice(dot + 3), sp: true };
-    var best = -1;
-    for (var i = text.indexOf(' '); i > 0; i = text.indexOf(' ', i + 1)) {
-      if (text.charAt(i - 1) === '▶') continue;
-      if (textWidth(text.slice(0, i), size, weight) <= w0) best = i; else break;
-    }
-    if (best > 0) return { head: text.slice(0, best), rest: text.slice(best + 1).trim(), sp: true };
-    var ch = Array.from(text), lo = 0, hi = ch.length - 1;
-    while (lo < hi) {
-      var mid = (lo + hi + 1) >> 1;
-      if (textWidth(ch.slice(0, mid).join(''), size, weight) <= w0) lo = mid; else hi = mid - 1;
-    }
-    return lo < 1 ? null : { head: ch.slice(0, lo).join(''), rest: ch.slice(lo).join('').trim(), sp: false };
-  }
-  // 위 띠 글(제목·안내): 한 줄로 되면 한 줄(플레이어 바로 위 — 넓은 쪽), 아니면 두 줄 (위 줄은 둥근 화면이라 짧다).
-  // 크기를 차례로 줄여 보고, 그래도 넘치면 가장 작은 크기로 마지막 줄 끝을 … 로. 들어갈 자리가 없으면 null (숨김)
-  function layoutTop(text, sizes, weight) {
-    var bottom = geo.B - TOP_GAP, cand = null;
-    for (var i = 0; i < sizes.length; i++) {
-      var size = sizes[i], lh = Math.round(size * LH);
-      if (bottom - lh < 0) continue;
-      var w1 = Math.floor(chordAt(bottom - lh));
-      if (w1 < size * 4) continue;
-      if (textWidth(text, size, weight) <= w1) return { size: size, lh: lh, lines: [{ t: text, w: w1 }] };
-      cand = { size: size, lh: lh, lines: [{ t: text, w: w1 }] };
-      var w0 = bottom - 2 * lh >= 0 ? Math.floor(chordAt(bottom - 2 * lh)) : 0;
-      if (w0 < size * 3) continue;
-      var cut = splitHead(text, size, weight, w0);
-      if (!cut || !cut.rest) continue;
-      cand = { size: size, lh: lh, lines: [{ t: cut.head, w: w0, sp: cut.sp }, { t: cut.rest, w: w1 }] };
-      if (textWidth(cut.rest, size, weight) <= w1) return cand;
-    }
-    return cand;
-  }
-  // 아래 띠 글 (한 줄, 플레이어 바로 아래)
-  function layoutBottom(text, sizes, weight) {
-    var top = geo.B + BOX + BOT_GAP, cand = null;
-    for (var i = 0; i < sizes.length; i++) {
-      var size = sizes[i], lh = Math.round(size * LH);
-      if (top + lh > geo.H) continue;
-      var w = Math.floor(chordAt(top + lh));
-      if (w < size * 4) continue;
-      cand = { size: size, lh: lh, lines: [{ t: text, w: w }] };
-      if (textWidth(text, size, weight) <= w) return cand;
-    }
-    return cand;
-  }
-  function renderLines(box, lay) {
-    box.textContent = '';
-    if (!lay) return;
-    lay.lines.forEach(function (ln, j) {
-      if (j && lay.lines[j - 1].sp) box.appendChild(document.createTextNode(' '));
-      var s = el('span', 'ln fit', ln.t);
-      s.style.fontSize = lay.size + 'px';
-      s.style.lineHeight = lay.lh + 'px';
-      s.style.maxWidth = ln.w + 'px';
-      box.appendChild(s);
-    });
+    root.setProperty('--bw', bw + 'px');
+    root.setProperty('--bh', bh + 'px');
+    root.setProperty('--sx', sx + 'px');
+    root.setProperty('--sw', sw + 'px');
   }
   // 안전망: 그래도 원 밖으로 나가는 것은 플레이어 쪽을 기준으로 줄인다 (장이 화면에 맞춰졌을 때 기준 — 장마다 같은 자리)
   function fitEl(e) {
@@ -340,40 +272,44 @@
   function makeSlide(id, k) {
     var sec = el('section', 'slide');
     sec.setAttribute('data-k', String(k));
-    var top = el('div', 'band top');
-    var ttl = el('p', 'ttl'), st = el('p', 'st');
-    st.setAttribute('role', 'status');
-    ttl.hidden = true;
-    st.hidden = true;
-    top.appendChild(ttl);
-    top.appendChild(st);
     var box = el('div', 'box');
     var ph = el('button', 'ph');
     ph.type = 'button';
     ph.setAttribute('aria-label', 'Shorts ' + (k + 1) + ' 재생');
     var img = document.createElement('img');
     img.alt = '';
-    img.width = 120;
-    img.height = 200;
+    img.width = 229;
+    img.height = 407;
     img.decoding = 'async';
     ph.appendChild(img);
     box.appendChild(ph);
-    var bot = el('div', 'band bot');
-    var sub = el('p', 'sub');
+    // 칸 왼쪽: 안내 글 (main = 굵은 안내, sub = 덧붙임)
+    var left = el('div', 'side l');
+    left.hidden = true;
+    var st = el('p', 'st fit'), sub = el('p', 'sub fit');
+    st.setAttribute('role', 'status');
+    st.hidden = true;
     sub.hidden = true;
+    left.appendChild(st);
+    left.appendChild(sub);
+    // 칸 오른쪽: 채널 단추 (동그란 그림 + 이름)
+    var right = el('div', 'side r');
     var ch = el('button', 'ch fit');
     ch.type = 'button';
     ch.hidden = true;
-    var nm = el('span', 'nm'), go = el('span', 'go', '›');
-    go.setAttribute('aria-hidden', 'true');
+    var av = el('span', 'av');
+    av.setAttribute('aria-hidden', 'true');
+    av.innerHTML = '<svg viewBox="0 0 24 24"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>';
+    var nm = el('span', 'nm');
+    ch.appendChild(av);
     ch.appendChild(nm);
-    ch.appendChild(go);
-    bot.appendChild(sub);
-    bot.appendChild(ch);
-    sec.appendChild(top);
+    right.appendChild(ch);
+    sec.appendChild(el('div', 'band top'));
     sec.appendChild(box);
-    sec.appendChild(bot);
-    var sl = { k: k, id: id, el: sec, ttl: ttl, st: st, box: box, ph: ph, img: img, sub: sub, ch: ch, nm: nm,
+    sec.appendChild(el('div', 'band bot'));
+    sec.appendChild(left);
+    sec.appendChild(right);
+    var sl = { k: k, id: id, el: sec, st: st, sub: sub, left: left, box: box, ph: ph, img: img, ch: ch, nm: nm,
       ttlText: '', author: '', stText: '', stKind: '', subText: '', imgBad: false };
     ph.addEventListener('click', function () { touched(); goTo(sl.k, 'tap'); });
     ch.addEventListener('click', function () { touched(); toChannel(sl); });
@@ -453,29 +389,28 @@
     pending[id] = pr;
     return pr;
   }
+  // 제목: 화면엔 유튜브 플레이어 위 줄이 보여 준다 — 장 이름(읽어 주기)과 미리보기 단추 이름으로
   function renderTitle(sl) {
     var t = titles[sl.id];
     sl.ttlText = t ? t.title : '';
-    renderLines(sl.ttl, sl.ttlText ? layoutTop(sl.ttlText, [13, 12], 700) : null);
-    sl.ttl.hidden = !sl.ttl.firstChild || !!sl.stText;
+    if (sl.ttlText) sl.el.setAttribute('aria-label', sl.ttlText); else sl.el.removeAttribute('aria-label');
     sl.ph.setAttribute('aria-label', (sl.ttlText || 'Shorts ' + (sl.k + 1)) + ' 재생');
   }
+  // 채널 단추: 이름을 알고 옆 자리가 넉넉할 때만
   function renderPill(sl) {
     var t = titles[sl.id];
     sl.author = t && t.author ? t.author : '';
     sl.nm.textContent = sl.author;
     sl.ch.setAttribute('aria-label', sl.author ? sl.author + ' 채널로 가기' : '');
-    sl.ch.style.maxWidth = pillMax + 'px';
-    sl.ch.hidden = !sl.author || !pillMax || !!sl.subText;
+    sl.ch.hidden = !sl.author || !geo || geo.sw < CH_MIN;
   }
   function renderStatus(sl) {
-    renderLines(sl.st, sl.stText ? layoutTop(sl.stText, [12, 11], 400) : null);
-    sl.st.className = 'st' + (sl.stKind === 'info' ? ' info' : '');
-    sl.st.hidden = !sl.st.firstChild;
-    sl.ttl.hidden = !sl.ttl.firstChild || !!sl.stText;
-    renderLines(sl.sub, sl.subText ? layoutBottom(sl.subText, [12, 11], 400) : null);
-    sl.sub.hidden = !sl.sub.firstChild;
-    sl.ch.hidden = !sl.author || !pillMax || !!sl.subText;
+    sl.st.textContent = sl.stText;
+    sl.st.className = 'st fit' + (sl.stKind === 'info' ? ' info' : '');
+    sl.st.hidden = !sl.stText;
+    sl.sub.textContent = sl.subText;
+    sl.sub.hidden = !sl.subText;
+    sl.left.hidden = (!sl.stText && !sl.subText) || !geo || geo.sw < SIDE_MIN;
   }
   function showInfo(sl) {
     if (slides[sl.k] !== sl) return;   // 그사이 목록이 바뀜
@@ -483,7 +418,7 @@
     renderPill(sl);
     fitIn(sl.el);
   }
-  // 지금 장의 안내: main = 위 띠(제목 자리), sub = 아래 띠(채널 알약 자리) — 둥근 화면의 좁은 띠에 나눠 싣는다
+  // 지금 장의 안내 (칸 왼쪽): main = 굵은 안내, sub = 덧붙임
   function status(main, sub, kind) {
     var sl = cur ? cur.sl : null;
     if (!sl) return;
@@ -555,10 +490,11 @@
     host.id = 'yt' + (++hostSeq);
     me.sl.box.textContent = '';
     me.sl.box.appendChild(host);
+    me.size = { w: geo.BW, h: geo.BH };
     try {
       me.player = new YT.Player(host.id, {
-        width: BOX,
-        height: BOX,
+        width: geo.BW,
+        height: geo.BH,
         videoId: me.id,
         playerVars: {
           playsinline: 1,
@@ -582,6 +518,16 @@
       restorePlaceholder(me.sl);
       apiFailed();
     }
+  }
+  // 플레이어가 아는 칸 크기를 보이는 칸에 맞춘다 (화면 크기가 바뀌었을 때 — 문서에 있는 setSize, 준비된 뒤에만)
+  function syncSize() {
+    var me = cur;
+    if (!me || !me.player || !me.ready || !geo) return;
+    if (me.size && me.size.w === geo.BW && me.size.h === geo.BH) return;
+    try {
+      me.player.setSize(geo.BW, geo.BH);
+      me.size = { w: geo.BW, h: geo.BH };
+    } catch (e) { report(e); }
   }
   function restorePlaceholder(sl) {
     if (!sl || sl.end || sl.msg) return;
@@ -653,7 +599,7 @@
       if (cur !== me || me.started || me.err || me.sl.stText) return;
       if (me.state !== null && me.state !== S.UNSTARTED && me.state !== S.CUED) return;
       me.req = 0;
-      status(document.visibilityState === 'visible' ? HINT : '▶ 를 눌러 재생해요', '', 'info');
+      status(document.visibilityState === 'visible' ? HINT : '▶\u00a0를 눌러 재생해요', '', 'info');
     }, HINT_MS);
   }
   function holdIdle(me) {
@@ -668,6 +614,7 @@
 
   function onReady() {
     cur.ready = true;
+    syncSize();
     armHint(cur);   // 방금 고른 것이 아니어서(예전 주소) 안 틀면 '▶ 를 눌러' 안내
     tryStart();
   }
@@ -678,8 +625,8 @@
     syncAwake();
     clearTimeout(me.t.hint);
     me.t.hint = 0;
-    if (!me.started) status(document.visibilityState === 'visible' ? HINT : '▶ 를 눌러 재생해요', '', 'info');
-    else status('▶ 를 눌러 이어서 재생해요', '', 'info');
+    if (!me.started) status(document.visibilityState === 'visible' ? HINT : '▶\u00a0를 눌러 재생해요', '', 'info');
+    else status('▶\u00a0를 눌러 이어서 재생해요', '', 'info');
   }
   function onStateChange(e) {
     var me = cur, s = e && e.data, prev = me.state;
@@ -753,7 +700,7 @@
     seenSent[id] = true;
     try { navigate('kakaowatch://tube/seen?v=' + id); } catch (e) { report(e); }
   }
-  // 채널 알약: 워치 앱이 그 Shorts 의 채널을 찾아 채널 화면을 연다 — 앱으로 넘어가니 멈추고 간다 (돌아와도 저절로 안 틂)
+  // 채널 단추: 워치 앱이 그 Shorts 의 채널을 찾아 채널 화면을 연다 — 앱으로 넘어가니 멈추고 간다 (돌아와도 저절로 안 틂)
   function toChannel(sl) {
     if (!P || !sl.author) return;
     var me = cur;
@@ -914,11 +861,12 @@
     fitIn(slides[endK].el);
     activate(p.i, fresh ? 'pick' : 'stale');
   }
-  // 크기가 바뀜(워치 인터넷 앱의 막대 등): 장 크기·띠 글을 다시 맞추고 지금 장에 다시 맞춘다
+  // 크기가 바뀜(워치 인터넷 앱의 막대 등): 장·칸 크기와 옆 자리를 다시 맞추고 지금 장에 다시 맞춘다
   function relayout() {
     var old = geo;
     measureGeo();
     if (old && old.H === geo.H && old.W === geo.W) return;
+    syncSize();
     slides.forEach(function (sl) {
       if (sl.end || sl.msg) { fitIn(sl.el); return; }
       if (titles[sl.id]) { renderTitle(sl); renderPill(sl); }
@@ -1007,7 +955,7 @@
       var start = (me.autoStart || me.want) && !me.started;
       me.autoStart = false;
       if (start && intentFresh(me)) { me.want = true; tryStart(); }
-      else if (start || me.hiddenPause) { me.want = false; me.hiddenPause = false; status(me.started ? PAUSED : '▶ 를 눌러 재생해요', '', 'info'); }
+      else if (start || me.hiddenPause) { me.want = false; me.hiddenPause = false; status(me.started ? PAUSED : '▶\u00a0를 눌러 재생해요', '', 'info'); }
       if (me.hold) holdIdle(me);   // 멈춤이 먹혔는지는 켜진 뒤부터 센다
     }
     syncAwake();

@@ -276,7 +276,8 @@ object TubeLinks {
      */
     /**
      * 재생 화면 주소 — [queue] 로 무엇을 이어 틀지: 믹스(mix=1) · 앱의 목록 그대로(ids=다음 동영상들, 처음 것까지 50개) ·
-     * 재생목록(list=). [inApp] = 워치 앱 안의 엔진으로 연다(app=1 — 아래 링크가 앱의 목록으로 돌아감)
+     * 재생목록(list=). [inApp] = 워치 앱 안의 엔진으로 연다(app=1 — 아래 링크가 앱의 목록으로 돌아감).
+     * 세로 동영상이면 o=p (재생 화면의 플레이어 칸을 처음부터 세로로)
      */
     fun playerUrl(base: String, video: TubeVideo, queue: Queue, nonce: Long? = null, inApp: Boolean = false): String = buildString {
         append(base).append("#v=").append(video.id)
@@ -289,6 +290,8 @@ object TubeLinks {
         }
         takeChars(video.title.trim(), MAX_TITLE).takeIf { it.isNotEmpty() }?.let { append("&t=").append(encode(it)) }
         takeChars(video.channel.trim(), MAX_CHANNEL).takeIf { it.isNotEmpty() }?.let { append("&c=").append(encode(it)) }
+        // 세로 동영상: 재생 화면이 처음부터 세로 칸으로 (가로·모름은 재생 화면의 기본 — 이어지는 곡은 재생 화면이 알아냄)
+        if (video.portrait == true) append("&o=p")
         // 어린이용(또는 모름): 재생 화면이 이 동영상의 믹스 추천을 앱에 알리지 않는다 (정책 III.E.4.j — 추적 끄기)
         if (video.madeForKids != false) append("&k=1")
         if (nonce != null) append("&n=").append(nonce)

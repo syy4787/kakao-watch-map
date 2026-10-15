@@ -103,6 +103,20 @@ class TubeTest {
     }
 
     /**
+     * 세로 동영상(유튜브 데이터의 플레이어 크기로 앎)이면 재생 화면에 o=p — 처음부터 세로 칸으로 연다 (가로로 만들었다 바꾸지 않게).
+     * 가로·모름은 붙이지 않는다 (재생 화면의 기본이 가로, 이어지는 곡은 재생 화면이 직접 알아냄)
+     */
+    @Test
+    fun portraitVideosOpenTheirPlayerBoxUpright() {
+        val base = "https://syy4787.github.io/kakao-watch-map/tube/"
+        val tall = TubeVideo("BzYnNdJhZQw", "세로", "IU", madeForKids = false, portrait = true)
+        assertEquals(base + "#v=BzYnNdJhZQw&mix=1&t=%EC%84%B8%EB%A1%9C&c=IU&o=p&n=5&app=1", TubeLinks.playerUrl(base, tall, Queue.Mix, nonce = 5, inApp = true))
+        assertTrue("어린이용 표시보다 앞", TubeLinks.playerUrl(base, tall.copy(madeForKids = null), Queue.Single).endsWith("&o=p&k=1"))
+        assertFalse(TubeLinks.playerUrl(base, tall.copy(portrait = false), Queue.Mix).contains("o="))
+        assertFalse("모르면 가로(기본)", TubeLinks.playerUrl(base, tall.copy(portrait = null), Queue.Mix).contains("o="))
+    }
+
+    /**
      * 유튜브 정책 III.E.4.j: 어린이용(Made for Kids)으로 지정된 동영상은 추적을 끈다 — 재생 화면에 k=1 을 붙여
      * 그 동영상의 믹스 추천을 앱에 알리지 않게. 어린이용인지 모르면(찾아보지 못함) 어린이용처럼
      */

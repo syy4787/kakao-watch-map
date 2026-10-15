@@ -117,6 +117,7 @@ async function snap(page) {
     const shown = e => !!(e && !e.hidden && e.offsetParent && !e.closest('[hidden]'));
     const txt = e => shown(e) ? e.textContent.replace(/\s+/g, ' ').trim() : '';
     const ch = act && act.querySelector('.ch');
+    const rect = e => { if (!shown(e)) return null; const r = e.getBoundingClientRect(); return r.width ? { x: r.left, y: r.top, w: r.width, h: r.height } : null; };
     const thumbs = [...document.querySelectorAll('.ph img')].map(i => {
       const r = i.getBoundingClientRect();
       let t = 0;
@@ -134,10 +135,12 @@ async function snap(page) {
       active, frames: frames.length, frameSlide: f ? +(f.closest('.slide')?.dataset.k ?? -99) : null,
       box: b && { w: b.width, h: b.height, x: b.left, y: b.top },
       overlay, live: live.length, pcount: fy.players.length,
-      player: p && { state: p.state, id: p.curId(), ready: !!p.readyFired, n: p.n },
+      player: p && { state: p.state, id: p.curId(), ready: !!p.readyFired, n: p.n, size: p.size },
       violations: fy.violations.slice(), wake: { ...window.__wl, sentinels: undefined },
       status: act ? [txt(act.querySelector('.st')), txt(act.querySelector('.sub'))].filter(Boolean).join(' · ') : '',
-      title: act ? txt(act.querySelector('.ttl')) : '',
+      // 제목은 화면에 따로 쓰지 않고(유튜브 플레이어 위 줄이 보여 줌) 장의 이름으로 — 읽어 주기
+      title: act ? (act.getAttribute('aria-label') || '') : '',
+      chBox: ch ? rect(ch) : null, stBox: act ? rect(act.querySelector('.side.l')) : null,
       chan: ch ? { text: txt(ch.querySelector('.nm')), hidden: !shown(ch), label: ch.getAttribute('aria-label') || '' } : null,
       thumbs, navs: window.__navs.map((u, k) => ({ u, hash: window.__navHash[k] })), life: window.__life,
       starts: fy.starts.map(x => x.id), errs: fy.errors || 0,
@@ -206,7 +209,22 @@ class Checker {
     if (errors.length) this.fail(step, '페이지 오류: ' + errors.join(' | '), s), errors.length = 0;
     if (s.live > 1) this.fail(step, `플레이어가 ${s.live}개`, s);
     if (s.frames > 1) this.fail(step, `iframe 이 ${s.frames}개`, s);
-    if (s.box && (Math.abs(s.box.w - 200) > 0.6 || Math.abs(s.box.h - 200) > 0.6)) this.fail(step, `플레이어 크기 ${s.box.w}×${s.box.h}`, s);
+    if (s.box) {
+      const { w, h } = s.box;
+      if (w < 199.5 || h < 199.5) this.fail(step, `플레이어 칸이 200×200 보다 작음 ${w}×${h}`, s);
+      const ps = s.player?.size;
+      if (ps && s.player.ready && (Math.abs(ps[0] - w) > 1 || Math.abs(ps[1] - h) > 1)) this.fail(step, `플레이어가 아는 크기 ${ps.join('×')} ≠ 보이는 칸 ${w.toFixed(1)}×${h.toFixed(1)}`, s);
+      // 장이 화면에 맞춰졌을 때: 세로 칸이 둥근 화면 안에 통째로(유튜브 줄이 잘리지 않게), 둥근 화면이 허락하는 만큼 크게.
+      // 채널 단추는 칸 오른쪽(누르기 넉넉히), 안내 글은 칸 왼쪽 — 칸과 겹치지 않게
+      if (s.H && Math.abs(s.scrollY - Math.round(s.scrollY / s.H) * s.H) <= 1 && s.frameSlide === s.active) {
+        const R = Math.min(s.vw, s.vh) / 2, half = Math.hypot(w, h) / 2;
+        if (half > R + 0.5) this.fail(step, `플레이어 칸 모서리가 둥근 화면 밖 (${w.toFixed(0)}×${h.toFixed(0)}, 반지름 ${R.toFixed(0)})`, s);
+        if (half < R - 24) this.fail(step, `플레이어 칸이 둥근 화면보다 많이 작음 (${w.toFixed(0)}×${h.toFixed(0)}, 반지름 ${R.toFixed(0)})`, s);
+        if (!(h > w * 1.55)) this.fail(step, `Shorts 칸이 세로가 아님 ${w.toFixed(0)}×${h.toFixed(0)}`, s);
+        if (s.chBox && (s.chBox.x < s.box.x + w + 2 || s.chBox.w < 76 || s.chBox.h < 88)) this.fail(step, `채널 단추 자리·크기 ${JSON.stringify(s.chBox)}`, s);
+        if (s.stBox && s.stBox.x + s.stBox.w > s.box.x - 2) this.fail(step, `안내 글이 칸에 닿음 ${JSON.stringify(s.stBox)}`, s);
+      }
+    }
     if (s.overlay) this.fail(step, '플레이어 위에 겹침: ' + s.overlay, s);
     if (s.sw > s.vw + 1) this.fail(step, `가로 넘침 ${s.sw} > ${s.vw}`, s);
     if (s.life !== this.vLife) { this.vLife = s.life; this.vSeen = 0; }
@@ -295,18 +313,20 @@ const A = {
   async release(page) {
     await page.evaluate(() => { let e; try { e = new TouchEvent('touchend', { bubbles: true, cancelable: true, touches: [] }); } catch (x2) { e = new Event('touchend', { bubbles: true }); } document.body.dispatchEvent(e); });
   },
-  // 진짜 손가락 끌기 (브라우저가 굴리고 튕김까지): where = 'band'(띠 — 페이지가 손가락을 봄) | 'player'(플레이어 위 — 못 봄),
-  // dy = 손가락 이동(CSS px, 음수 = 위로 밀기 = 다음 장), ms = 움직임 사이 (2ms 면 세게 튕김: 2장 넘게 굴러감)
+  // 진짜 손가락 끌기 (브라우저가 굴리고 튕김까지): where = 'band'(칸 밖 — 페이지가 손가락을 봄) | 'player'(플레이어 위 — 못 봄),
+  // dy = 손가락 이동(화면 폭 284 기준 px — 페이지 폭이 몇이든 화면에서 같은 손가락 움직임, 음수 = 위로 밀기 = 다음 장),
+  // ms = 움직임 사이 (2ms 면 세게 튕김: 2장 넘게 굴러감). 손가락 자리는 페이지 CSS px (CDP 의 손가락 좌표 = 확대된 페이지의 CSS px):
+  // band = 칸 왼쪽 빈 곳, player = 칸 한가운데 줄
   async drag(page, [where, dy, steps, ms]) {
-    const m = await page.evaluate(() => ({ iw: innerWidth }));
-    const k = (page.viewportSize().width) / m.iw;
+    const m = await page.evaluate(() => ({ w: innerWidth, h: innerHeight }));
+    const u = m.w / 284;
     const up = dy < 0;
-    const x = (where === 'band' ? 60 : 140) * k;
-    const y0 = (where === 'band' ? (up ? 262 : 18) : (up ? 230 : 50)) * k;
+    const x = where === 'band' ? m.w * 0.125 : m.w * 0.5;
+    const y0 = (where === 'band' ? (up ? 262 : 18) : (up ? 230 : 50)) / 284 * m.h;
     const cdp = await page.context().newCDPSession(page);
     const n = steps || 4;
     await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y: y0 }] });
-    for (let i = 1; i <= n; i++) { await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x, y: y0 + dy * k * i / n }] }); await page.waitForTimeout(ms ?? 16); }
+    for (let i = 1; i <= n; i++) { await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x, y: y0 + dy * u * i / n }] }); await page.waitForTimeout(ms ?? 16); }
     await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
     await cdp.detach().catch(() => {});
   },
@@ -337,8 +357,8 @@ const A = {
       return bottom - top < 10 ? null : { x: (r.left + r.right) / 2, y: (top + bottom) / 2, iw: innerWidth };
     }, off);
     if (!p) return 'hidden';
-    const k = page.viewportSize().width / p.iw;
-    await page.touchscreen.tap(p.x * k, p.y * k);
+    // 누르는 자리는 페이지 CSS px 그대로 (Playwright 손가락 좌표 = 확대된 페이지의 CSS px — 2026-10 확인)
+    await page.touchscreen.tap(p.x, p.y);
     return 'ok';
   },
   async hide(page) { await page.evaluate(() => window.__setVisible(false)); },
@@ -372,7 +392,7 @@ const USER_ACTS = ['bezel', 'bezelUp', 'bezelBurst', 'by', 'byH', 'fling', 'hold
 const scripted = [
   { name: '열기_바로재생', vp: true, hash: `#ids=${L(4)}&n=NOW&app=1`, steps: [
     ['wait', 1500], ['expect', s => s.active === 0 && s.player?.id === S(1) && s.player.state === 1 && s.frameSlide === 0, '방금 고른 Shorts 는 바로 재생'],
-    ['expect', s => s.title === 'Shorts ' + S(1) && s.chan && !s.chan.hidden && s.chan.text === '채널 sh0' && s.chan.label === '채널 sh0 채널로 가기', '위 띠 제목 · 아래 띠 채널 알약'],
+    ['expect', s => s.title === 'Shorts ' + S(1) && s.chan && !s.chan.hidden && s.chan.text === '채널 sh0' && s.chan.label === '채널 sh0 채널로 가기', '제목(장 이름) · 오른쪽 채널 단추'],
     ['expect', s => seenIds(s).join() === S(1), '앱 안: 처음 재생된 Shorts 를 앱에 알림'],
     ['expect', s => s.wake.active === 1, '재생 중엔 화면 켜 둠'] ] },
   { name: '열기_시작자리', hash: `#ids=${L(5)}&i=2&n=NOW`, steps: [
@@ -381,7 +401,7 @@ const scripted = [
     ['wait', 3300], ['expect', s => s.player && s.player.state !== 1 && /▶/.test(s.status), '오래된 주소는 저절로 안 틂 + 안내'],
     ['tapPlayerButton'], ['wait', 1200], ['expect', s => s.player?.state === 1 && s.status === '', '플레이어 ▶ 로 재생'] ] },
   { name: '자동재생막힘_안내_탭', vp: true, hash: `#ids=${L(3)}&n=NOW`, cfg: { autoplay: false }, steps: [
-    ['wait', 1500], ['expect', s => s.player && s.player.state !== 1 && s.status === '가운데 ▶ 를 눌러 시작하세요', '막히면 안내'],
+    ['wait', 1500], ['expect', s => s.player && s.player.state !== 1 && s.status === '가운데 ▶ 를 눌러 시작하세요' && s.stBox && s.stBox.x + s.stBox.w <= s.box.x, '막히면 안내 (칸 왼쪽)'],
     ['tapPlayerButton'], ['wait', 1200], ['expect', s => s.player?.state === 1 && s.status === '', '플레이어 ▶ 로 재생'] ] },
   { name: '베젤_한칸씩', vp: true, hash: `#ids=${L(6)}&n=NOW&app=1`, steps: [
     ['wait', 1300], ['expect', s => s.active === 0 && s.player?.state === 1, '첫 Shorts 재생'],
@@ -398,13 +418,14 @@ const scripted = [
   { name: '베젤_빠르게세칸', hash: `#ids=${L(6)}&n=NOW`, steps: [
     ['wait', 1300], ['bezelBurst', 3], ['wait', 1500], ['expect', s => s.active === 3 && s.player?.id === S(4) && s.player.state === 1, '빠르게 세 칸도 세 장'] ] },
   { name: '살짝_제자리', hash: `#ids=${L(4)}&n=NOW`, steps: [
-    ['wait', 1300], ['by', 5], ['wait', 900], ['expect', s => s.active === 0 && s.pcount === 1 && s.player?.state === 1 && Math.abs(s.scrollY) <= 1, '5px 은 제자리 (플레이어 그대로)'],
-    ['by', 7], ['wait', 900], ['expect', s => s.active === 0 && s.pcount === 1 && Math.abs(s.scrollY) <= 1, '8px 까지는 제자리'] ] },
+    ['wait', 1300], ['by', 8], ['wait', 900], ['expect', s => s.active === 0 && s.pcount === 1 && s.player?.state === 1 && Math.abs(s.scrollY) <= 1, '8px 은 제자리 (플레이어 그대로)'],
+    ['by', 14], ['wait', 900], ['expect', s => s.active === 0 && s.pcount === 1 && Math.abs(s.scrollY) <= 1, '14px(장 높이의 3%)까지는 제자리'],
+    ['by', 18], ['wait', 1200], ['expect', s => s.active === 1 && s.player?.state === 1, '그보다 더 굴리면 다음 장'] ] },
   { name: '손안대고_여러장', hash: `#ids=${L(8)}&n=NOW`, steps: [
     ['wait', 1300], ['byH', 2.5], ['wait', 1500], ['expect', s => s.active === 2 && s.player?.id === S(3) && s.player.state === 1, '2.5장 → 2장 (딱 반이면 덜 가는 쪽)'],
     ['byH', 1.6], ['wait', 1500], ['expect', s => s.active === 4 && s.player?.state === 1, '1.6장 → 2장'],
     ['byH', 0.3], ['wait', 1500], ['expect', s => s.active === 5, '0.3장 → 한 장'],
-    ['byH', -0.02], ['wait', 1200], ['expect', s => s.active === 5 && Math.abs(s.scrollY - 5 * s.H) <= 1, '8px 이하는 제자리'] ] },
+    ['byH', -0.02], ['wait', 1200], ['expect', s => s.active === 5 && Math.abs(s.scrollY - 5 * s.H) <= 1, '장 높이의 2% 는 제자리'] ] },
   { name: '손가락_세게튕겨도_한장', vp: true, hash: `#ids=${L(6)}&n=NOW`, steps: [
     ['wait', 1300], ['fling', 2.5], ['wait', 1500], ['expect', s => s.active === 1 && s.player?.id === S(2) && s.player.state === 1, '손가락으로 세게 넘겨도 한 장'],
     ['fling', 0.02], ['wait', 1200], ['expect', s => s.active === 1 && s.pcount === 2, '살짝 움직인 손가락은 제자리'],
@@ -521,7 +542,8 @@ const scripted = [
     ['wait', 1300], ['resize', [280, 240]], ['wait', 1200], ['expect', s => s.active === 1 && Math.abs(s.H - s.vh) <= 1 && Math.abs(s.scrollY - s.H) <= 1, '높이가 바뀌면 장 크기·자리도 맞춤'],
     ['resize', [280, 280]], ['wait', 1200], ['expect', s => s.active === 1 && Math.abs(s.scrollY - s.H) <= 1 && s.player?.state === 1, '되돌려도 그대로 재생'] ] },
 ];
-const viewports = [{ tag: '284', vw: 284 }, { tag: '240', vw: 240 }, { tag: '300', vw: 300 }, { tag: '226', vw: 226 }];
+const viewports = [{ tag: '284', vw: 284 }, { tag: '240', vw: 240 }, { tag: '300', vw: 300 }, { tag: '226', vw: 226 },
+  { tag: '280x240', vw: 280, vh: 240 }, { tag: '226x196', vw: 226, vh: 196 }, { tag: '226x300', vw: 226, vh: 300 }];
 
 async function runScenario(browser, sc, label) {
   const { ctx, page, errors, nav } = await openPage(browser, sc);

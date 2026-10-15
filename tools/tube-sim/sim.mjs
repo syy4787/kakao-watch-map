@@ -1,6 +1,6 @@
 // 워치 유튜브 재생 화면 시뮬레이터 — 가짜 유튜브 플레이어(fake_yt.js)로 사용자가 겪을 모든 경우를 돌리고
 // 매 단계 뒤 유튜브 규칙·단단함 불변식을 확인한다.
-//   node sim.mjs [--only=이름] [--allvp=1] [--random=개수] [--steps=개수] [--seed=시작] [--retry=1] [--page=경로] [--shots=폴더]
+//   node sim.mjs [--only=이름] [--allvp=1] [--vp=크기,크기] [--random=개수] [--steps=개수] [--seed=시작] [--retry=1] [--page=경로] [--shots=폴더]
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -30,7 +30,7 @@ async function openPage(browser, sc) {
   const ctx = await browser.newContext({ viewport: { width: vw, height: vh }, deviceScaleFactor: sc.dpr || 2.125, isMobile: true, hasTouch: true, locale: 'ko-KR' });
   const page = await ctx.newPage();
   const errors = [];
-  const nav = { loads: 0 };
+  const nav = { loads: 0, oembeds: 0 };
   page.on('load', () => { nav.loads++; });
   page.on('pageerror', e => errors.push(String(e.message || e)));
   page.on('console', m => { if (m.type() === 'error' && !/Failed to load resource|net::ERR/.test(m.text())) errors.push('console: ' + m.text()); });
@@ -85,10 +85,19 @@ async function openPage(browser, sc) {
   await page.route(BASE + '**', r => r.fulfill({ status: 200, contentType: 'text/html; charset=utf-8', body: PAGE }));
   await page.route('https://www.youtube.com/iframe_api*', r => sc.cfg?.apiFail ? r.abort() : r.fulfill({ status: 200, contentType: 'text/javascript', body: FAKE }));
   await page.route('https://www.youtube.com/oembed*', r => {
+    nav.oembeds++;
     if (sc.cfg?.oembedFail) return r.abort();
     const u = new URL(r.request().url());
-    const id = (new URL(u.searchParams.get('url')).searchParams.get('v')) || '?';
-    return r.fulfill({ status: 200, contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify({ title: '곡 ' + id + (sc.cfg?.longTitles ? ' — 아주 긴 제목이 붙은 노래 (Official Music Video) [4K Remaster] 가사 포함 버전' : ''), author_name: '채널 ' + id.slice(0, 3) }) });
+    const asked = new URL(u.searchParams.get('url'));
+    const short = /^\/shorts\/([A-Za-z0-9_-]{11})$/.exec(asked.pathname);
+    const id = (short ? short[1] : asked.searchParams.get('v')) || '?';
+    // /shorts/ 주소만 안 되는 경우(유튜브가 바꿨을 때) — /watch?v= 로 이름은 받는다
+    if (short && sc.cfg?.shortsFail) return r.fulfill({ status: 404, contentType: 'text/plain', headers: { 'access-control-allow-origin': '*' }, body: 'Not Found' });
+    // 실제 oEmbed (2026-10 확인): /shorts/번호 로 물으면 영상 모양대로(세로 Shorts 113×200 · 가로 200×113), /watch?v= 는 늘 200×113
+    const tall = !!short && (sc.cfg?.portrait || []).includes(id);
+    const square = !!short && (sc.cfg?.square || []).includes(id);
+    const [w, h] = square ? [200, 200] : tall ? [113, 200] : [200, 113];
+    return r.fulfill({ status: 200, contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify({ title: '곡 ' + id + (sc.cfg?.longTitles ? ' — 아주 긴 제목이 붙은 노래 (Official Music Video) [4K Remaster] 가사 포함 버전' : ''), author_name: '채널 ' + id.slice(0, 3), width: w, height: h }) });
   });
   await page.route('https://i.ytimg.com/**', r => sc.cfg?.thumbFail ? r.abort() : r.fulfill({ status: 200, contentType: 'image/png', body: PNG }));
   await page.goto(BASE + stamp(sc.hash ?? '#v=dQw4w9WgXcQ&mix=1&t=' + encodeURIComponent('첫 곡 제목') + '&c=' + encodeURIComponent('첫 채널') + '&n=NOW'));
@@ -98,7 +107,7 @@ async function openPage(browser, sc) {
 
 // 글자 크게 (안드로이드 '글자 크기'처럼 글자만 키움)
 function textScaleCss(k) {
-  const sizes = [['#title', 18], ['#channel', 14], ['#status', 13], ['#time', 12], ['.next h2', 16], ['.next .t', 14], ['.tail a', 15], ['.tail p', 13], ['.tail button', 15], ['.pill', 15]];
+  const sizes = [['#title', 36], ['#channel', 28], ['#status', 26], ['#time', 24], ['.next h2', 32], ['.next .t', 28], ['.tail a', 30], ['.tail p', 26], ['.tail button', 30], ['.pill', 30]];
   return sizes.map(([s, px]) => `${s}{font-size:${(px * k).toFixed(1)}px !important}`).join('\n');
 }
 
@@ -126,7 +135,8 @@ async function snap(page) {
       scrollY, vw: innerWidth, vh: innerHeight, sw: document.scrollingElement.scrollWidth,
       frames: frames.length, box: b && { w: b.width, h: b.height, x: b.left, y: b.top },
       overlay,
-      player: p && { state: p.state, idx: p.getPlaylistIndex(), len: (p.getPlaylist() || []).length, id: p.curId(), vol: p.vol, muted: p.muted, ready: !!p.readyFired },
+      player: p && { state: p.state, idx: p.getPlaylistIndex(), len: (p.getPlaylist() || []).length, id: p.curId(), vol: p.vol, muted: p.muted, ready: !!p.readyFired, size: p.size },
+      sizes: (fy.sizes || []).slice(),
       violations: fy.violations.slice(), soft: fy.soft.length,
       wake: { ...window.__wl, sentinels: undefined },
       title: document.getElementById('title')?.textContent || '',
@@ -147,7 +157,7 @@ async function snap(page) {
   });
 }
 
-// 둥근 화면: 보이는(흐리지 않은) 요소가 원 밖으로 4px 넘게 나가는지
+// 둥근 화면: 보이는(흐리지 않은) 요소가 원 밖으로 8px(화면 폭 480 기준 — 예전 240 기준 4px) 넘게 나가는지
 async function fitCheck(page) {
   return page.evaluate(async () => {
     // 맞추기는 화면 그리기(rAF)에서 한다 — 그 화면의 rAF 가 다 끝난 뒤(사용자가 보는 그 화면)에 잰다
@@ -166,7 +176,7 @@ async function fitCheck(page) {
       for (const yy of [Math.max(b.top, 0), Math.min(b.bottom, innerHeight)]) {
         const dy = Math.abs(yy - cy); const half = dy >= r ? 0 : Math.sqrt(r * r - dy * dy);
         const over = Math.max(cx - half - L, R - (cx + half));
-        if (over > 4) bad.push(`${el.id || el.className}(${el.textContent.trim().slice(0, 12)}) +${over.toFixed(1)}px y=${Math.round(yy)} op=${op}`);
+        if (over > 8) bad.push(`${el.id || el.className}(${el.textContent.trim().slice(0, 12)}) +${over.toFixed(1)}px y=${Math.round(yy)} op=${op}`);
       }
     }
     return bad;
@@ -206,7 +216,18 @@ class Checker {
   check(step, s, errors) {
     if (errors.length) this.fail(step, '페이지 오류: ' + errors.join(' | '), s), errors.length = 0;
     if (s.frames > 1) this.fail(step, `플레이어가 ${s.frames}개`, s);
-    if (s.box && (Math.abs(s.box.w - 200) > 0.6 || Math.abs(s.box.h - 200) > 0.6)) this.fail(step, `플레이어 크기 ${s.box.w}×${s.box.h}`, s);
+    if (s.box) {
+      const { w, h } = s.box;
+      if (w < 199.5 || h < 199.5) this.fail(step, `플레이어 칸이 200×200 보다 작음 ${w}×${h}`, s);
+      const ps = s.player?.size;
+      if (ps && s.player.ready && (Math.abs(ps[0] - w) > 1 || Math.abs(ps[1] - h) > 1)) this.fail(step, `플레이어가 아는 크기 ${ps.join('×')} ≠ 보이는 칸 ${w.toFixed(1)}×${h.toFixed(1)}`, s);
+      // 첫 화면(칸이 화면 가운데)일 때: 칸이 둥근 화면 안에 통째로 들어가고(유튜브 제목·조작 줄이 잘리지 않게), 둥근 화면이 허락하는 만큼 크게
+      if (Math.abs(s.box.x + w / 2 - s.vw / 2) < 1.5 && Math.abs(s.box.y + h / 2 - s.vh / 2) < 1.5) {
+        const R = Math.min(s.vw, s.vh) / 2, half = Math.hypot(w, h) / 2;
+        if (half > R + 0.5) this.fail(step, `플레이어 칸 모서리가 둥근 화면 밖 (${w.toFixed(0)}×${h.toFixed(0)}, 반지름 ${R.toFixed(0)})`, s);
+        if (half < R - 24) this.fail(step, `플레이어 칸이 둥근 화면보다 많이 작음 (${w.toFixed(0)}×${h.toFixed(0)}, 반지름 ${R.toFixed(0)})`, s);
+      }
+    }
     if (s.overlay) this.fail(step, '플레이어 위에 겹침: ' + s.overlay, s);
     if (s.sw > s.vw + 1) this.fail(step, `가로 넘침 ${s.sw} > ${s.vw}`, s);
     for (const v of s.violations) this.fail(step, '유튜브 규칙 위반: ' + JSON.stringify(v), s);
@@ -317,6 +338,7 @@ const A = {
     if (showFirst) { await A.show(page); await A.thaw(page); } else { await A.thaw(page); await page.waitForTimeout(50); await A.show(page); }
   },
   async back(page) { await page.evaluate(() => history.back()); },
+  async resize(page, [w, h]) { await page.setViewportSize({ width: w, height: h }); },
 };
 
 // ---------- 정해 둔 시나리오 ----------
@@ -327,6 +349,37 @@ const PL = 'PLtestlist0001';
 const PLAYLISTS = { [PL]: [Q1, Q2, Q3, Q4] };
 const MIX0 = ['dQw4w9WgXcQ', 'dQw4wx00001', 'dQw4wx00002'];   // 가짜 플레이어의 첫 믹스 (mixLen 3)
 const scripted = [
+  // 플레이어 칸은 영상 모양대로 — 가로 영상 = 가로로 긴 칸, 세로 영상 = 세로로 긴 칸 (둥근 화면 안에 통째로 — 불변식)
+  { name: '칸_가로영상', cfg: { autoplay: true, mixLen: 3, duration: 30 }, steps: [
+    ['wait', 1500], ['expect', s => s.box && s.box.w > s.box.h * 1.6 && s.player?.state === 1, '가로 영상은 가로로 긴 칸'] ] },
+  { name: '칸_세로영상_앱이알림', hash: '#v=dQw4w9WgXcQ&mix=1&o=p&n=NOW', cfg: { autoplay: true, mixLen: 3, duration: 30, portrait: ['dQw4w9WgXcQ'] }, steps: [
+    ['wait', 1500], ['expect', s => s.box && s.box.h > s.box.w * 1.6 && s.player?.state === 1 && s.sizes.length === 0, '앱이 세로라고 알린 첫 동영상은 처음부터 세로 칸 (만든 뒤 크기를 바꾸지 않음)'] ] },
+  { name: '칸_믹스다음곡세로', cfg: { autoplay: true, mixLen: 4, duration: 30, speed: 2, durations: { dQw4w9WgXcQ: 3, dQw4wx00001: 4 }, portrait: ['dQw4wx00001'] }, steps: [
+    ['wait', 900], ['expect', s => s.box && s.box.w > s.box.h && s.player?.id === 'dQw4w9WgXcQ', '첫 곡은 가로 칸'],
+    ['wait', 1800], ['expect', s => s.player?.id === 'dQw4wx00001' && s.box && s.box.h > s.box.w * 1.6, '믹스가 고른 다음 곡이 세로면 세로 칸으로 (setSize)'],
+    ['wait', 1800], ['expect', s => s.player?.id === 'dQw4wx00002' && s.box && s.box.w > s.box.h * 1.6, '그다음 가로 곡은 다시 가로 칸'],
+    ['scrollToNow'], ['wait', 300], ['tap', '#prev'], ['wait', 1500], ['expect', s => s.player?.id === 'dQw4wx00001' && s.box && s.box.h > s.box.w, '⏮ 로 세로 곡에 돌아가면 다시 세로 칸'] ] },
+  // 리뷰에서 찾음: 믹스를 못 불러와 이 동영상만 다시 틀 때도 앱이 알린 것(세로 o=p · 어린이용 k=1)을 그대로
+  { name: '칸_믹스오류_한곡으로_세로그대로', hash: '#v=dQw4w9WgXcQ&mix=1&o=p&k=1&app=1&n=NOW', cfg: { autoplay: true, mixError: 2, duration: 30, oembedFail: true }, steps: [
+    ['wait', 2500], ['expect', s => s.pcount === 2 && s.player?.state === 1 && s.box && s.box.h > s.box.w * 1.6, '한 곡으로 다시 틀어도 세로 칸'],
+    ['expect', s => s.recs.length === 0, '어린이용 표시도 그대로 (알리지 않음)'] ] },
+  // 앱은 세로·정사각을 '세로'로 안다(o=p) — oEmbed 가 정사각이라고 하면 정사각 칸 (세로 칸에 작게 두지 않음)
+  { name: '칸_정사각영상', hash: '#v=dQw4w9WgXcQ&mix=1&o=p&n=NOW', cfg: { autoplay: true, mixLen: 3, duration: 30, square: ['dQw4w9WgXcQ'] }, steps: [
+    ['wait', 1500], ['expect', s => s.box && Math.abs(s.box.w - s.box.h) <= 2 && Math.hypot(s.box.w, s.box.h) > Math.min(s.vw, s.vh) - 30, '정사각 영상은 정사각 칸 (둥근 화면에 맞게 크게)'] ] },
+  // /shorts/ 로 묻는 것이 안 되면(유튜브가 바꿈) /watch?v= 로 이름은 받고 칸은 가로(기본)
+  { name: '칸_shorts주소안됨_이름은나옴', cfg: { autoplay: true, mixLen: 3, duration: 30, shortsFail: true }, steps: [
+    ['wait', 1500], ['scrollToNow'], ['wait', 300], ['expect', s => s.title === '곡 dQw4w9WgXcQ' && s.player?.state === 1, '이름은 /watch?v= 로'],
+    ['expect', s => s.box && s.box.w > s.box.h, '모양을 모르면 가로 칸'] ] },
+  // oEmbed 가 안 되면(인터넷·차단) 상태가 바뀔 때마다 또 묻지 않는다 (1분에 한 번)
+  { name: '칸_oEmbed실패_되풀이안함', cfg: { autoplay: true, mixLen: 4, duration: 2, speed: 2, oembedFail: true }, steps: [
+    ['wait', 6000], ['expect', s => s.player?.idx >= 2 && s.oembeds <= 10, '곡마다 한 번씩만 (/shorts 와 /watch 둘)'] ] },
+  // 화면 크기가 바뀌면(인터넷 앱의 막대 등) 칸도 다시 — 플레이어에도 알림 (setSize)
+  { name: '칸_화면크기바뀜', cfg: { autoplay: true, mixLen: 3, duration: 30 }, steps: [
+    ['wait', 1500], ['resize', [226, 196]], ['wait', 900], ['expect', s => s.box && s.box.h >= 199.5 && s.box.w > s.box.h && s.vh < s.vw, '낮은 화면: 칸이 줄어 둥근 화면 안에'],
+    ['resize', [226, 226]], ['wait', 900], ['expect', s => s.box && s.box.w > 400 && s.vh === s.vw, '되돌리면 다시 크게'] ] },
+  { name: '칸_모양모름_가로', hash: '#v=dQw4w9WgXcQ&mix=1&o=p&n=NOW', cfg: { autoplay: true, mixLen: 3, duration: 30, speed: 2, durations: { dQw4w9WgXcQ: 2 }, oembedFail: true }, steps: [
+    ['wait', 900], ['expect', s => s.box && s.box.h > s.box.w, '앱이 알린 세로는 oEmbed 없이도 세로'],
+    ['wait', 1800], ['expect', s => s.player?.id === 'dQw4wx00001' && s.box && s.box.w > s.box.h, '모양을 모르는 다음 곡은 가로 칸 (기본)'] ] },
   { name: '목록재생_ids', hash: `#v=${Q1}&ids=${Q2},${Q3},${Q4}&t=${encodeURIComponent('첫 동영상')}&n=NOW`, cfg: { autoplay: true, duration: 8, speed: 2 }, steps: [
     ['wait', 1500], ['expect', s => s.player?.len === 4 && s.player?.idx === 0 && s.player?.id === Q1 && s.player?.state === 1, '고른 동영상부터 앱의 목록 그대로'],
     ['scroll', 0.8], ['wait', 500], ['expect', s => s.nUp === 3, '다음 동영상 3개'],
@@ -367,7 +420,7 @@ const scripted = [
     ['hash', `#v=${Q3}&list=${PL}&app=1&n=NOW`], ['wait', 1500], ['expect', s => s.recs.length === 0 && s.player?.len === 4 && s.player?.state === 1, '재생목록(list=)도 알리지 않음'] ] },
   // 채널 이름을 누르면 지금 동영상의 채널로 (앱이 채널을 찾아 채널 화면) — 멈추고 간다
   { name: '채널링크', hash: `#v=${Q1}&ids=${Q2},${Q3}&app=1&c=${encodeURIComponent('첫 채널')}&n=NOW`, cfg: { autoplay: true, duration: 30 }, steps: [
-    ['wait', 1500], ['scrollToNow'], ['wait', 300], ['expect', s => s.chan?.tag === 'BUTTON' && !s.chan.hidden && s.chan.h >= 32 && s.chan.label === '채널 qAA 채널로 가기' && /›/.test(s.channel), '채널 이름 = 누를 수 있는 단추 (32px 이상, › 표시)'],
+    ['wait', 1500], ['scrollToNow'], ['wait', 300], ['expect', s => s.chan?.tag === 'BUTTON' && !s.chan.hidden && s.chan.h >= 64 && s.chan.label === '채널 qAA 채널로 가기' && /›/.test(s.channel), '채널 이름 = 누를 수 있는 단추 (64px 이상, › 표시)'],
     ['tap', '#next'], ['wait', 1500], ['expect', s => s.player?.id === Q2 && s.player?.state === 1, '다음 동영상 재생 중'],
     ['tap', '#channel'], ['wait', 500], ['expect', s => s.navs.length === 1 && s.navs[0] === 'kakaowatch://tube/channel?v=' + Q2 && s.player?.state !== 1, '앱 안: 지금 동영상의 채널로 + 멈춤'] ] },
   { name: '채널링크_인터넷앱', hash: `#v=${ID2}&n=NOW`, cfg: { autoplay: true, duration: 30 }, steps: [
@@ -537,7 +590,7 @@ const viewports = [
 
 async function runScenario(browser, sc, label) {
   const { ctx, page, errors, nav } = await openPage(browser, sc);
-  const snapN = async () => { const s = await snap(page); s.loads = nav.loads; return s; };
+  const snapN = async () => { const s = await snap(page); s.loads = nav.loads; s.oembeds = nav.oembeds; return s; };
   const ck = new Checker(label);
   let i = 0;
   try {
@@ -598,11 +651,12 @@ function randomScenario(seed, steps) {
     wakeLock: pick(['ok', 'ok', 'ok', 'reject', 'none']), oembedFail: r() < 0.1, thumbFail: r() < 0.1, minuteMs: 200,
     bufferMs: 150 + Math.floor(r() * 600), longTitles: r() < 0.3, pauseLate: r() < 0.3,
     syncEvents: r() < 0.2, lateIndex: r() < 0.25, cueStall: r() < 0.05, clock: r() < 0.3,
+    portrait: r() < 0.4 ? [pick(['dQw4wx00001', 'dQw4wx00002', ID2, Q2, 'dQw4w9WgXcQ'])] : undefined,
   };
   const vp = pick(viewports);
   cfg.playlists = PLAYLISTS;
   const hashes = ['#v=' + ID2 + '&mix=1', '#v=' + ID3, '#v=dQw4w9WgXcQ&mix=1', '#v=' + ID2 + '&t=' + encodeURIComponent('다른 곡'),
-    `#v=${Q1}&ids=${Q2},${Q3},${Q4}`, `#v=${Q2}&list=${PL}&app=1`, `#v=${Q4}&ids=${Q1}&app=1`, '#v=' + ID2 + '&mix=1&app=1', '#v=' + ID3 + '&mix=1&app=1&k=1'];
+    `#v=${Q1}&ids=${Q2},${Q3},${Q4}`, `#v=${Q2}&list=${PL}&app=1`, `#v=${Q4}&ids=${Q1}&app=1`, '#v=' + ID2 + '&mix=1&app=1', '#v=' + ID3 + '&mix=1&app=1&k=1', '#v=' + ID2 + '&mix=1&o=p&app=1'];
   const list = [];
   for (let k = 0; k < steps; k++) {
     const x = r();
@@ -633,7 +687,8 @@ const only = args.only ? new RegExp(args.only) : null;
 if (!args.random || args.scripted) {
   for (const sc of scripted) {
     if (only && !only.test(sc.name)) continue;
-    const vps = args.allvp ? viewports : [viewports[0]];
+    let vps = args.allvp ? viewports : [viewports[0]];
+    if (args.vp) vps = viewports.filter(v => String(args.vp).split(',').includes(v.tag));   // --vp=226x196,226_text1.3
     for (const vp of vps) {
       const label = `${sc.name}@${vp.tag}`;
       let fails = await runScenario(browser, { ...vp, ...sc }, label);

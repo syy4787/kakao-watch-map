@@ -441,22 +441,30 @@ class TubePlayerActivity : ComponentActivity() {
     private object Engine {
         private var runtime: GeckoRuntime? = null
 
-        fun runtime(context: Context): GeckoRuntime = runtime ?: GeckoRuntime.create(
-            context,
-            GeckoRuntimeSettings.Builder()
-                .consoleOutput(BuildConfig.DEBUG)
-                .remoteDebuggingEnabled(false)
-                .aboutConfigEnabled(false)
-                .javaScriptEnabled(true)
-                .loginAutofillEnabled(false)
-                .doubleTapZoomingEnabled(false)
-                .inputAutoZoomEnabled(false)
-                .preferredColorScheme(GeckoRuntimeSettings.COLOR_SCHEME_DARK)
-                .build(),
-        ).also { runtime = it }
+        fun runtime(context: Context): GeckoRuntime = runtime ?: GeckoRuntime.create(context, engineSettings()).also { runtime = it }
     }
 
     companion object {
+        /**
+         * 엔진 설정. 화면 밀도 1 = CSS 1px 이 화면 1px — 재생 화면은 폭 480 으로 고정(워치 화면과 1:1)이라 배치는 그대로이고,
+         * 유튜브는 칸 크기 × 밀도로 화질을 고르므로 밀도를 그대로(2.125) 두면 같은 크기에 두 배 해상도(데이터·배터리·열)를 받는다.
+         * 글자 키우기(폰트 부풀리기·배율)는 쓰지 않는다 — 페이지가 정한 크기 그대로
+         */
+        @VisibleForTesting
+        internal fun engineSettings(): GeckoRuntimeSettings = GeckoRuntimeSettings.Builder()
+            .consoleOutput(BuildConfig.DEBUG)
+            .remoteDebuggingEnabled(false)
+            .aboutConfigEnabled(false)
+            .javaScriptEnabled(true)
+            .loginAutofillEnabled(false)
+            .doubleTapZoomingEnabled(false)
+            .inputAutoZoomEnabled(false)
+            .displayDensityOverride(1f)
+            .fontInflation(false)
+            .fontSizeFactor(1f)
+            .preferredColorScheme(GeckoRuntimeSettings.COLOR_SCHEME_DARK)
+            .build()
+
         const val EXTRA_URL = "url"
         /** Shorts 재생 화면 (재생 화면 주소 아래) */
         private const val SHORTS_PAGE = "shorts.html"
