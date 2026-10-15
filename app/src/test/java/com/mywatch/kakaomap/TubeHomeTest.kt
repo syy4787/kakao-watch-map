@@ -174,6 +174,13 @@ class TubeHomeTest {
         assertEquals((1..8).map { id("b", it) }, ids(TubeHome.mixSeeds(ctx(history = many), chart)))
     }
 
+    /** 메뉴의 '재생'으로 본 Shorts 도 기록에 남지만 믹스의 씨앗은 아니다 (세로 30초짜리로 시작하는 믹스는 이상하다) */
+    @Test
+    fun shortsInTheHistoryAreNotMixSeeds() {
+        val history = listOf(v("a", 1, cat = "10", short = true), v("a", 2, cat = "10"), v("a", 3), v("a", 4), v("a", 5))
+        assertEquals(listOf(id("a", 2), id("a", 3), id("a", 4), id("a", 5)), ids(TubeHome.mixSeeds(ctx(history = history), emptyList())))
+    }
+
     // ---------------- 채널·Shorts 고르기 ----------------
 
     @Test

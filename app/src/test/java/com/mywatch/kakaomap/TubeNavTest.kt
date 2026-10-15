@@ -383,6 +383,35 @@ class TubeNavTest {
         assertNull("로그아웃 전에 묻던 내 데이터가 늦게 와도 남기지 않는다", l.slot(Feed.Liked).page)
     }
 
+    /**
+     * 받은 것으로 새로 정해진 받을 거리만 받는다 ([TubeLoader.loadNew]) — 받기가 끝날 때마다 실패한 것까지 또 받으면
+     * 받기 → 실패 → 또 받기가 끝없이 돌았다 (인터넷이 없으면 배터리, 유튜브 오류면 하루 한도까지)
+     */
+    @Test
+    fun onlyNewFeedsAreFetchedSoAFailureIsNotRetriedInALoop() {
+        val fake = Fake()
+        val l = loader(fake)
+        fake.fail = ApiException("네트워크 연결을 확인하세요")
+        val f = Feed.ShortsSearch
+        l.loadNew(f)
+        assertEquals(1, fake.asked.size)
+        assertEquals("네트워크 연결을 확인하세요", l.slot(f).error)
+        l.loadNew(f)
+        assertEquals("실패한 것은 또 받지 않는다 (다시 시도·화면을 다시 열 때만)", 1, fake.asked.size)
+        l.load(f)
+        assertEquals("화면을 열면 다시", 2, fake.asked.size)
+        fake.fail = null
+        fake.gate = CompletableDeferred()
+        val g = Feed.Live
+        l.loadNew(g)
+        l.loadNew(g)
+        assertEquals("받는 중이면 또 묻지 않는다", 3, fake.asked.size)
+        fake.gate!!.complete(Unit)
+        l.loadNew(g)
+        assertEquals("받은 것은 그대로", 3, fake.asked.size)
+        assertEquals(2, l.slot(g).page?.videos?.size)
+    }
+
     /** 믹스 추천이 새로 오면 홈이 받을 거리(Recs)의 열쇠가 바뀐다 — 예전 것은 지우고 받는 중이던 것도 버린다 (메모리) */
     @Test
     fun forgettingOldFeedsDropsTheirSlotsAndRunningJobs() {

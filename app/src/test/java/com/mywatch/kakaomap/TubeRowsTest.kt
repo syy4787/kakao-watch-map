@@ -6,6 +6,8 @@ import android.graphics.Bitmap
 import android.widget.ImageView
 import androidx.core.graphics.drawable.RoundedBitmapDrawable
 import com.mywatch.kakaomap.tube.DeviceCode
+import com.mywatch.kakaomap.tube.HomeChip
+import com.mywatch.kakaomap.tube.HomeFeed
 import com.mywatch.kakaomap.tube.Played
 import com.mywatch.kakaomap.tube.Queue
 import com.mywatch.kakaomap.tube.TubeChannel
@@ -18,7 +20,10 @@ import com.mywatch.kakaomap.ui.TubeRows
 import com.mywatch.kakaomap.ui.TubeRows.Account
 import com.mywatch.kakaomap.ui.TubeRows.LoginState
 import com.mywatch.kakaomap.ui.TubeThumbs
+import com.mywatch.kakaomap.ui.tube.ChannelTab
 import com.mywatch.kakaomap.ui.tube.Slot
+import com.mywatch.kakaomap.ui.tube.SubsChip
+import com.mywatch.kakaomap.ui.tube.TubeTab
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -104,74 +109,99 @@ class TubeRowsTest {
     }
 
     @Test
-    fun aCardReadsLikeTheYouTubeApp() {
-        val rows = TubeRows.chart(c, "인기 음악", ready(*videos.toTypedArray()), now)
+    fun aCardReadsLikeTheYouTubeAppAndContinuesAsAMix() {
+        val rows = TubeRows.history(c, videos.map { Played(it, now) }, now)
         val first = cards(rows).first()
         assertEquals("1theK (원더케이) · 조회수 1.2만회 · 3일 전", first.meta)
-        // 누르면 그 동영상부터 (워치에서 못 트는 것은 빼고) 목록 그대로 이어서
-        assertEquals(Queue.Ids(listOf("aaaaaaaaaa2", "aaaaaaaaaa4", "aaaaaaaaaa5", "aaaaaaaaaa6")), first.queue)
+        // 유튜브 앱처럼: 누르면 그 동영상부터, 다음은 유튜브가 고른 비슷한 동영상 (믹스)
+        assertEquals(Queue.Mix, first.queue)
         // 둘째 줄이 길면 끝이 잘리므로 '폰에서 재생'은 맨 앞에 (가장 중요한 정보)
         assertEquals("올린 사람이 막아 둔 동영상은 폰에서", "폰에서 재생 · 1theK (원더케이) · 조회수 1.2만회 · 3일 전", cards(rows)[2].meta)
         val live = TubeRows.card(c, TubeVideo("jfKfPfyJRdk", "lofi", "Lofi Girl", live = true), now, Queue.Single)
         assertEquals("Lofi Girl", live.meta)
         val bare = TubeRows.card(c, TubeVideo("bbbbbbbbbbb", "제목", ""), now, Queue.Single)
         assertEquals("", bare.meta)
+        // 좋아요는 재생목록처럼 목록 순서대로 (워치에서 못 트는 것은 빼고)
+        val liked = TubeRows.liked(c, ready(*videos.toTypedArray()), now)
+        assertEquals(Queue.Ids(listOf("aaaaaaaaaa2", "aaaaaaaaaa4", "aaaaaaaaaa5", "aaaaaaaaaa6")), cards(liked).first().queue)
+    }
+
+    private val shorts = (1..3).map { v("shortaaaa0$it").copy(portrait = true, durationSec = 30) }
+
+    @Test
+    fun homeHasTabsSearchChipsAndTheFeedWithAShortsShelf() {
+        val rows = TubeRows.home(
+            c, TubeRows.HomeData(HomeChip.ALL, HomeFeed(videos.take(5), shorts, shelfAt = 3), TubeRows.Load(), ready(videos[0], next = "T2"), update = false, now = now),
+        )
+        assertEquals("유튜브", (rows[0] as Row.Header).title)
+        assertEquals(Row.Tabs(TubeTab.HOME), rows[1])
+        assertTrue("탭 아래 흰 '검색'", (rows[2] as Row.Action).let { it.id == TubeRows.A_SEARCH && it.accent })
+        val bar = rows[3] as Row.ChipBar
+        assertEquals(TubeRows.BAR_HOME, bar.bar)
+        assertEquals("ALL", bar.selected)
+        assertEquals(listOf("전체", "믹스", "음악", "게임", "실시간", "뉴스", "최근 업로드", "감상한 동영상", "새로운 맞춤 동영상"), bar.chips.map { it.second })
+        val kinds = rows.drop(4).map { it::class.simpleName }
+        assertEquals(listOf("VideoCard", "VideoCard", "VideoCard", "ShortsShelf", "VideoCard", "VideoCard", "Action"), kinds)
+        assertEquals(shorts, rows.filterIsInstance<Row.ShortsShelf>().single().videos)
+        assertTrue("홈의 동영상은 믹스로 이어서", cards(rows).all { it.queue == Queue.Mix })
+        assertEquals(TubeRows.A_MORE, (rows.last() as Row.Action).id)
+        // 새 버전이 있으면 맨 위 (검색은 그때 회색)
+        val update = TubeRows.home(c, TubeRows.HomeData(HomeChip.ALL, HomeFeed(videos.take(1)), TubeRows.Load(), null, update = true, now = now))
+        assertEquals(TubeRows.A_UPDATE, (update[1] as Row.Action).id)
+        assertFalse(update.filterIsInstance<Row.Action>().first { it.id == TubeRows.A_SEARCH }.accent)
     }
 
     @Test
-    fun homeHasTheSectionsInOrderWhenSignedOut() {
-        val rows = TubeRows.home(
-            c, TubeRows.HomeData(
-                history = listOf(Played(videos[0], now - 1000), Played(videos[1], now - 2000)),
-                searches = listOf("아이유 밤편지", "뉴진스"),
-                feed = null,
-                music = ready(*videos.toTypedArray(), next = "M2"),
-                popular = loading,
-                account = Account(configured = true, signedIn = false),
-                update = false,
-                now = now,
-            ),
-        )
-        assertEquals(listOf("유튜브", "이어서 보기", "인기 음악", "인기 동영상", "최근 검색"), headers(rows))
-        assertTrue("맨 위 흰 '검색'", (rows[1] as Row.Action).let { it.id == TubeRows.A_SEARCH && it.accent })
-        assertTrue("구독·보관함 둘이 한 줄", rows.any { it is Row.Chips && it.items.map { i -> i.id } == listOf(TubeRows.A_SUBS, TubeRows.A_LIBRARY) })
-        assertTrue("인기 음악은 몇 개만 + 더 보기", actions(rows).contains(TubeRows.A_CHART_MUSIC))
-        assertTrue("불러오는 중엔 회색 자리", rows.any { it is Row.Skeleton })
-        assertTrue(actions(rows).contains(TubeRows.A_QUERY + "아이유 밤편지"))
-        assertTrue("로그인 버튼", actions(rows).contains(TubeRows.A_LOGIN))
-        assertFalse(actions(rows).contains(TubeRows.A_UPDATE))
+    fun homeShowsPlaceholdersWhileLoadingAndWhyWhenItFailed() {
+        fun home(chip: HomeChip, feed: HomeFeed, load: TubeRows.Load) = TubeRows.home(c, TubeRows.HomeData(chip, feed, load, null, false, now))
+        val loading = home(HomeChip.ALL, HomeFeed(emptyList()), TubeRows.Load(loading = true))
+        assertEquals("받는 중엔 회색 자리 셋", 3, loading.count { it is Row.Skeleton })
+        val some = home(HomeChip.ALL, HomeFeed(videos.take(2)), TubeRows.Load(loading = true))
+        assertEquals("받은 것은 먼저 보여 주고 아래에 회색 자리 하나", listOf("VideoCard", "VideoCard", "Skeleton"), some.drop(4).map { it::class.simpleName })
+        val failed = home(HomeChip.ALL, HomeFeed(emptyList()), TubeRows.Load(error = "네트워크 연결을 확인하세요"))
+        assertTrue(failed.any { it is Row.Note && it.text == "네트워크 연결을 확인하세요" })
+        assertTrue(actions(failed).contains(TubeRows.A_RETRY))
+        val live = home(HomeChip.LIVE, HomeFeed(emptyList()), TubeRows.Load())
+        assertTrue(live.any { it is Row.Note && it.text == c.getString(R.string.tube_empty_live) })
+        assertEquals("LIVE", live.filterIsInstance<Row.ChipBar>().single().selected)
     }
 
     @Test
-    fun homeWhenSignedInShowsTheSubscriptionFeedAndMyAccount() {
-        val rows = TubeRows.home(
-            c, TubeRows.HomeData(
-                history = emptyList(), searches = emptyList(),
-                feed = ready(*videos.toTypedArray()),
-                music = ready(videos[0]), popular = ready(videos[1]),
-                account = Account(configured = true, signedIn = true, channel = channel),
-                update = true, now = now,
-            ),
-        )
-        assertEquals(listOf("유튜브", "구독 새 동영상", "인기 음악", "인기 동영상"), headers(rows))
-        assertEquals("새 버전이 있으면 맨 위", TubeRows.A_UPDATE, (rows[1] as Row.Action).id)
-        assertTrue(actions(rows).contains(TubeRows.A_SUBS_MORE))
-        val account = rows.filterIsInstance<Row.Action>().first { it.id == TubeRows.A_ACCOUNT }
-        assertEquals("1theK (원더케이)", account.text)
-        assertFalse(actions(rows).contains(TubeRows.A_LOGIN))
-
-        val off = TubeRows.home(c, TubeRows.HomeData(emptyList(), emptyList(), null, loading, loading, Account(configured = false, signedIn = false), false, now))
-        assertFalse("로그인 키가 없는 빌드엔 로그인 버튼 대신 안내", actions(off).contains(TubeRows.A_LOGIN))
-        assertTrue(off.any { it is Row.Note && it.text == c.getString(R.string.tube_login_unavailable) })
+    fun theMixesChipShowsMixCardsThatPlayAMix() {
+        val rows = TubeRows.home(c, TubeRows.HomeData(HomeChip.MIXES, HomeFeed(videos.take(2)), TubeRows.Load(), null, false, now))
+        val mixes = cards(rows)
+        assertEquals(2, mixes.size)
+        assertTrue(mixes.all { it.queue == Queue.Mix && it.badge == "믹스" })
+        assertEquals("제목은 그대로 (기록·재생 화면에 '믹스'가 붙지 않게)", videos[0].title, mixes[0].video.title)
+        assertEquals("1theK (원더케이) 외 · 믹스", mixes[0].meta)
     }
 
     @Test
     fun aFailedSectionSaysWhyAndCanBeRetried() {
-        val rows = TubeRows.chart(c, "인기 동영상", Slot(error = "네트워크 연결을 확인하세요"), now)
+        val rows = TubeRows.channel(c, "1theK", ChannelTab.VIDEOS, Slot(), Slot(error = "네트워크 연결을 확인하세요"), Slot(), now)
         assertTrue(rows.any { it is Row.Note && it.text == "네트워크 연결을 확인하세요" })
         assertTrue(actions(rows).contains(TubeRows.A_RETRY))
         val signIn = TubeRows.liked(c, Slot(error = "로그인이 필요해요", signIn = true), now)
         assertTrue("로그인이 풀렸으면 로그인 버튼", actions(signIn).contains(TubeRows.A_LOGIN))
+    }
+
+    @Test
+    fun theShortsTabIsAGridWithAPlayButton() {
+        val rows = TubeRows.shorts(c, shorts, TubeRows.Load())
+        assertEquals(listOf("Header", "Tabs", "Action", "ShortsPair", "ShortsPair"), rows.map { it::class.simpleName })
+        assertEquals(TubeRows.A_SHORTS_PLAY, (rows[2] as Row.Action).id)
+        assertEquals(Row.ShortsPair(shorts, 2), rows.last())
+        val none = TubeRows.shorts(c, emptyList(), TubeRows.Load())
+        assertTrue(none.any { it is Row.Note && it.text == c.getString(R.string.tube_shorts_empty) })
+        assertFalse(actions(none).contains(TubeRows.A_SHORTS_PLAY))
+    }
+
+    @Test
+    fun theSearchPageOffersVoiceAndRecentSearches() {
+        val rows = TubeRows.find(c, listOf("아이유 밤편지", "뉴진스"))
+        assertTrue((rows[1] as Row.Action).let { it.id == TubeRows.A_INPUT && it.accent })
+        assertEquals(listOf(TubeRows.A_INPUT, TubeRows.A_QUERY + "아이유 밤편지", TubeRows.A_QUERY + "뉴진스", TubeRows.A_CLEAR_SEARCHES), actions(rows))
+        assertEquals(listOf(TubeRows.A_INPUT), actions(TubeRows.find(c, emptyList())))
     }
 
     @Test
@@ -187,6 +217,12 @@ class TubeRowsTest {
         assertEquals("ChannelItem", kinds[1])
         assertTrue("재생목록은 동영상 사이에", kinds.indexOf("PlaylistItem") in (kinds.indexOf("VideoCard") + 1) until kinds.lastIndexOf("VideoCard"))
         assertEquals("구독자 2530만명 · 동영상 1.3만개", rows.filterIsInstance<Row.ChannelItem>().single().sub)
+        assertTrue("검색 결과도 믹스로 이어서", cards(rows).all { it.queue == Queue.Mix })
+        // 결과 속 Shorts(둘 이상)는 셋째 동영상 뒤 선반으로
+        val withShorts = TubeRows.search(c, "아이유", Slot(page = TubePage(videos.take(4) + shorts, null), source = TubeSource.YOUTUBE), now)
+        assertEquals(listOf("Header", "VideoCard", "VideoCard", "VideoCard", "ShortsShelf", "VideoCard"), withShorts.map { it::class.simpleName }.takeWhile { it != "Action" })
+        val oneShort = TubeRows.search(c, "아이유", Slot(page = TubePage(videos.take(1) + shorts.take(1), null), source = TubeSource.YOUTUBE), now)
+        assertEquals("하나뿐이면 카드로", 2, cards(oneShort).size)
         assertTrue(actions(rows).containsAll(listOf(TubeRows.A_MORE, TubeRows.A_SEARCH, TubeRows.A_PHONE_SEARCH)))
         val kakao = TubeRows.search(c, "아이유", Slot(page = TubePage(videos.take(1), null), source = TubeSource.KAKAO, note = "오늘 유튜브 검색 한도를 다 써서 카카오 동영상 검색으로 찾았어요"), now)
         assertTrue(kakao.any { it is Row.Note && it.text.startsWith("오늘 유튜브 검색 한도") })
@@ -227,35 +263,47 @@ class TubeRowsTest {
     }
 
     @Test
-    fun placeholdersAreAsManyAsTheCardsThatWillCome() {
-        val rows = TubeRows.home(
-            c, TubeRows.HomeData(
-                history = emptyList(), searches = emptyList(), feed = Slot(loading = true),
-                music = loading, popular = loading,
-                account = Account(configured = true, signedIn = true), update = false, now = now,
-            ),
-        )
-        fun section(title: String) = rows.dropWhile { !(it is Row.Header && it.title == title) }.drop(1).takeWhile { it !is Row.Header }
-        assertEquals("구독 새 동영상 3개 자리", 3, section(c.getString(R.string.tube_feed)).count { it is Row.Skeleton })
-        assertEquals("인기 음악 4개 자리", 4, section(c.getString(R.string.tube_chart_music)).count { it is Row.Skeleton })
-    }
-
-    @Test
-    fun aChannelPageShowsItsPictureVideosAndPlaylists() {
-        val rows = TubeRows.channel(
-            c, "1theK",
-            info = Slot(page = TubePage(emptyList(), null, channels = listOf(channel))),
-            videos = ready(*videos.take(2).toTypedArray(), next = "C2"),
-            playlists = Slot(page = TubePage(emptyList(), null, playlists = listOf(TubePlaylist("PL1aaaaaaaaaa", "라이브", "1theK", null, 12)))),
-            now = now,
-        )
+    fun aChannelPageHasChipsForVideosShortsLiveAndPlaylists() {
+        val info = Slot(page = TubePage(emptyList(), null, channels = listOf(channel)))
+        val lists = Slot(page = TubePage(emptyList(), null, playlists = listOf(TubePlaylist("PL1aaaaaaaaaa", "라이브", "1theK", null, 12))))
+        val rows = TubeRows.channel(c, "1theK", ChannelTab.VIDEOS, info, ready(*videos.take(2).toTypedArray(), next = "C2"), lists, now)
         val header = rows.first() as Row.Header
         assertEquals("1theK (원더케이)", header.title)
         assertEquals("https://yt3.ggpht.com/k=s240", header.avatar)
         assertEquals("구독자 2530만명 · 동영상 1.3만개", header.subtitle)
+        val bar = rows[1] as Row.ChipBar
+        assertEquals(listOf("동영상", "Shorts", "실시간", "재생목록"), bar.chips.map { it.second })
+        assertEquals("VIDEOS", bar.selected)
         assertEquals(2, cards(rows).size)
+        assertTrue(cards(rows).all { it.queue == Queue.Mix })
         assertTrue(actions(rows).contains(TubeRows.A_MORE))
-        assertEquals("1theK · 12개", rows.filterIsInstance<Row.PlaylistItem>().single().sub)
+        val sh = TubeRows.channel(c, "1theK", ChannelTab.SHORTS, info, ready(*shorts.toTypedArray()), lists, now)
+        assertEquals(2, sh.count { it is Row.ShortsPair })
+        val pl = TubeRows.channel(c, "1theK", ChannelTab.PLAYLISTS, info, Slot(), lists, now)
+        assertEquals("1theK · 12개", pl.filterIsInstance<Row.PlaylistItem>().single().sub)
+        val live = TubeRows.channel(c, "1theK", ChannelTab.LIVE, info, ready(), lists, now)
+        assertTrue(live.any { it is Row.Note && it.text == c.getString(R.string.tube_channel_live_empty) })
+    }
+
+    @Test
+    fun subscriptionsHaveChannelPicturesChipsAndAShortsShelf() {
+        val signedIn = Account(configured = true, signedIn = true, channel = channel)
+        val chans = Slot(page = TubePage(emptyList(), "SC2", channels = listOf(channel, channel.copy(id = "UC00000000000000000000x2", title = "둘"))))
+        val feed = ready(*(videos.take(4) + shorts).toTypedArray())
+        val rows = TubeRows.subscriptions(c, signedIn, SubsChip.ALL, chans, feed, null, null, now)
+        assertEquals(listOf("Header", "Tabs", "AvatarStrip", "ChipBar"), rows.take(4).map { it::class.simpleName })
+        assertTrue((rows[2] as Row.AvatarStrip).more)
+        assertEquals(listOf("VideoCard", "VideoCard", "VideoCard", "ShortsShelf", "VideoCard"), rows.drop(4).map { it::class.simpleName })
+        val onlyVideos = TubeRows.subscriptions(c, signedIn, SubsChip.VIDEOS, chans, feed, null, null, now)
+        assertEquals("동영상 칩엔 Shorts 없이", 4, cards(onlyVideos).size)
+        assertTrue(onlyVideos.none { it is Row.ShortsShelf })
+        val grid = TubeRows.subscriptions(c, signedIn, SubsChip.SHORTS, chans, feed, ready(shorts[0]), null, now)
+        assertEquals("구독 채널 Shorts + 피드 속 Shorts 를 격자로", 2, grid.count { it is Row.ShortsPair })
+        val live = TubeRows.subscriptions(c, signedIn, SubsChip.LIVE, chans, feed, null, ready(), now)
+        assertTrue(live.any { it is Row.Note && it.text == c.getString(R.string.tube_subs_live_empty) })
+        val out = TubeRows.subscriptions(c, Account(configured = true, signedIn = false), SubsChip.ALL, Slot(), Slot(), null, null, now)
+        assertTrue(actions(out).contains(TubeRows.A_LOGIN))
+        assertTrue(out.none { it is Row.ChipBar })
     }
 
     @Test
@@ -319,9 +367,12 @@ class TubeRowsTest {
     fun theVideoMenuOffersWhatMakesSense() {
         val rows = TubeRows.menu(c, videos[0], inHistory = true)
         assertEquals("aaaaaaaaaa1", (rows.first() as Row.Header).art)
-        assertEquals(listOf(TubeRows.A_PLAY, TubeRows.A_CHANNEL, TubeRows.A_ON_PHONE, TubeRows.A_FORGET, TubeRows.A_CANCEL), actions(rows))
+        assertEquals(
+            listOf(TubeRows.A_PLAY, TubeRows.A_CHANNEL, TubeRows.A_ON_PHONE, TubeRows.A_NOT_INTERESTED, TubeRows.A_NO_CHANNEL, TubeRows.A_FORGET, TubeRows.A_CANCEL),
+            actions(rows),
+        )
         val noChannel = TubeRows.menu(c, videos[0].copy(channelId = null), inHistory = false)
-        assertEquals(listOf(TubeRows.A_PLAY, TubeRows.A_ON_PHONE, TubeRows.A_CANCEL), actions(noChannel))
+        assertEquals(listOf(TubeRows.A_PLAY, TubeRows.A_ON_PHONE, TubeRows.A_NOT_INTERESTED, TubeRows.A_CANCEL), actions(noChannel))
         val phoneOnly = TubeRows.menu(c, videos[2], inHistory = false)
         val phone = phoneOnly.filterIsInstance<Row.Action>().first { it.accent }
         assertEquals("워치에서 못 트는 동영상은 폰이 주 버튼", TubeRows.A_ON_PHONE, phone.id)
@@ -339,14 +390,20 @@ class TubeRowsTest {
         assertEquals("약관·개인정보", (later.first() as Row.Header).title)
         assertEquals("이미 동의했으면 볼 것만", listOf(TubeRows.A_YT_TERMS, TubeRows.A_PRIVACY), actions(later))
         assertEquals("처리방침 주소를 모르면(로컬 빌드) 약관만", listOf(TubeRows.A_YT_TERMS), actions(TubeRows.terms(c, agreed = true, privacy = false)))
-        assertTrue("보관함에서 언제든", actions(TubeRows.library(c, 0, Account(configured = true, signedIn = false))).contains(TubeRows.A_TERMS))
+        assertTrue("'나'에서 언제든", actions(TubeRows.library(c, Account(configured = true, signedIn = false), emptyList(), 0, 0, false, now)).contains(TubeRows.A_TERMS))
     }
 
     @Test
-    fun theLibraryShowsMyListsOnlyWhenSignedIn() {
-        val out = TubeRows.library(c, history = 3, Account(configured = true, signedIn = false))
+    fun youShowsHistoryMyListsAndWhatIsKeptForRecommendations() {
+        val history = videos.take(3).map { Played(it, now) }
+        val out = TubeRows.library(c, Account(configured = true, signedIn = false), history, recs = 40, dismissed = 2, update = false, now = now)
+        assertEquals("나", (out[0] as Row.Header).title)
+        assertEquals(Row.Tabs(TubeTab.YOU), out[1])
+        assertEquals("최근 기록 둘", 2, cards(out).size)
         assertEquals(listOf(TubeRows.A_HISTORY, TubeRows.A_LOGIN, TubeRows.A_CLEAR, TubeRows.A_TERMS), actions(out))
-        val inn = TubeRows.library(c, history = 0, Account(configured = true, signedIn = true, channel = channel))
-        assertEquals(listOf(TubeRows.A_HISTORY, TubeRows.A_LIKED, TubeRows.A_MY_PLAYLISTS, TubeRows.A_ACCOUNT, TubeRows.A_TERMS), actions(inn))
+        assertTrue("무엇을 얼마나 두는지", out.any { it is Row.Note && it.text.contains("40개") && it.text.contains("2개") })
+        val inn = TubeRows.library(c, Account(configured = true, signedIn = true, channel = channel), emptyList(), 0, 0, update = true, now = now)
+        assertEquals("1theK (원더케이)", (inn[0] as Row.Header).title)
+        assertEquals(listOf(TubeRows.A_UPDATE, TubeRows.A_MY_PLAYLISTS, TubeRows.A_LIKED, TubeRows.A_ACCOUNT, TubeRows.A_TERMS), actions(inn))
     }
 }

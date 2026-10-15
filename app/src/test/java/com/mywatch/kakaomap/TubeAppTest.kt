@@ -12,6 +12,7 @@ import android.os.Bundle
 import android.os.Looper
 import android.os.PowerManager
 import android.view.View
+import android.view.ViewGroup
 import androidx.recyclerview.widget.RecyclerView
 import com.mywatch.kakaomap.net.ApiException
 import com.mywatch.kakaomap.net.Http
@@ -23,6 +24,7 @@ import com.mywatch.kakaomap.tube.Tokens
 import com.mywatch.kakaomap.tube.TubeAccount
 import com.mywatch.kakaomap.tube.TubeAuth
 import com.mywatch.kakaomap.tube.TubeChannel
+import com.mywatch.kakaomap.tube.TubeInbox
 import com.mywatch.kakaomap.tube.TubeLinks
 import com.mywatch.kakaomap.tube.TubePage
 import com.mywatch.kakaomap.tube.TubePlaylist
@@ -40,7 +42,9 @@ import com.mywatch.kakaomap.ui.TubeRows
 import com.mywatch.kakaomap.ui.TubeThumbs
 import com.mywatch.kakaomap.ui.tube.Feed
 import com.mywatch.kakaomap.ui.tube.Fetched
+import com.mywatch.kakaomap.ui.tube.Page
 import com.mywatch.kakaomap.ui.tube.TubeBackend
+import com.mywatch.kakaomap.ui.tube.TubeTab
 import kotlinx.coroutines.CompletableDeferred
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -132,7 +136,8 @@ class TubeAppTest {
         }, store)
         PhoneOpener.override = { url -> phoneOpened += url; PhoneOpener.Result.OPENED }
         backend.pages[Feed.Popular("10").key] = { token -> Fetched(TubePage(if (token == null) music else listOf(v("musicaaaaa5")), if (token == null) "M2" else null)) }
-        backend.pages[Feed.Popular(null).key] = { Fetched(TubePage(popular, null)) }
+        // 인기(한국 — 음악·게임·영화 차트): 처음 쓰는 사람의 홈 '전체'는 이것
+        backend.pages[Feed.Popular(null).key] = { token -> Fetched(TubePage(if (token == null) music + popular else listOf(v("trendaaaaa7")), if (token == null) "T2" else null)) }
     }
 
     @After
@@ -181,19 +186,72 @@ class TubeAppTest {
         rv.scrollToPosition(i)
         rv.measure(spec, spec)
         rv.layout(0, 0, 480, 480)
-        val holder = rv.findViewHolderForAdapterPosition(i)!!
-        val target = if (rows(a)[i] is Row.Chips) {
-            val chips = rows(a)[i] as Row.Chips
-            (holder.itemView as android.view.ViewGroup).getChildAt(chips.items.indexOfFirst { which(Row.Action(it.id, it.icon, it.text)) }.coerceAtLeast(0))
-        } else holder.itemView
+        val target = rv.findViewHolderForAdapterPosition(i)!!.itemView
         if (long) target.performLongClick() else target.performClick()
         if (wait) settle { !opening(a) } else idle()
     }
 
-    private fun tapAction(a: TubeActivity, id: String, wait: Boolean = true) =
-        tap(a, wait = wait) { it is Row.Action && it.id == id || it is Row.Chips && it.items.any { c -> c.id == id } }
+    private fun tapAction(a: TubeActivity, id: String, wait: Boolean = true) = tap(a, wait = wait) { it is Row.Action && it.id == id }
 
     private fun tapCard(a: TubeActivity, id: String, long: Boolean = false) = tap(a, long) { it is Row.VideoCard && it.video.id == id }
+
+    /** 한 줄 안의 칸(탭·칩·세로 카드)을 누른다 */
+    private fun tapIn(a: TubeActivity, long: Boolean = false, which: (Row) -> Boolean, pick: (View) -> View) {
+        val rv = a.findViewById<RecyclerView>(R.id.list)
+        val i = rows(a).indexOfFirst(which)
+        assertTrue("누를 줄이 있다: ${rows(a).map { it::class.simpleName }}", i >= 0)
+        val spec = View.MeasureSpec.makeMeasureSpec(480, View.MeasureSpec.EXACTLY)
+        rv.measure(spec, spec)
+        rv.layout(0, 0, 480, 480)
+        rv.scrollToPosition(i)
+        rv.measure(spec, spec)
+        rv.layout(0, 0, 480, 480)
+        val target = pick(rv.findViewHolderForAdapterPosition(i)!!.itemView)
+        if (long) target.performLongClick() else target.performClick()
+        settle { !opening(a) }
+    }
+
+    private fun tapTab(a: TubeActivity, tab: TubeTab) = tapIn(a, which = { it is Row.Tabs }) { v ->
+        v.findViewById(
+            when (tab) {
+                TubeTab.HOME -> R.id.tab_home
+                TubeTab.SHORTS -> R.id.tab_shorts
+                TubeTab.SUBS -> R.id.tab_subs
+                TubeTab.YOU -> R.id.tab_you
+            },
+        )
+    }
+
+    /** 칩 줄에서 [label] 칩을 누른다 */
+    private fun tapChip(a: TubeActivity, label: String) = tapIn(a, which = { it is Row.ChipBar }) { v ->
+        val row = v.findViewById<ViewGroup>(R.id.chip_row)
+        (0 until row.childCount).map(row::getChildAt).first { it.contentDescription.toString().substringBefore(",") == label }
+    }
+
+    private fun chip(a: TubeActivity) = rows(a).filterIsInstance<Row.ChipBar>().firstOrNull()?.selected
+
+    /** 한 줄 안에서 누를 수 있는 칸들 (보이는 것, 읽어 주기 글이 있는 것) — 차례대로 */
+    private fun tappables(v: View): List<View> {
+        val out = mutableListOf<View>()
+        fun walk(x: View) {
+            if (x.visibility != View.VISIBLE) return
+            if (x.isClickable && x.contentDescription != null) out += x
+            if (x is ViewGroup) (0 until x.childCount).forEach { walk(x.getChildAt(it)) }
+        }
+        walk(v)
+        return out
+    }
+
+    /** Shorts 모양 (세로 · 30초) — 채널은 셋을 돌아가며 */
+    private fun short(n: Int, ch: String = "UCshortsshortsshorts%04d".format(n % 3)) =
+        TubeVideo("short%06d".format(n), "Shorts $n", "숏 채널 ${n % 3}", 30, channelId = ch, views = 10, publishedAt = now - 60_000, portrait = true)
+
+    private fun cards(a: TubeActivity) = rows(a).filterIsInstance<Row.VideoCard>().map { it.video.id }
+
+    private fun back(a: TubeActivity) {
+        a.onBackPressedDispatcher.onBackPressed()
+        settle { !opening(a) }
+    }
 
     private fun started(a: TubeActivity): Intent? = shadowOf(a).nextStartedActivity
 
@@ -225,7 +283,7 @@ class TubeAppTest {
         assertEquals(listOf(TubeLinks.YOUTUBE_TERMS), phoneOpened)
         tapAction(a, TubeRows.A_AGREE)
         assertEquals("유튜브", titles(a).first())
-        assertTrue(backend.asked.contains(Feed.Popular("10").key))
+        assertTrue("처음 쓰는 사람의 '전체'는 인기", backend.asked.contains(Feed.Popular(null).key))
         a.finish()
         val again = open()
         assertEquals("다시 열면 바로 홈", "유튜브", titles(again).first())
@@ -246,16 +304,18 @@ class TubeAppTest {
     // ---------------- 재생 ----------------
 
     @Test
-    fun aCardOnHomePlaysInTheAppWithTheRestOfTheListAfterIt() {
+    fun aCardOnHomePlaysInTheAppAndContinuesAsAYouTubeMix() {
         val a = open()
-        assertTrue(titles(a).containsAll(listOf("유튜브", "인기 음악", "인기 동영상")))
+        assertEquals("유튜브", titles(a).first())
+        assertTrue("맨 위 탭", rows(a).any { it is Row.Tabs })
+        assertEquals("ALL", chip(a))
         tapCard(a, "musicaaaaa1")
         val s = started(a)
         assertEquals(TubePlayerActivity::class.java.name, s?.component?.className)
-        // 워치에서 못 트는 musicaaaaa3 은 빼고 이어서
-        assertEquals(TubeLinks.playerUrl(base, music[0], Queue.Ids(listOf("musicaaaaa2", "musicaaaaa4")), inApp = true), s?.playerPage())
+        // 유튜브 앱처럼 다음 동영상은 유튜브가 고른 것 (믹스) — 재생 화면이 그 목록을 앱에 알려 '전체'에 섞는다
+        assertEquals(TubeLinks.playerUrl(base, music[0], Queue.Mix, inApp = true), s?.playerPage())
         assertEquals("musicaaaaa1", TubeState(context).lastPlayed()?.id)
-        assertTrue("본 동영상이 '이어서 보기'에", titles(a).contains("이어서 보기"))
+        assertFalse("본 동영상은 '전체'에서 빠진다", rows(a).filterIsInstance<Row.VideoCard>().any { it.video.id == "musicaaaaa1" })
     }
 
     @Test
@@ -266,7 +326,7 @@ class TubeAppTest {
         tapCard(a, "popularaaa1")
         val s = started(a)
         assertEquals(Intent.ACTION_VIEW, s?.action)
-        assertEquals(TubeLinks.playerUrl(base, popular[0], Queue.Ids(listOf("popularaaa2"))), s?.dataString?.replace(Regex("&n=\\d+"), ""))
+        assertEquals(TubeLinks.playerUrl(base, popular[0], Queue.Mix), s?.dataString?.replace(Regex("&n=\\d+"), ""))
         assertEquals(context.getString(R.string.tube_engine_browser), ShadowToast.getTextOfLatestToast())
     }
 
@@ -275,7 +335,7 @@ class TubeAppTest {
         val a = open()
         tapCard(a, "musicaaaaa3")
         assertNull(started(a))
-        assertEquals(listOf(TubeLinks.watchUrl("musicaaaaa3", mix = false)), phoneOpened)
+        assertEquals("폰에서도 믹스로", listOf(TubeLinks.watchUrl("musicaaaaa3", mix = true)), phoneOpened)
     }
 
     @Test
@@ -284,7 +344,7 @@ class TubeAppTest {
         val a = open()
         tapCard(a, "popularaaa2")
         assertNull(started(a))
-        assertEquals(listOf(TubeLinks.watchUrl("popularaaa2", mix = false)), phoneOpened)
+        assertEquals(listOf(TubeLinks.watchUrl("popularaaa2", mix = true)), phoneOpened)
     }
 
     // ---------------- 둘러보기 ----------------
@@ -337,7 +397,7 @@ class TubeAppTest {
             if (token == null) Fetched(TubePage(first, "M2")) else Fetched(TubePage(second, null))
         }
         val a = open()
-        tapAction(a, TubeRows.A_LIBRARY)
+        tapTab(a, TubeTab.YOU)
         tapAction(a, TubeRows.A_MY_PLAYLISTS)
         tap(a) { it is Row.PlaylistItem }
         tapAction(a, TubeRows.A_PLAY_ALL)
@@ -364,7 +424,7 @@ class TubeAppTest {
         val controller = Robolectric.buildActivity(TubeActivity::class.java).setup()
         val a = controller.get()
         settle { !opening(a) }
-        tapAction(a, TubeRows.A_LIBRARY)
+        tapTab(a, TubeTab.YOU)
         tapAction(a, TubeRows.A_MY_PLAYLISTS)
         tap(a) { it is Row.PlaylistItem }
         assertEquals("드라이브", titles(a).first())
@@ -458,7 +518,7 @@ class TubeAppTest {
         controller.start().resume()
         settle { !opening(a) }
         tapCard(a, "musicaaaaa3")                  // 폰에서만 열리는 동영상
-        assertEquals(listOf(TubeLinks.watchUrl("musicaaaaa3", mix = false)), phoneOpened)
+        assertEquals(listOf(TubeLinks.watchUrl("musicaaaaa3", mix = true)), phoneOpened)
         shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(3))
         assertFalse("앱이 저절로 닫히지 않는다", a.isFinishing)
     }
@@ -511,7 +571,7 @@ class TubeAppTest {
             Fetched(TubePage(listOf(v("phoneonly01", embeddable = false), v("mine0000002")), null))
         }
         val a = open()
-        tapAction(a, TubeRows.A_LIBRARY)
+        tapTab(a, TubeTab.YOU)
         tapAction(a, TubeRows.A_MY_PLAYLISTS)
         tap(a) { it is Row.PlaylistItem }
         tapCard(a, "phoneonly01")
@@ -591,26 +651,28 @@ class TubeAppTest {
 
     @Test
     fun afterTheMenuTheListIsWhereItWas() {
+        backend.pages[Feed.Popular("10").key] = { Fetched(TubePage((1..12).map { v("music%06d".format(it)) }, null)) }
         val a = open()
-        val home = rows(a)
+        tapChip(a, "음악")
+        assertEquals("MUSIC", chip(a))
         // 목록 아래쪽의 동영상을 길게 눌러 메뉴 → 취소 → 그 자리
-        tapCard(a, "popularaaa2", long = true)
+        tapCard(a, "music000009", long = true)
         tapAction(a, TubeRows.A_CANCEL)
         val where = firstShown(a)
-        assertTrue("아래쪽(인기 동영상)이 보이고 있었다: $where", where.startsWith("card:popular") || where == "header:인기 동영상")
-        // 메뉴 → 재생 → 돌아오면 그 자리 (방금 본 동영상이 위쪽 '이어서 보기'에 들어가도)
-        tapCard(a, "popularaaa2", long = true)
+        assertTrue("아래쪽이 보이고 있었다: $where", where.startsWith("card:music00000") && where != "card:music000001")
+        // 메뉴 → 재생 → 돌아오면 그 자리 ('음악'은 본 것도 그대로 둔다)
+        tapCard(a, "music000009", long = true)
         tapAction(a, TubeRows.A_PLAY)
         assertEquals("메뉴는 닫히고 목록으로", "유튜브", titles(a).first())
         assertEquals("메뉴에서 틀고 돌아오면 보던 자리", where, firstShown(a))
         // 메뉴 → 채널 → 뒤로 = 보던 자리
-        tapCard(a, "popularaaa2", long = true)
+        tapCard(a, "music000009", long = true)
         tapAction(a, TubeRows.A_CHANNEL)
         assertEquals("1theK (원더케이)", titles(a).first())
         a.onBackPressedDispatcher.onBackPressed()
         idle()
-        assertEquals("방금 본 동영상이 '이어서 보기'에 (위쪽이 늘었다)", home.size + 2, rows(a).size)
         assertEquals("채널에서 뒤로 오면 보던 자리", where, firstShown(a))
+        assertEquals("칩도 그대로", "MUSIC", chip(a))
     }
 
     @Test
@@ -633,18 +695,33 @@ class TubeAppTest {
     }
 
     @Test
-    fun aFailedSectionCanBeRetriedAndMoreAddsTheNextPage() {
+    fun aFailedHomeCanBeRetriedAndMoreAddsTheNextPage() {
         backend.fail = ApiException("네트워크 연결을 확인하세요")
         val a = open()
         assertTrue(rows(a).any { it is Row.Note && it.text == "네트워크 연결을 확인하세요" })
         backend.fail = null
         tapAction(a, TubeRows.A_RETRY)
-        assertEquals("인기 음악 4개 + 인기 동영상 2개", 6, rows(a).filterIsInstance<Row.VideoCard>().size)
-        tapAction(a, TubeRows.A_CHART_MUSIC)
-        assertEquals("인기 음악", titles(a).first())
+        assertEquals("인기 6개", 6, rows(a).filterIsInstance<Row.VideoCard>().size)
         tapAction(a, TubeRows.A_MORE)
-        assertTrue(rows(a).filterIsInstance<Row.VideoCard>().any { it.video.id == "musicaaaaa5" })
-        assertTrue(backend.asked.contains(Feed.Popular("10").key + "@M2"))
+        assertTrue(rows(a).filterIsInstance<Row.VideoCard>().any { it.video.id == "trendaaaaa7" })
+        assertTrue(backend.asked.contains(Feed.Popular(null).key + "@T2"))
+    }
+
+    /**
+     * 리뷰에서 찾음: 받기가 끝날 때마다 '새로 정해진 받을 거리'를 받는데, 실패한 것까지 또 받아 받기 → 실패 → 또 받기가 끝없이 돌았다
+     * (인터넷이 없으면 배터리, 유튜브 오류면 하루 한도까지) → 실패한 것은 다시 시도·화면을 다시 열 때만
+     */
+    @Test
+    fun aFailingNetworkIsNotAskedOverAndOver() {
+        backend.fail = ApiException("네트워크 연결을 확인하세요")
+        val a = open()
+        settle()
+        val first = backend.asked.size
+        assertTrue("물은 것이 있다", first > 0)
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(30))
+        settle()
+        assertEquals("가만히 있으면 더 묻지 않는다: ${backend.asked}", first, backend.asked.size)
+        assertTrue(rows(a).any { it is Row.Action && it.id == TubeRows.A_RETRY })
     }
 
     /**
@@ -653,22 +730,19 @@ class TubeAppTest {
      */
     @Test
     fun scrollingToTheEndLoadsTheNextPageByItselfButNotForSearches() {
-        backend.pages[Feed.Popular("10").key] = { token ->
+        backend.pages[Feed.Popular(null).key] = { token ->
             val n = if (token == null) 0 else 1
-            Fetched(TubePage((1..12).map { v("music%02d%04d".format(n, it)) }, if (token == null) "M2" else null))
+            Fetched(TubePage((1..12).map { v("trend%02d%04d".format(n, it)) }, if (token == null) "T2" else null))
         }
         val a = open()
-        tapAction(a, TubeRows.A_CHART_MUSIC)
-        assertFalse(backend.asked.contains(Feed.Popular("10").key + "@M2"))
+        assertFalse(backend.asked.contains(Feed.Popular(null).key + "@T2"))
         scrollToEnd(a)
-        assertTrue("끝까지 내리면 다음 쪽", backend.asked.contains(Feed.Popular("10").key + "@M2"))
+        assertTrue("끝까지 내리면 다음 쪽", backend.asked.contains(Feed.Popular(null).key + "@T2"))
         assertEquals(24, rows(a).filterIsInstance<Row.VideoCard>().size)
 
         backend.pages[Feed.Search("아이유").key] = { token ->
             Fetched(TubePage((1..12).map { v("search%05d".format(it)) }, if (token == null) "S2" else null), TubeSource.YOUTUBE)
         }
-        a.onBackPressedDispatcher.onBackPressed()
-        settle()
         tapAction(a, TubeRows.A_SEARCH)
         val input = shadowOf(a).nextStartedActivityForResult
         val result = Intent()
@@ -686,8 +760,317 @@ class TubeAppTest {
             rv.measure(spec, spec)
             rv.layout(0, 0, 480, 480)
             rv.scrollBy(0, 400)
-            settle()
+            idle()   // 가짜 유튜브는 바로 대답한다 (메인 스레드에서)
         }
+        settle { !opening(a) }
+    }
+
+    // ---------------- 탭 · 칩 ----------------
+
+    /** 맨 위 탭: 탭끼리는 자리만 바꾸고(뒤로 가기에 쌓이지 않음), 뒤로 = 홈, 홈 탭 = 홈 */
+    @Test
+    fun theTopTabsSwapInPlaceAndBackGoesHome() {
+        val a = open()
+        assertEquals(1, a.nav.depth)
+        tapTab(a, TubeTab.SUBS)
+        assertEquals("구독", titles(a).first())
+        assertEquals(2, a.nav.depth)
+        tapTab(a, TubeTab.YOU)
+        assertEquals("나", titles(a).first())
+        assertEquals("탭끼리는 자리만 바뀐다", 2, a.nav.depth)
+        back(a)
+        assertEquals("유튜브", titles(a).first())
+        assertFalse(a.isFinishing)
+        tapTab(a, TubeTab.YOU)
+        tapTab(a, TubeTab.HOME)
+        assertEquals("유튜브", titles(a).first())
+        assertEquals(1, a.nav.depth)
+    }
+
+    /**
+     * 홈 칩은 그 칩이 보여 줄 것만 받는다 — 게임 차트는 '게임'을 열 때, 실시간 검색(하루 100번 한도)은 '실시간'을 열 때만.
+     * 칩은 뒤로 가기에 쌓이지 않고, '전체'가 아닌 칩에서 뒤로 = '전체' (그다음 뒤로 = 닫기)
+     */
+    @Test
+    fun eachHomeChipAsksOnlyForWhatItShowsAndBackReturnsToAll() {
+        backend.pages[Feed.Popular("20").key] = { Fetched(TubePage(listOf(v("gameaaaaaa1").copy(categoryId = "20")), null)) }
+        backend.pages[Feed.Live.key] = { Fetched(TubePage(listOf(v("liveaaaaaa1").copy(live = true, durationSec = null)), null)) }
+        val a = open()
+        assertFalse("게임 차트는 게임 칩을 열 때", backend.asked.contains(Feed.Popular("20").key))
+        assertFalse("실시간 검색은 실시간 칩을 열 때만", backend.asked.contains(Feed.Live.key))
+        tapChip(a, "게임")
+        assertEquals("GAMING", chip(a))
+        assertTrue(backend.asked.contains(Feed.Popular("20").key))
+        assertTrue(cards(a).contains("gameaaaaaa1"))
+        assertFalse(backend.asked.contains(Feed.Live.key))
+        assertEquals("칩은 뒤로 가기에 쌓이지 않는다", 1, a.nav.depth)
+        tapChip(a, "실시간")
+        assertTrue(backend.asked.contains(Feed.Live.key))
+        assertEquals(listOf("liveaaaaaa1"), cards(a))
+        back(a)
+        assertEquals("뒤로 = 먼저 '전체'로", "ALL", chip(a))
+        assertFalse(a.isFinishing)
+        back(a)
+        assertTrue("'전체'에서 뒤로 = 닫기", a.isFinishing)
+    }
+
+    /** 오른쪽으로 쓸기(Wear OS 의 뒤로)도 같다: '전체'가 아닌 칩이면 '전체'로 */
+    @Test
+    fun swipingBackFromAChipReturnsToAll() {
+        val a = open()
+        tapChip(a, "음악")
+        val swipe = a.findViewById<androidx.wear.widget.SwipeDismissFrameLayout>(R.id.swipe)
+        assertTrue("칩에서는 쓸어서 '전체'로", swipe.isSwipeable)
+        val dismissed = androidx.wear.widget.SwipeDismissFrameLayout::class.java.getDeclaredMethod("performDismissFinishedCallbacks")
+        dismissed.isAccessible = true
+        dismissed.invoke(swipe)
+        settle()
+        assertEquals("ALL", chip(a))
+        assertFalse(a.isFinishing)
+        assertFalse("'전체'에서는 시스템이 닫는다", swipe.isSwipeable)
+    }
+
+    @Test
+    fun channelChipsSwapInPlace() {
+        backend.pages[Feed.ChannelInfo(channel.id).key] = { Fetched(TubePage(emptyList(), null, channels = listOf(channel))) }
+        backend.pages[Feed.ChannelUploads(channel.id, Uploads.LONG).key] = { Fetched(TubePage(listOf(v("chanaaaaaa1")), null)) }
+        backend.pages[Feed.ChannelUploads(channel.id, Uploads.SHORTS).key] = { Fetched(TubePage((1..3).map { short(it, channel.id) }, null)) }
+        val a = open()
+        tapCard(a, "musicaaaaa1", long = true)
+        tapAction(a, TubeRows.A_CHANNEL)
+        assertEquals(2, a.nav.depth)
+        assertFalse("Shorts 는 Shorts 칩을 열 때", backend.asked.contains(Feed.ChannelUploads(channel.id, Uploads.SHORTS).key))
+        tapChip(a, "Shorts")
+        assertEquals("SHORTS", chip(a))
+        assertTrue(backend.asked.contains(Feed.ChannelUploads(channel.id, Uploads.SHORTS).key))
+        assertEquals("세로 카드 두 칸씩", 2, rows(a).count { it is Row.ShortsPair })
+        assertEquals("칩은 쌓이지 않는다", 2, a.nav.depth)
+        back(a)
+        assertEquals("유튜브", titles(a).first())
+    }
+
+    /** 구독: 채널 사진 줄 — 누르면 그 채널, 끝의 '전체' = 구독 채널 모두 */
+    @Test
+    fun theAvatarStripOpensAChannelOrAllSubscriptions() {
+        signIn()
+        val other = TubeChannel("UCotherotherotherother12", "다른 채널", null)
+        backend.pages[Feed.Account.key] = { Fetched(TubePage(emptyList(), null, channels = listOf(channel))) }
+        backend.pages[Feed.SubsChannels.key] = { Fetched(TubePage(emptyList(), null, channels = listOf(channel, other))) }
+        backend.pages[Feed.SubsFeed.key] = { Fetched(TubePage(listOf(v("feedaaaaaa1")), null)) }
+        backend.pages[Feed.ChannelInfo(other.id).key] = { Fetched(TubePage(emptyList(), null, channels = listOf(other))) }
+        val a = open()
+        tapTab(a, TubeTab.SUBS)
+        assertTrue(rows(a).any { it is Row.AvatarStrip })
+        tapIn(a, which = { it is Row.AvatarStrip }) { v -> tappables(v)[1] }
+        assertEquals("다른 채널", titles(a).first())
+        back(a)
+        assertEquals("구독", titles(a).first())
+        tapIn(a, which = { it is Row.AvatarStrip }) { v -> tappables(v).last() }
+        assertEquals("구독 채널", titles(a).first())
+        assertEquals(listOf(channel.id, other.id), rows(a).filterIsInstance<Row.ChannelItem>().map { it.channel.id })
+    }
+
+    // ---------------- 알고리즘 ----------------
+
+    /** 재생 화면이 알려 준 유튜브 믹스 추천(받은 편지)이 '전체' 맨 앞에 섞인다 — 받은 편지는 읽으면 지운다 */
+    @Test
+    fun mixRecommendationsFromThePlayerComeFirstInAll() {
+        val recs = listOf(v("recaaaaaaa1"), v("recaaaaaaa2"))
+        backend.pages[Feed.Recs(recs.map { it.id }).key] = { Fetched(TubePage(recs, null)) }
+        TubeInbox.of(context).post("kakaowatch://tube/recs?seed=musicaaaaa1&ids=recaaaaaaa1,recaaaaaaa2")
+        val a = open()
+        settle { cards(a).firstOrNull() == "recaaaaaaa1" }
+        assertEquals(listOf("recaaaaaaa1", "recaaaaaaa2"), cards(a).take(2))
+        assertTrue("인기도 섞인다", cards(a).contains("popularaaa1"))
+        assertTrue("받은 편지는 읽고 지운다", TubeInbox.of(context).drain().isEmpty())
+        // '나'에 추천에 쓰는 것이 보인다 · 기록 지우기 = 믹스 추천도 지운다
+        tapTab(a, TubeTab.YOU)
+        assertTrue(rows(a).any { it is Row.Note && it.text == context.getString(R.string.tube_recs_info, 0, 2, 0) })
+        tapAction(a, TubeRows.A_CLEAR)
+        assertTrue(TubeState(context).harvests(System.currentTimeMillis()).isEmpty())
+        tapTab(a, TubeTab.HOME)
+        assertFalse("지운 추천은 '전체'에서도 빠진다", cards(a).contains("recaaaaaaa1"))
+    }
+
+    /** 관심 없음 · 채널 추천 안 함: 바로 빠지고, 다시 열어도 (30일 기억) */
+    @Test
+    fun notInterestedTakesTheCardAwayAndIsRemembered() {
+        val other = TubeVideo("otheraaaaa1", "다른 채널 동영상", "다른 채널", 200, channelId = "UCotherotherotherother12", views = 10, publishedAt = now - 1_000)
+        backend.pages[Feed.Popular(null).key] = { Fetched(TubePage(music + popular + other, null)) }
+        val a = open()
+        tapCard(a, "popularaaa1", long = true)
+        tapAction(a, TubeRows.A_NOT_INTERESTED)
+        assertEquals("유튜브", titles(a).first())
+        assertEquals(context.getString(R.string.tube_dismissed), ShadowToast.getTextOfLatestToast())
+        assertFalse(cards(a).contains("popularaaa1"))
+        assertTrue(TubeState(context).dismissedVideos(System.currentTimeMillis()).contains("popularaaa1"))
+        tapCard(a, "musicaaaaa1", long = true)
+        tapAction(a, TubeRows.A_NO_CHANNEL)
+        assertEquals(context.getString(R.string.tube_channel_dismissed), ShadowToast.getTextOfLatestToast())
+        assertEquals("그 채널의 것은 모두 빠진다", listOf("otheraaaaa1"), cards(a))
+        a.finish()
+        val again = open()
+        assertEquals("다시 열어도", listOf("otheraaaaa1"), cards(again))
+    }
+
+    /** 처리방침이 바뀌었으면(판 2 — 워치 안 기록으로 추천) 예전에 동의했어도 다시 묻는다 */
+    @Test
+    fun agreeingToTheOldTermsIsNotEnough() {
+        context.getSharedPreferences("tube", Context.MODE_PRIVATE).edit().putInt("terms_agreed", 1).commit()
+        val a = open()
+        assertEquals("시작하기 전에", titles(a).first())
+        assertTrue("동의 전엔 유튜브에 묻지 않는다", backend.asked.isEmpty())
+        tapAction(a, TubeRows.A_AGREE)
+        assertEquals("유튜브", titles(a).first())
+    }
+
+    // ---------------- Shorts ----------------
+
+    /** Shorts 탭: 준비되는 대로 Shorts 재생 화면을 한 번 바로 연다. 돌아오면 격자 — 세로 카드를 누르면 그 자리부터, 탭을 다시 누르면 처음부터 */
+    @Test
+    fun theShortsTabOpensTheShortsPlayerOnceWhenReady() {
+        backend.pages[Feed.ShortsSearch.key] = { Fetched(TubePage((1..12).map { short(it) }, null)) }
+        val controller = Robolectric.buildActivity(TubeActivity::class.java).setup()
+        val a = controller.get()
+        settle { !opening(a) }
+        tapTab(a, TubeTab.SHORTS)
+        val s = started(a)
+        assertEquals(TubePlayerActivity::class.java.name, s?.component?.className)
+        val url = s?.getStringExtra(TubePlayerActivity.EXTRA_URL).orEmpty()
+        assertTrue(url, url.startsWith(base + "shorts.html#ids=short000001,"))
+        assertTrue(url, url.contains("&i=0&") && url.endsWith("&app=1"))
+        // 재생 화면에서 돌아오면 격자 (다시 열지 않는다)
+        controller.pause().stop()
+        controller.start().resume()
+        settle { !opening(a) }
+        assertNull("돌아오면 다시 열지 않는다", started(a))
+        assertEquals("Shorts", titles(a).first())
+        assertEquals(6, rows(a).count { it is Row.ShortsPair })
+        tapIn(a, which = { it is Row.ShortsPair && it.index == 2 }) { v -> tappables(v)[1] }
+        val url2 = started(a)?.getStringExtra(TubePlayerActivity.EXTRA_URL).orEmpty()
+        assertTrue("누른 세로 카드부터: $url2", url2.contains("&i=3&"))
+        controller.pause().stop()
+        controller.start().resume()
+        settle { !opening(a) }
+        tapTab(a, TubeTab.SHORTS)
+        assertTrue("탭을 다시 누르면 처음부터", started(a)?.getStringExtra(TubePlayerActivity.EXTRA_URL).orEmpty().contains("&i=0&"))
+    }
+
+    /** 홈·다른 앱으로 떠났으면 Shorts 가 다 받아져도 저절로 열지 않는다 (돌아와도) */
+    @Test
+    fun leavingBeforeTheShortsAreReadyMeansTheyDoNotOpenByThemselves() {
+        val hold = CompletableDeferred<Unit>()
+        backend.holds[Feed.ShortsSearch.key] = hold
+        backend.pages[Feed.ShortsSearch.key] = { Fetched(TubePage((1..12).map { short(it) }, null)) }
+        val controller = Robolectric.buildActivity(TubeActivity::class.java).setup()
+        val a = controller.get()
+        settle { !opening(a) }
+        tapTab(a, TubeTab.SHORTS)
+        assertNull("받는 중", started(a))
+        controller.userLeaving().pause().stop()
+        hold.complete(Unit)
+        idle()
+        assertNull(started(a))
+        controller.start().resume()
+        settle { !opening(a) }
+        assertNull("돌아와도 저절로 열지 않는다", started(a))
+        assertTrue(rows(a).any { it is Row.ShortsPair })
+    }
+
+    /** 손목을 내린 사이 다 받아졌으면 다시 볼 때 연다 (1분 안) — 보일 때만 재생 */
+    @Test
+    fun shortsReadyWhileTheScreenWasOffOpenWhenYouLookAgain() {
+        val hold = CompletableDeferred<Unit>()
+        backend.holds[Feed.ShortsSearch.key] = hold
+        backend.pages[Feed.ShortsSearch.key] = { Fetched(TubePage((1..12).map { short(it) }, null)) }
+        val controller = Robolectric.buildActivity(TubeActivity::class.java).setup()
+        val a = controller.get()
+        settle { !opening(a) }
+        tapTab(a, TubeTab.SHORTS)
+        power.setIsInteractive(false)
+        controller.pause().stop()
+        hold.complete(Unit)
+        idle()
+        assertNull("화면이 꺼진 동안엔 열지 않는다", started(a))
+        power.setIsInteractive(true)
+        controller.start().resume()
+        settle { shadowOf(a).peekNextStartedActivity() != null }
+        assertTrue(started(a)?.getStringExtra(TubePlayerActivity.EXTRA_URL).orEmpty().contains("shorts.html#ids=short000001"))
+    }
+
+    /**
+     * 무작위 여정에서 찾음: 맨 앞 Shorts 가 다른 곳 재생이 막힌 것이면 'Shorts 보기'·바로 열기가 폰으로 갔다 (저절로 폰이 열림) →
+     * 워치에서 틀 수 있는 첫 Shorts 부터. 하나도 없으면 바로 열지 않고, 'Shorts 보기'를 누르면 폰으로
+     */
+    @Test
+    fun theShortsPlayerStartsAtTheFirstShortTheWatchCanPlay() {
+        val blocked = short(1).copy(embeddable = false)
+        backend.pages[Feed.ShortsSearch.key] = { Fetched(TubePage(listOf(blocked) + (2..5).map { short(it) }, null)) }
+        val a = open()
+        tapTab(a, TubeTab.SHORTS)
+        val url = started(a)?.getStringExtra(TubePlayerActivity.EXTRA_URL).orEmpty()
+        assertTrue("저절로 열 때도 틀 수 있는 것부터: $url", url.contains("#ids=short000002,") && url.contains("&i=0&"))
+        assertFalse("막힌 것은 목록에서 뺀다", url.contains("short000001"))
+        assertTrue("폰은 열지 않는다", phoneOpened.isEmpty())
+        tapAction(a, TubeRows.A_SHORTS_PLAY)
+        assertTrue(started(a)?.getStringExtra(TubePlayerActivity.EXTRA_URL).orEmpty().contains("#ids=short000002,"))
+        assertTrue(phoneOpened.isEmpty())
+    }
+
+    @Test
+    fun whenNoShortCanPlayOnTheWatchNothingOpensByItself() {
+        backend.pages[Feed.ShortsSearch.key] = { Fetched(TubePage((1..3).map { short(it).copy(embeddable = false) }, null)) }
+        val a = open()
+        tapTab(a, TubeTab.SHORTS)
+        assertNull("저절로 열지 않는다", started(a))
+        assertTrue("폰도 저절로 열지 않는다", phoneOpened.isEmpty())
+        tapAction(a, TubeRows.A_SHORTS_PLAY)
+        assertEquals("누르면 폰의 Shorts 로", listOf(TubeLinks.phoneShortsUrl("short000001")), phoneOpened)
+    }
+
+    /** 재생 화면이 알려 준 본 Shorts 는 Shorts 목록에서 뒤로 간다 */
+    @Test
+    fun seenShortsGoToTheBack() {
+        backend.pages[Feed.ShortsSearch.key] = { Fetched(TubePage((1..4).map { short(it) }, null)) }
+        TubeInbox.of(context).post("kakaowatch://tube/seen?v=short000001")
+        val controller = Robolectric.buildActivity(TubeActivity::class.java).setup()
+        val a = controller.get()
+        settle { !opening(a) }
+        tapTab(a, TubeTab.SHORTS)
+        val ids = Uri.parse(started(a)?.getStringExtra(TubePlayerActivity.EXTRA_URL)?.replace("#", "?")).getQueryParameter("ids").orEmpty().split(',')
+        assertEquals("본 것은 맨 뒤", "short000001", ids.last())
+        assertEquals(4, ids.size)
+    }
+
+    // ---------------- 검색 화면 ----------------
+
+    /** 검색 화면 (유튜브 앱처럼): 열면 곧바로 말·키보드, 취소하면 최근 검색어 — 누르면 그 검색(검색 화면 자리에), 검색 기록 지우기 */
+    @Test
+    fun theSearchPageShowsRecentSearchesAndCanClearThem() {
+        TubeState(context).addSearch("뉴진스")
+        TubeState(context).addSearch("아이유")
+        backend.pages[Feed.Search("뉴진스").key] = { Fetched(TubePage(listOf(v("searchaaaa1")), null), TubeSource.YOUTUBE) }
+        val a = open()
+        tapAction(a, TubeRows.A_SEARCH)
+        assertEquals("검색", titles(a).first())
+        val input = shadowOf(a).nextStartedActivityForResult
+        assertNotNull("검색 화면을 열면 곧바로 말·키보드 입력", input)
+        shadowOf(a).receiveResult(input.intent, Activity.RESULT_CANCELED, Intent())
+        settle()
+        assertEquals("취소하면 검색 화면 그대로", "검색", titles(a).first())
+        val recent = rows(a).filterIsInstance<Row.Action>().filter { it.id.startsWith(TubeRows.A_QUERY) }.map { it.text }
+        assertEquals(listOf("아이유", "뉴진스"), recent)
+        tapAction(a, TubeRows.A_QUERY + "뉴진스")
+        assertEquals("‘뉴진스’", titles(a).first())
+        assertEquals("검색 화면 자리가 결과로", 2, a.nav.depth)
+        back(a)
+        assertEquals("유튜브", titles(a).first())
+        tapAction(a, TubeRows.A_SEARCH)
+        shadowOf(a).nextStartedActivityForResult?.let { shadowOf(a).receiveResult(it.intent, Activity.RESULT_CANCELED, Intent()) }
+        settle()
+        tapAction(a, TubeRows.A_CLEAR_SEARCHES)
+        assertTrue(TubeState(context).searches.isEmpty())
+        assertFalse(rows(a).any { it is Row.Action && it.id.startsWith(TubeRows.A_QUERY) })
     }
 
     // ---------------- 로그인 ----------------
@@ -698,7 +1081,7 @@ class TubeAppTest {
         backend.pages[Feed.SubsChannels.key] = { Fetched(TubePage(emptyList(), null, channels = listOf(channel))) }
         backend.pages[Feed.Account.key] = { Fetched(TubePage(emptyList(), null, channels = listOf(channel))) }
         val a = open()
-        tapAction(a, TubeRows.A_SUBS)
+        tapTab(a, TubeTab.SUBS)
         assertTrue(rows(a).any { it is Row.Note && it.text == context.getString(R.string.tube_subs_need_login) })
         tapAction(a, TubeRows.A_LOGIN)
         settle { rows(a).any { it is Row.Code } }
@@ -726,14 +1109,14 @@ class TubeAppTest {
         backend.pages[Feed.Account.key] = { Fetched(TubePage(emptyList(), null, channels = listOf(channel))) }
         backend.pages[Feed.Liked.key] = { Fetched(TubePage(listOf(v("likedaaaaa1")), null)) }
         val a = open()
-        tapAction(a, TubeRows.A_LIBRARY)
+        tapTab(a, TubeTab.YOU)
         tapAction(a, TubeRows.A_ACCOUNT)
         assertEquals("1theK (원더케이)", titles(a).first())
         tapAction(a, TubeRows.A_LOGOUT)
         settle { posts.any { it.first.endsWith("/revoke") } }
         assertNull(store.t)
         assertEquals("RT", posts.last { it.first.endsWith("/revoke") }.second["token"])
-        assertEquals("보관함", titles(a).first())
+        assertEquals("나", titles(a).first())
         assertFalse(rows(a).any { it is Row.Action && it.id == TubeRows.A_LIKED })
         assertTrue(rows(a).any { it is Row.Action && it.id == TubeRows.A_LOGIN })
     }
@@ -746,7 +1129,7 @@ class TubeAppTest {
         val c = Robolectric.buildActivity(TubeActivity::class.java).setup()
         val a = c.get()
         settle { !opening(a) }
-        tapAction(a, TubeRows.A_LIBRARY)
+        tapTab(a, TubeTab.YOU)
         tapAction(a, TubeRows.A_LIKED)
         assertTrue(rows(a).filterIsInstance<Row.VideoCard>().any { it.video.id == "likedaaaaa1" })
         // 구글 계정 > 보안에서 이 앱의 접근을 끊음 → 다음에 토큰을 쓸 때 앱이 알아차리고 지운다
@@ -759,7 +1142,7 @@ class TubeAppTest {
         store.t = Tokens("AT2", "RT2", now + 3_600_000)
         c.pause().resume()
         settle()
-        if (titles(a).first() != "보관함") tapAction(a, TubeRows.A_LIBRARY)
+        if (a.nav.top != Page.Library) tapTab(a, TubeTab.YOU)
         tapAction(a, TubeRows.A_LIKED)
         val ids = rows(a).filterIsInstance<Row.VideoCard>().map { it.video.id }
         assertEquals(listOf("likedbbbbb1"), ids)
@@ -775,7 +1158,7 @@ class TubeAppTest {
         backend.pages[Feed.Account.key] = { Fetched(TubePage(emptyList(), null, channels = listOf(channel))) }
         val a = open()
         store.t = null   // 다른 화면의 받기에서 접근이 끊긴 것을 알아차림
-        tapAction(a, TubeRows.A_SUBS)
+        tapTab(a, TubeTab.SUBS)
         assertEquals("구독 화면은 열린다", "구독", titles(a).first())
         assertTrue(rows(a).any { it is Row.Note && it.text == context.getString(R.string.tube_subs_need_login) })
         tapAction(a, TubeRows.A_LOGIN)
@@ -788,7 +1171,7 @@ class TubeAppTest {
     @Test
     fun aGoogleHiccupWhileWaitingDoesNotEndTheSignIn() {
         val a = open()
-        tapAction(a, TubeRows.A_LIBRARY)
+        tapTab(a, TubeTab.YOU)
         tapAction(a, TubeRows.A_LOGIN)
         settle { rows(a).any { it is Row.Code } }
         tokenReply = Http.Response(503, "")
@@ -798,7 +1181,7 @@ class TubeAppTest {
         tokenReply = Http.Response(200, """{"access_token":"AT","expires_in":3599,"refresh_token":"RT","scope":"https://www.googleapis.com/auth/youtube.readonly"}""")
         shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(11))
         settle { titles(a).firstOrNull() != "로그인" }
-        assertEquals("보관함", titles(a).first())
+        assertEquals("나", titles(a).first())
         assertNotNull(store.t)
     }
 
@@ -806,7 +1189,7 @@ class TubeAppTest {
     @Test
     fun aLateAnswerAfterSigningInIsNotShownAsDenied() {
         val a = open()
-        tapAction(a, TubeRows.A_LIBRARY)
+        tapTab(a, TubeTab.YOU)
         tapAction(a, TubeRows.A_LOGIN)
         settle { rows(a).any { it is Row.Code } }
         tokenReply = Http.Response(403, """{"error":"access_denied"}""")
@@ -815,13 +1198,13 @@ class TubeAppTest {
         shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(6))
         settle { titles(a).firstOrNull() != "로그인" }
         assertFalse(rows(a).any { it is Row.Note && it.text == context.getString(R.string.tube_login_denied) })
-        assertEquals("보관함", titles(a).first())
+        assertEquals("나", titles(a).first())
     }
 
     @Test
     fun ifSignInFinishedWhileTheScreenWasOffItSaysSoInsteadOfCodeExpired() {
         val a = open()
-        tapAction(a, TubeRows.A_LIBRARY)
+        tapTab(a, TubeTab.YOU)
         tapAction(a, TubeRows.A_LOGIN)
         settle { rows(a).any { it is Row.Code } }
         // 화면이 꺼지기 직전 보낸 물음이 끝나 로그인됨 → 그 코드는 이미 쓰였다 (다시 물으면 invalid_grant)
@@ -829,7 +1212,7 @@ class TubeAppTest {
         tokenReply = Http.Response(400, """{"error":"invalid_grant"}""")
         shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(6))
         settle { titles(a).firstOrNull() != "로그인" }
-        assertEquals("로그인 화면은 닫히고 보던 화면으로", "보관함", titles(a).first())
+        assertEquals("로그인 화면은 닫히고 보던 화면으로", "나", titles(a).first())
         assertFalse(rows(a).any { it is Row.Note && it.text == context.getString(R.string.tube_login_expired) })
     }
 
@@ -844,6 +1227,47 @@ class TubeAppTest {
         tapAction(a, TubeRows.A_HANDOFF)
         assertEquals(listOf("https://www.youtube.com/watch?v=BzYnNdJhZQw&list=PLxA687tYuMWhkqYjvAGtW_heiEL4Hk_Lx&t=83s"), phoneOpened)
         assertEquals("유튜브", titles(a).first())
+    }
+
+    /**
+     * 재생 화면의 채널 이름을 누름 → 그 동영상의 채널 화면. 본 동영상이면 기록의 채널로 바로, 아니면 찾아서(1단위).
+     * 못 찾으면 알리고 그대로, 다른 꼴의 링크는 따르지 않는다
+     */
+    @Test
+    fun theChannelNameInThePlayerOpensThatChannel() {
+        backend.pages[Feed.VideoChannel("zzzaaaaaaa1").key] = { Fetched(TubePage(emptyList(), null, channels = listOf(TubeChannel(channel.id, channel.title, null)))) }
+        backend.pages[Feed.ChannelInfo(channel.id).key] = { Fetched(TubePage(emptyList(), null, channels = listOf(channel))) }
+        backend.pages[Feed.ChannelUploads(channel.id, Uploads.LONG).key] = { Fetched(TubePage(listOf(v("chanaaaaaa1")), null)) }
+        val controller = Robolectric.buildActivity(TubeActivity::class.java, Intent(Intent.ACTION_VIEW, Uri.parse("kakaowatch://tube/channel?v=zzzaaaaaaa1"))).setup()
+        val a = controller.get()
+        settle { titles(a).firstOrNull() == channel.title }
+        assertEquals(channel.title, titles(a).first())
+        assertTrue(cards(a).contains("chanaaaaaa1"))
+        back(a)
+        assertEquals("유튜브", titles(a).first())
+
+        // 본 동영상이면 찾지 않고 바로
+        TubeState(context).addPlayed(v("seenaaaaaa1"))
+        backend.asked.clear()
+        controller.newIntent(Intent(Intent.ACTION_VIEW, Uri.parse("kakaowatch://tube/channel?v=seenaaaaaa1")))
+        settle { !opening(a) }
+        assertEquals(channel.title, titles(a).first())
+        assertFalse(backend.asked.any { it.startsWith("vchannel/") })
+        back(a)
+
+        // 못 찾으면 알리고 그대로
+        controller.newIntent(Intent(Intent.ACTION_VIEW, Uri.parse("kakaowatch://tube/channel?v=nonenonenon")))
+        settle { !opening(a) }
+        assertEquals("유튜브", titles(a).first())
+        assertEquals(context.getString(R.string.tube_channel_not_found), ShadowToast.getTextOfLatestToast())
+
+        // 다른 곳·다른 꼴의 링크
+        backend.asked.clear()
+        controller.newIntent(Intent(Intent.ACTION_VIEW, Uri.parse("kakaowatch://evil/channel?v=zzzaaaaaaa1")))
+        controller.newIntent(Intent(Intent.ACTION_VIEW, Uri.parse("kakaowatch://tube:99/channel?v=zzzaaaaaaa1")))
+        settle { !opening(a) }
+        assertEquals("유튜브", titles(a).first())
+        assertFalse(backend.asked.any { it.startsWith("vchannel/") })
     }
 
     @Test

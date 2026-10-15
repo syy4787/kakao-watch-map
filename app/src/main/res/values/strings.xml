@@ -103,7 +103,7 @@
     <string name="tap_to_retry">👆 톡 하면 다시 시도</string>
     <string name="error_sdk_init">카카오맵 SDK 시작 실패\n(%1$s)\n\nx86 에뮬레이터는 지원 안 돼요.\n실제 워치에서 실행하세요.</string>
 
-    <!-- 유튜브: 워치용 유튜브 앱 (둘러보기·검색·구독·보관함, 앱 안에서 공식 플레이어로 재생) -->
+    <!-- 유튜브: 워치용 유튜브 앱 (홈·Shorts·구독·나 탭, 검색, 앱 안에서 공식 플레이어로 재생) -->
     <string name="tube_app_name">유튜브</string>
     <string name="tube_title">유튜브</string>
     <string name="tube_search">검색</string>
@@ -122,29 +122,20 @@
     <string name="tube_live">LIVE</string>
     <string name="tube_selected">선택됨</string>
 
-    <!-- 홈 · 구독 · 보관함 -->
+    <!-- 홈 · 구독 · 나 -->
     <string name="tube_subscriptions">구독</string>
-    <string name="tube_library">보관함</string>
-    <string name="tube_continue">이어서 보기</string>
     <string name="tube_history_all">기록 모두 보기</string>
-    <string name="tube_feed">구독 새 동영상</string>
     <string name="tube_feed_empty">구독한 채널에 새 동영상이 없어요</string>
-    <string name="tube_chart_music">인기 음악</string>
-    <string name="tube_chart_popular">인기 동영상</string>
-    <string name="tube_channels">채널</string>
     <string name="tube_no_subscriptions">구독한 채널이 없어요</string>
     <string name="tube_subs_need_login">로그인하면 구독한 채널의 새 동영상을 볼 수 있어요</string>
     <string name="tube_history">시청 기록</string>
     <string name="tube_history_count">%1$d개</string>
-    <string name="tube_history_none">아직 없어요</string>
     <string name="tube_history_empty">아직 본 동영상이 없어요</string>
     <string name="tube_history_note">이 앱에서 본 동영상만 워치에 30일 동안 남아요</string>
     <string name="tube_liked">좋아요 표시한 동영상</string>
     <string name="tube_my_playlists">내 재생목록</string>
     <string name="tube_no_playlists">재생목록이 없어요</string>
-    <string name="tube_videos">동영상</string>
     <string name="tube_no_videos">동영상이 없어요</string>
-    <string name="tube_playlists">재생목록</string>
     <string name="tube_playlist">재생목록</string>
     <string name="tube_play_all">모두 재생</string>
 
@@ -201,7 +192,45 @@
     <string name="tube_tab_subs">구독</string>
     <string name="tube_tab_you">나</string>
     <string name="tube_all">전체</string>
-    <string name="tube_terms_text">이 앱은 YouTube API 서비스를 써요. 쓰면 YouTube 서비스 약관과 이 앱의 개인정보 처리방침에 동의하는 거예요. 정보는 워치에만 둬요.</string>
+    <string name="tube_you">나</string>
+    <string name="tube_chip_all">전체</string>
+    <string name="tube_chip_mixes">믹스</string>
+    <string name="tube_chip_music">음악</string>
+    <string name="tube_chip_gaming">게임</string>
+    <string name="tube_chip_live">실시간</string>
+    <string name="tube_chip_news">뉴스</string>
+    <string name="tube_chip_recent">최근 업로드</string>
+    <string name="tube_chip_watched">감상한 동영상</string>
+    <string name="tube_chip_new">새로운 맞춤 동영상</string>
+    <string name="tube_chip_videos">동영상</string>
+    <string name="tube_chip_playlists">재생목록</string>
+    <string name="tube_mix">믹스</string>
+    <string name="tube_mix_meta">%1$s 외 · 믹스</string>
+    <string name="tube_mix_meta_plain">믹스</string>
+    <string name="tube_empty_all">볼 동영상을 찾지 못했어요</string>
+    <string name="tube_empty_mixes">동영상을 보면 믹스가 생겨요</string>
+    <string name="tube_empty_category">아직 볼 동영상이 없어요</string>
+    <string name="tube_empty_live">지금 볼 수 있는 실시간 방송이 없어요</string>
+    <string name="tube_empty_recent">최근 일주일 안에 올라온 동영상이 없어요</string>
+    <string name="tube_empty_new">새로운 동영상을 찾지 못했어요 · 동영상을 볼수록 늘어요</string>
+    <string name="tube_search_voice">말하거나 입력해서 검색</string>
+    <string name="tube_clear_searches">검색 기록 지우기</string>
+    <string name="tube_shorts_play">Shorts 보기</string>
+    <string name="tube_shorts_empty">Shorts를 찾지 못했어요</string>
+    <string name="tube_subs_channels">구독 채널</string>
+    <string name="tube_subs_shorts_empty">구독 채널의 Shorts가 없어요</string>
+    <string name="tube_subs_live_empty">구독 채널의 실시간 방송이 없어요</string>
+    <string name="tube_channel_shorts_empty">Shorts가 없어요</string>
+    <string name="tube_channel_live_empty">실시간 방송이 없어요</string>
+    <string name="tube_recs_info">추천에 쓰는 것: 이 앱에서 본 동영상 %1$d개 · 유튜브 믹스 추천 %2$d개 · 관심 없음 %3$d개 — 워치에만 두고 30일·7일·30일 뒤 저절로 지워져요</string>
+    <string name="tube_clear_sub">본 동영상·검색어·추천</string>
+    <string name="tube_not_interested">관심 없음</string>
+    <string name="tube_no_channel">채널 추천 안 함</string>
+    <string name="tube_dismissed">관심 없음으로 표시했어요</string>
+    <string name="tube_channel_dismissed">이 채널은 추천하지 않을게요</string>
+    <string name="tube_cleared">기록을 지웠어요</string>
+    <string name="tube_channel_not_found">채널을 찾지 못했어요</string>
+    <string name="tube_terms_text">이 앱은 YouTube API 서비스를 써요. 쓰면 YouTube 서비스 약관과 이 앱의 개인정보 처리방침에 동의하는 거예요. 이 앱에서 본 동영상·유튜브 믹스 추천·관심 없음은 워치에만 두고 홈 추천에만 써요.</string>
     <string name="tube_terms_agree">동의하고 시작</string>
     <string name="tube_terms_youtube">YouTube 서비스 약관</string>
     <string name="tube_terms_privacy">개인정보 처리방침</string>

@@ -24,6 +24,7 @@ class LiveBackend(private val context: Context) : TubeBackend {
             Feed.SubsFeed -> Fetched(TubePage(data.subscriptionFeed(), null))
             Feed.SubsChannels -> Fetched(data.subscriptions(token))
             is Feed.SubsShorts -> Fetched(TubePage(data.shortsOf(feed.channels, SUBS_SHORTS_PER_CHANNEL), null))
+            is Feed.SubsLive -> Fetched(TubePage(data.uploadsFeed(feed.channels, Uploads.LIVE, SUBS_LIVE_PER_CHANNEL, SUBS_LIVE_MAX), null))
             Feed.Liked -> Fetched(data.liked(token))
             Feed.MyPlaylists -> Fetched(data.myPlaylists(token))
             Feed.Account -> Fetched(TubePage(emptyList(), null, channels = listOfNotNull(data.myChannel())))
@@ -51,5 +52,8 @@ class LiveBackend(private val context: Context) : TubeBackend {
         const val SHORTS_PER_CHANNEL = 4
         /** 구독 화면의 Shorts: 채널마다 */
         const val SUBS_SHORTS_PER_CHANNEL = 3
+        /** 구독 화면의 실시간: 채널마다 최근 방송 수와 모두의 최대 */
+        const val SUBS_LIVE_PER_CHANNEL = 2
+        const val SUBS_LIVE_MAX = 20
     }
 }

@@ -34,7 +34,11 @@ import com.mywatch.kakaomap.tube.TubePage
 import com.mywatch.kakaomap.tube.TubePlaylist
 import com.mywatch.kakaomap.tube.TubeSource
 import com.mywatch.kakaomap.tube.TubeVideo
+import com.mywatch.kakaomap.ui.tube.ChannelTab
 import com.mywatch.kakaomap.ui.tube.Slot
+import com.mywatch.kakaomap.ui.tube.SubsChip
+import com.mywatch.kakaomap.tube.HomeChip
+import com.mywatch.kakaomap.tube.HomeFeed
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.Robolectric
@@ -260,50 +264,94 @@ class ScreensRenderTest {
         shoot(name, rows, pages, fontScale, Look.TUBE)
     }
 
-    private fun home(signedIn: Boolean, loading: Boolean = false) = TubeRows.home(
+    /** 세로 Shorts (미리보기는 4:3 가운데 세로 그림 — 유튜브 hqdefault 처럼 양옆이 검은 띠) */
+    private val tubeShorts = (1..5).map { n ->
+        TubeVideo("short00000$n", listOf("고양이가 박스에 들어가는 법 #shorts", "1분 만에 끝내는 김치볶음밥", "오늘의 출근길 🚇", "강아지 산책 브이로그", "춤 챌린지")[n - 1],
+            "채널 $n", 30 + n, channelId = "UC" + n.toString().padStart(22, '0'), portrait = true)
+    }
+
+    private fun shortsPictures() {
+        val palette = listOf(0xFFB0413E, 0xFF3A5BA0, 0xFF2E7D5B, 0xFF7B4FA0, 0xFFC08A2E).map { it.toInt() }
+        tubeShorts.forEachIndexed { i, v ->
+            val bmp = Bitmap.createBitmap(480, 360, Bitmap.Config.ARGB_8888)
+            val c = Canvas(bmp)
+            c.drawColor(Color.BLACK)
+            c.drawRect(138f, 0f, 342f, 360f, Paint().apply { color = palette[i % palette.size] })
+            c.drawCircle(240f, 150f, 40f, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(150, 255, 255, 255) })
+            TubeThumbs.preload(TubeLinks.thumbnail(v.id, big = true), bmp)
+        }
+    }
+
+    private fun home(chip: HomeChip = HomeChip.ALL, loading: Boolean = false, update: Boolean = false) = TubeRows.home(
         tubeApp, TubeRows.HomeData(
-            history = tubeVideos.take(2).mapIndexed { i, v -> Played(v, tubeNow - i) },
-            searches = listOf("아이유 밤편지", "비 오는 날 듣기 좋은 노래 플레이리스트 모음"),
-            feed = if (signedIn) ready(tubeVideos.drop(1)) else null,
-            music = if (loading) Slot(loading = true) else ready(tubeVideos, "M2"),
-            popular = if (loading) Slot(error = "네트워크 연결을 확인하세요") else ready(tubeVideos.take(2)),
-            account = TubeRows.Account(configured = true, signedIn = signedIn, channel = if (signedIn) tubeChannel else null),
-            update = false, now = tubeNow,
+            chip,
+            if (loading) HomeFeed(tubeVideos.take(1)) else HomeFeed(tubeVideos, tubeShorts, shelfAt = 3),
+            TubeRows.Load(loading = loading),
+            more = ready(tubeVideos.take(1), "T2"),
+            update = update, now = tubeNow,
         ),
     )
 
     @Test
     fun tubeHome() {
         TubeThumbs.enabled = false
-        tube("tube_home", home(signedIn = false), pages = 9)
-        tube("tube_home_signed_in", home(signedIn = true), pages = 4)
-        tube("tube_home_loading", home(signedIn = false, loading = true), pages = 6)
-        tube("tube_home_font130", home(signedIn = false), pages = 5, fontScale = 1.3f)
+        shortsPictures()
+        tube("tube_home", home(), pages = 9)
+        tube("tube_home_update", home(update = true), pages = 2)
+        tube("tube_home_loading", home(loading = true), pages = 3)
+        tube("tube_home_font130", home(), pages = 5, fontScale = 1.3f)
+        tube(
+            "tube_home_mixes", TubeRows.home(tubeApp, TubeRows.HomeData(HomeChip.MIXES, HomeFeed(tubeVideos.take(3)), TubeRows.Load(), null, false, tubeNow)),
+            pages = 4,
+        )
+        tube("tube_home_live_empty", TubeRows.home(tubeApp, TubeRows.HomeData(HomeChip.LIVE, HomeFeed(emptyList()), TubeRows.Load(), null, false, tubeNow)), pages = 2)
     }
 
     @Test
-    fun tubeSearchChannelPlaylist() {
+    fun tubeShortsFindAndSearch() {
         TubeThumbs.enabled = false
-        val page = TubePage(tubeVideos.take(4), "S2", channels = listOf(tubeChannel), playlists = tubePlaylists.take(1))
-        tube("tube_search", TubeRows.search(tubeApp, "아이유", Slot(page = page, source = TubeSource.YOUTUBE), tubeNow), pages = 6)
+        shortsPictures()
+        tube("tube_shorts", TubeRows.shorts(tubeApp, tubeShorts, TubeRows.Load()), pages = 4)
+        tube("tube_shorts_font130", TubeRows.shorts(tubeApp, tubeShorts, TubeRows.Load()), pages = 4, fontScale = 1.3f)
+        tube("tube_find", TubeRows.find(tubeApp, listOf("아이유 밤편지", "비 오는 날 듣기 좋은 노래 플레이리스트 모음", "뉴진스")), pages = 3)
+        val page = TubePage(tubeVideos.take(4) + tubeShorts.take(3), "S2", channels = listOf(tubeChannel), playlists = tubePlaylists.take(1))
+        tube("tube_search", TubeRows.search(tubeApp, "아이유", Slot(page = page, source = TubeSource.YOUTUBE), tubeNow), pages = 7)
         tube(
             "tube_search_kakao", TubeRows.search(tubeApp, "비 오는 날 듣기 좋은 노래", Slot(page = TubePage(tubeVideos.take(1), null), source = TubeSource.KAKAO,
                 note = "오늘 유튜브 검색 한도를 다 써서 카카오 동영상 검색으로 찾았어요"), tubeNow), pages = 3,
         )
-        tube(
-            "tube_channel", TubeRows.channel(tubeApp, "1theK", Slot(page = TubePage(emptyList(), null, channels = listOf(tubeChannel))),
-                ready(tubeVideos.take(2), "C2"), Slot(page = TubePage(emptyList(), null, playlists = tubePlaylists)), tubeNow), pages = 5,
-        )
+    }
+
+    @Test
+    fun tubeChannelPlaylist() {
+        TubeThumbs.enabled = false
+        shortsPictures()
+        val info = Slot(page = TubePage(emptyList(), null, channels = listOf(tubeChannel)))
+        val lists = Slot(page = TubePage(emptyList(), null, playlists = tubePlaylists))
+        tube("tube_channel", TubeRows.channel(tubeApp, "1theK", ChannelTab.VIDEOS, info, ready(tubeVideos.take(2), "C2"), lists, tubeNow), pages = 5)
+        tube("tube_channel_shorts", TubeRows.channel(tubeApp, "1theK", ChannelTab.SHORTS, info, ready(tubeShorts), lists, tubeNow), pages = 5)
+        tube("tube_channel_playlists", TubeRows.channel(tubeApp, "1theK", ChannelTab.PLAYLISTS, info, Slot(), lists, tubeNow), pages = 3)
         tube("tube_playlist", TubeRows.playlist(tubeApp, "드라이브할 때 듣는 노래 모음", "PL1aaaaaaaaaa", false, ready(tubeVideos.take(3)), tubeNow), pages = 4)
     }
 
     @Test
-    fun tubeLibraryLoginAccount() {
+    fun tubeYouSubscriptionsLoginAccount() {
         TubeThumbs.enabled = false
+        shortsPictures()
         val signedIn = TubeRows.Account(configured = true, signedIn = true, channel = tubeChannel)
-        tube("tube_library", TubeRows.library(tubeApp, 3, signedIn), pages = 2)
-        tube("tube_library_out", TubeRows.library(tubeApp, 0, TubeRows.Account(configured = true, signedIn = false)), pages = 2)
-        tube("tube_subscriptions", TubeRows.subscriptions(tubeApp, signedIn, ready(tubeVideos.take(2)), Slot(page = TubePage(emptyList(), null, channels = listOf(tubeChannel))), tubeNow), pages = 4)
+        val history = tubeVideos.take(3).map { Played(it, tubeNow) }
+        tube("tube_you", TubeRows.library(tubeApp, signedIn, history, recs = 96, dismissed = 3, update = false, now = tubeNow), pages = 5)
+        tube("tube_you_out", TubeRows.library(tubeApp, TubeRows.Account(configured = true, signedIn = false), emptyList(), 0, 0, false, tubeNow), pages = 3)
+        val channels = Slot(page = TubePage(emptyList(), "SC2", channels = (1..6).map { tubeChannel.copy(id = "UC" + it.toString().padStart(22, '7'), title = "채널 이름 $it") }))
+        tube(
+            "tube_subscriptions",
+            TubeRows.subscriptions(tubeApp, signedIn, SubsChip.ALL, channels, ready(tubeVideos.take(4) + tubeShorts.take(2)), ready(tubeShorts), null, tubeNow), pages = 5,
+        )
+        tube(
+            "tube_subscriptions_shorts",
+            TubeRows.subscriptions(tubeApp, signedIn, SubsChip.SHORTS, channels, ready(tubeVideos.take(2)), ready(tubeShorts), null, tubeNow), pages = 4,
+        )
+        tube("tube_subs_channels", TubeRows.subsChannels(tubeApp, channels), pages = 3)
         val code = com.mywatch.kakaomap.tube.DeviceCode("dc", "PSQ-RWD-XKZ", "https://www.google.com/device", tubeNow + 1_800_000, 5)   // 실제 코드 길이(11자)
         tube("tube_login", TubeRows.login(tubeApp, TubeRows.LoginState.Waiting(code)), pages = 3)
         tube("tube_login_font130", TubeRows.login(tubeApp, TubeRows.LoginState.Waiting(code)), pages = 3, fontScale = 1.3f)
@@ -316,9 +364,9 @@ class ScreensRenderTest {
     @Test
     fun tubeMenuAndHandoff() {
         TubeThumbs.enabled = false
-        tube("tube_menu", TubeRows.menu(tubeApp, tubeVideos[0], inHistory = true), pages = 3)
-        tube("tube_menu_phone_only", TubeRows.menu(tubeApp, tubeVideos[3], inHistory = false), pages = 3)
-        tube("tube_menu_font130", TubeRows.menu(tubeApp, tubeVideos[3], inHistory = true), pages = 4, fontScale = 1.3f)
+        tube("tube_menu", TubeRows.menu(tubeApp, tubeVideos[0], inHistory = true), pages = 4)
+        tube("tube_menu_phone_only", TubeRows.menu(tubeApp, tubeVideos[3], inHistory = false), pages = 4)
+        tube("tube_menu_font130", TubeRows.menu(tubeApp, tubeVideos[3], inHistory = true), pages = 5, fontScale = 1.3f)
         val h = com.mywatch.kakaomap.tube.Handoff(tubeVideos[3], 83, true)
         tube("tube_handoff", TubeRows.handoff(tubeApp, h), pages = 2)
         tube("tube_history", TubeRows.history(tubeApp, tubeVideos.take(2).map { Played(it, tubeNow) }, tubeNow), pages = 4)

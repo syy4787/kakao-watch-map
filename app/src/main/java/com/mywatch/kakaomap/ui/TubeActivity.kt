@@ -6,6 +6,8 @@ import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.content.SharedPreferences
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.os.PowerManager
 import android.os.SystemClock
 import android.text.InputType
@@ -16,6 +18,7 @@ import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.StringRes
 import androidx.annotation.VisibleForTesting
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.OrientationHelper
@@ -27,6 +30,8 @@ import com.mywatch.kakaomap.R
 import com.mywatch.kakaomap.data.ErrorLog
 import com.mywatch.kakaomap.tile.TubeTileService
 import com.mywatch.kakaomap.tube.DeviceCode
+import com.mywatch.kakaomap.tube.HomeChip
+import com.mywatch.kakaomap.tube.MixHarvests
 import com.mywatch.kakaomap.tube.NetworkException
 import com.mywatch.kakaomap.tube.PhoneOpener
 import com.mywatch.kakaomap.tube.PlayRequest
@@ -40,17 +45,22 @@ import com.mywatch.kakaomap.tube.TubeLinks
 import com.mywatch.kakaomap.tube.TubePage
 import com.mywatch.kakaomap.tube.TubePlay
 import com.mywatch.kakaomap.tube.TubeRevokeWorker
+import com.mywatch.kakaomap.tube.TubeInbox
 import com.mywatch.kakaomap.tube.TubeState
 import com.mywatch.kakaomap.tube.TubeVideo
 import com.mywatch.kakaomap.tube.Uploads
 import com.mywatch.kakaomap.tube.WatchPlayer
 import com.mywatch.kakaomap.ui.TubeRows.LoginState
+import com.mywatch.kakaomap.ui.tube.ChannelTab
 import com.mywatch.kakaomap.ui.tube.Feed
 import com.mywatch.kakaomap.ui.tube.LiveBackend
 import com.mywatch.kakaomap.ui.tube.Page
+import com.mywatch.kakaomap.ui.tube.SubsChip
 import com.mywatch.kakaomap.ui.tube.TubeBackend
+import com.mywatch.kakaomap.ui.tube.TubeFeeds
 import com.mywatch.kakaomap.ui.tube.TubeLoader
 import com.mywatch.kakaomap.ui.tube.TubeNav
+import com.mywatch.kakaomap.ui.tube.TubeTab
 import com.mywatch.kakaomap.update.UpdateActivity
 import com.mywatch.kakaomap.update.UpdateManager
 import com.mywatch.kakaomap.update.UpdateWorker
@@ -63,9 +73,12 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 
 /**
- * 워치용 유튜브 앱 (워치 앱 목록의 '유튜브'): 유튜브 앱처럼 홈(이어서 보기·구독 새 동영상·인기 음악·인기 동영상) · 검색(동영상·채널·재생목록) ·
- * 구독 · 보관함(기록·좋아요·내 재생목록) · 채널 · 재생목록. 구글 계정으로 로그인하면 내 구독·좋아요·재생목록 ([TubeAccount] — 코드는 폰에서).
- * 동영상을 누르면 그 동영상부터 목록 그대로 앱 안의 재생 화면([TubePlayerActivity] — 유튜브 공식 플레이어)에서 튼다.
+ * 워치용 유튜브 앱 (워치 앱 목록의 '유튜브'): 유튜브 앱처럼 맨 위 탭(홈 · Shorts · 구독 · 나), 홈의 칩(전체 · 믹스 · 음악 · 게임 · 실시간 · 뉴스 ·
+ * 최근 업로드 · 감상한 동영상 · 새로운 맞춤 동영상 — '전체'는 유튜브 믹스 추천·구독·본 채널·인기를 섞은 것, [TubeFeeds]),
+ * 검색 화면(최근 검색어) · 검색 결과 · 구독(채널 사진 줄·칩) · 나(기록·내 재생목록·좋아요·계정) · 채널(동영상·Shorts·실시간·재생목록) · 재생목록.
+ * 구글 계정으로 로그인하면 내 구독·좋아요·재생목록 ([TubeAccount] — 코드는 폰에서).
+ * 동영상을 누르면 그 동영상부터 유튜브 믹스로(재생목록·좋아요는 목록 순서대로) 앱 안의 재생 화면([TubePlayerActivity] — 유튜브 공식 플레이어)에서,
+ * Shorts 는 따로 된 Shorts 재생 화면(한 장씩 넘기기)에서 튼다. 재생 화면이 알려 준 믹스 추천·본 Shorts 는 받은 편지([TubeInbox])로 받는다.
  * 앱 안 엔진이 최근에 죽었으면 워치 인터넷 앱, 올린 사람이 막아 둔 동영상·재생 화면에 닿지 않으면 폰 유튜브로 ([TubePlay.route]).
  * 뒤로(버튼·쓸어 넘기기)는 늘 한 화면씩 ([TubeNav]), 홈에서 뒤로 가면 닫힌다.
  */
@@ -74,7 +87,16 @@ class TubeActivity : ComponentActivity() {
     private lateinit var ui: WearList
     private lateinit var state: TubeState
     private lateinit var loader: TubeLoader
+    private lateinit var feeds: TubeFeeds
     private lateinit var backend: TubeBackend
+    private val handler = Handler(Looper.getMainLooper())
+    /** 받을 거리를 다시 정하는 일이 이미 걸려 있음 (받을 때마다 한 번으로 모은다) */
+    private var feedsQueued = false
+    /**
+     * Shorts 탭으로 들어옴 — Shorts 가 준비되는 대로 Shorts 재생 화면을 한 번 바로 연다 (보고 있을 때만, [SHORTS_AUTO_MS] 안).
+     * 재생 화면에서 돌아오거나 다른 화면으로 가면 끝
+     */
+    private var shortsAutoAt = 0L
     private val phone by lazy { PhoneOpener(this) }
     private val auth by lazy { TubeAccount.auth(this) }
     /** 화면 쌓기 (시험에서 지금 어느 화면인지 본다) */
@@ -140,8 +162,14 @@ class TubeActivity : ComponentActivity() {
         backend = backendOverride ?: LiveBackend(applicationContext)
         loader = TubeLoader(lifecycleScope, backend) { feed ->
             loader.takeMoreError(feed)?.let(::toast)
-            if (!isFinishing) render()
+            if (!isFinishing) {
+                // 받은 것으로 새로 정할 수 있게 된 받을 거리(구독 채널 → Shorts 등)는 이 받기가 끝난 뒤에
+                queueFeeds()
+                render()
+                maybeOpenShorts()
+            }
         }
+        feeds = TubeFeeds(loader, state) { signedIn }
         onBackPressedDispatcher.addCallback(this, back)
         // 베젤·크라운으로 끝까지 내리면 다음 쪽을 저절로 (싼 목록만)
         ui.list.addOnScrollListener(object : RecyclerView.OnScrollListener() {
@@ -151,7 +179,10 @@ class TubeActivity : ComponentActivity() {
         })
         ambient = AmbientCover(this, ::ambientSummary) { inAmbient ->
             asleep = inAmbient
-            if (!inAmbient) runDeferred()
+            if (!inAmbient) {
+                runDeferred()
+                maybeOpenShorts()
+            }
         }
         wasSignedIn = signedIn
         // 재생 화면을 보는 사이 이 화면이 정리됐다가 다시 만들어졌으면 다녀온 화면들 그대로 (데이터는 새로 받는다)
@@ -206,8 +237,12 @@ class TubeActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        // 재생 화면이 남긴 것(믹스 추천·본 Shorts)을 받는다 — 홈 '전체'에 바로 섞인다
+        runCatching { state.ingest(TubeInbox.of(this).drain()) }.onFailure { ErrorLog.record("유튜브·받은 편지", it) }
         // 다녀온 사이 기록·로그인·새 버전이 바뀌었을 수 있다
         if (!opening) show()
+        // 손목을 내린 사이 Shorts 가 준비됐으면 이제 연다 (onStart 에선 아직 '보이는 중'이 아니라 여기서)
+        maybeOpenShorts()
         UpdateManager.prefsForListening(this).registerOnSharedPreferenceChangeListener(updateListener)
         UpdateWorker.onAppOpened(this)
         prewarm()
@@ -221,6 +256,7 @@ class TubeActivity : ComponentActivity() {
     override fun onStop() {
         // 화면이 켜진 채 가려졌으면 떠난 것, 꺼져서 안 보이면(손목을 내림) 잠깐 안 보는 것
         if (getSystemService(PowerManager::class.java)?.isInteractive != false) left = true else asleep = true
+        if (left) shortsAutoAt = 0L
         // 로그인 기다리기는 화면이 보일 때만 (돌아오면 같은 코드로 이어서)
         loginJob?.cancel()
         loginJob = null
@@ -241,7 +277,9 @@ class TubeActivity : ComponentActivity() {
             shortcut = null
             closeJob?.cancel()
             closeJob = null
-            intent.dataString?.let(TubeLinks::handoff)?.let(::showHandoff)
+            val link = intent.dataString
+            link?.let(TubeLinks::handoff)?.let(::showHandoff)
+            link?.let(TubeLinks::channelLink)?.let(::openChannelOf)
             return
         }
         // 타일의 요청은 주소 없는 인텐트로만 온다 — 주소(data)나 BROWSABLE 이 붙은 건 웹에서 왔을 수 있어 따르지 않는다
@@ -277,32 +315,23 @@ class TubeActivity : ComponentActivity() {
         channel = loader.slot(Feed.Account).page?.channels?.firstOrNull(),
     )
 
-    /** 이 화면이 받을 것들 */
-    private fun feedsOf(p: Page): List<Feed> = when (p) {
-        is Page.Home -> listOfNotNull(
-            Feed.Popular(MUSIC), Feed.Popular(null),
-            if (signedIn) Feed.SubsFeed else null, if (signedIn) Feed.Account else null,
-        )
-        is Page.Search -> listOf(Feed.Search(p.query))
-        is Page.Subscriptions -> if (signedIn) listOf(Feed.SubsFeed, Feed.SubsChannels) else emptyList()
-        Page.SubsChannels -> if (signedIn) listOf(Feed.SubsChannels) else emptyList()
-        Page.Library, Page.Account -> if (signedIn) listOf(Feed.Account) else emptyList()
-        Page.Liked -> listOf(Feed.Liked)
-        Page.MyPlaylists -> listOf(Feed.MyPlaylists)
-        is Page.Channel -> listOf(Feed.ChannelInfo(p.id), Feed.ChannelUploads(p.id, Uploads.LONG), Feed.ChannelPlaylists(p.id))
-        is Page.Playlist -> listOf(Feed.PlaylistVideos(p.id, p.own))
-        Page.History, is Page.Menu, Page.Login, is Page.Handoff, Page.Terms, Page.Shorts, Page.Find -> emptyList()
-    }
+    /** 이 화면이 받을 것들 (믹스 추천·본 채널·Shorts 처럼 워치 안의 것·구독 채널로 정해지는 것까지 — [TubeFeeds]) */
+    private fun feedsOf(p: Page): List<Feed> = feeds.feedsFor(p, System.currentTimeMillis())
 
     /** '더 보기'로 이어 받을 것 */
-    private fun moreFeed(p: Page): Feed? = when (p) {
-        is Page.Search -> Feed.Search(p.query)
-        is Page.Subscriptions, Page.SubsChannels -> Feed.SubsChannels
-        Page.Liked -> Feed.Liked
-        Page.MyPlaylists -> Feed.MyPlaylists
-        is Page.Channel -> Feed.ChannelUploads(p.id, Uploads.LONG)
-        is Page.Playlist -> Feed.PlaylistVideos(p.id, p.own)
-        else -> null
+    private fun moreFeed(p: Page): Feed? = feeds.moreFor(p)
+
+    /**
+     * 받은 것으로 새로 정할 수 있게 된 받을 거리(구독 채널 → Shorts 등)를 받는다 — 받기가 끝난 다음 차례에 한 번
+     * (받는 중에 같은 것을 또 받지 않게). 새것만: 실패한 것까지 받으면 받기 → 실패 → 또 받기가 끝없이 돈다
+     */
+    private fun queueFeeds() {
+        if (feedsQueued) return
+        feedsQueued = true
+        handler.post {
+            feedsQueued = false
+            if (!isFinishing && !isDestroyed && state.agreed) feedsOf(nav.top).forEach { loader.loadNew(it) }
+        }
     }
 
     /**
@@ -355,8 +384,9 @@ class TubeActivity : ComponentActivity() {
     }
 
     private fun render() {
-        back.isEnabled = nav.depth > 1
-        // 오른쪽으로 쓸기도 한 화면씩 뒤로 (홈에서는 시스템이 닫는다)
+        // 홈에서 '전체'가 아닌 칩이면 뒤로 = '전체'로 (유튜브 앱처럼) — 닫지 않는다
+        back.isEnabled = nav.depth > 1 || (nav.top as? Page.Home)?.chip.let { it != null && it != HomeChip.ALL }
+        // 오른쪽으로 쓸기도 한 화면씩 뒤로 (홈 '전체'에서는 시스템이 닫는다)
         ui.swipeBack = if (back.isEnabled) back::handleOnBackPressed else null
         if (opening) {
             ui.showStatus(getString(openingText))
@@ -364,29 +394,28 @@ class TubeActivity : ComponentActivity() {
         }
         val now = System.currentTimeMillis()
         ui.rows = when (val p = nav.top) {
-            is Page.Home -> TubeRows.home(
-                this, TubeRows.HomeData(
-                    history = state.played(now),
-                    searches = state.searches,
-                    feed = if (signedIn) loader.slot(Feed.SubsFeed) else null,
-                    music = loader.slot(Feed.Popular(MUSIC)),
-                    popular = loader.slot(Feed.Popular(null)),
-                    account = account(),
-                    update = runCatching { UpdateManager.hasUpdate(this) }.getOrDefault(false),
-                    now = now,
-                ),
-            )
+            is Page.Home -> {
+                val (feed, load, more) = feeds.home(p.chip, now)
+                TubeRows.home(this, TubeRows.HomeData(p.chip, feed, load, more, hasUpdate(), now))
+            }
+            Page.Shorts -> feeds.shorts(now).let { (list, load) -> TubeRows.shorts(this, list, load) }
+            Page.Find -> TubeRows.find(this, state.searches)
             is Page.Search -> TubeRows.search(this, p.query, loader.slot(Feed.Search(p.query)), now)
-            is Page.Subscriptions -> TubeRows.subscriptions(this, account(), loader.slot(Feed.SubsFeed), loader.slot(Feed.SubsChannels), now)
-            Page.SubsChannels -> TubeRows.subscriptions(this, account(), loader.slot(Feed.SubsFeed), loader.slot(Feed.SubsChannels), now)
-            Page.Shorts -> listOf(Row.Header(getString(R.string.tube_shorts)))
-            Page.Find -> listOf(Row.Header(getString(R.string.tube_search)))
-            Page.Library -> TubeRows.library(this, state.played(now).size, account())
+            is Page.Subscriptions -> TubeRows.subscriptions(
+                this, account(), p.chip, loader.slot(Feed.SubsChannels), loader.slot(Feed.SubsFeed),
+                subsSlot(p, SubsChip.SHORTS), subsSlot(p, SubsChip.LIVE), now,
+            )
+            Page.SubsChannels -> TubeRows.subsChannels(this, loader.slot(Feed.SubsChannels))
+            Page.Library -> TubeRows.library(
+                this, account(), state.played(now), recs = MixHarvests.order(state.harvests(now), Int.MAX_VALUE).size,
+                dismissed = state.dismissedVideos(now).size + state.dismissedChannels(now).size, update = hasUpdate(), now = now,
+            )
             Page.History -> TubeRows.history(this, state.played(now), now)
             Page.Liked -> TubeRows.liked(this, loader.slot(Feed.Liked), now)
             Page.MyPlaylists -> TubeRows.myPlaylists(this, loader.slot(Feed.MyPlaylists))
             is Page.Channel -> TubeRows.channel(
-                this, p.title, loader.slot(Feed.ChannelInfo(p.id)), loader.slot(Feed.ChannelUploads(p.id, Uploads.LONG)), loader.slot(Feed.ChannelPlaylists(p.id)), now,
+                this, p.title, p.section, loader.slot(Feed.ChannelInfo(p.id)),
+                loader.slot(feeds.channelList(p)), loader.slot(Feed.ChannelPlaylists(p.id)), now,
             )
             is Page.Playlist -> TubeRows.playlist(this, p.title, p.id, p.own, loader.slot(Feed.PlaylistVideos(p.id, p.own)), now, p.private)
             is Page.Menu -> TubeRows.menu(this, p.video, inHistory = state.played(now).any { it.video.id == p.video.id })
@@ -396,6 +425,12 @@ class TubeActivity : ComponentActivity() {
             Page.Terms -> TubeRows.terms(this, state.agreed, privacy = TubeLinks.privacyUrl(BuildConfig.UPDATE_REPO) != null)
         }
     }
+
+    private fun hasUpdate() = runCatching { UpdateManager.hasUpdate(this) }.getOrDefault(false)
+
+    /** 구독 화면의 Shorts·실시간 칩이 받은 것 (그 칩을 받는 중이 아니면 null) */
+    private fun subsSlot(p: Page.Subscriptions, chip: SubsChip) =
+        feedsOf(p).firstOrNull { (chip == SubsChip.SHORTS && it is Feed.SubsShorts) || (chip == SubsChip.LIVE && it is Feed.SubsLive) }?.let(loader::slot)
 
     private fun spot(): Spot? {
         val lm = ui.list.layoutManager as? LinearLayoutManager ?: return null
@@ -424,6 +459,7 @@ class TubeActivity : ComponentActivity() {
     /** 새 화면으로 (맨 위부터) */
     private fun go(p: Page) {
         if (p == nav.top) return
+        if (p != Page.Shorts) shortsAutoAt = 0L
         spot()?.let { scrolls[nav.top] = it }
         if (nav.top == Page.Login) stopLogin()
         syncSignIn()
@@ -437,9 +473,15 @@ class TubeActivity : ComponentActivity() {
         ui.list.scrollToPosition(0)
     }
 
-    /** 한 화면 뒤로 (그 화면에서 보던 자리로). 홈이면 닫는다 */
+    /** 한 화면 뒤로 (그 화면에서 보던 자리로). 홈에서 '전체'가 아닌 칩이면 먼저 '전체'로, 홈이면 닫는다 */
     private fun goBack() {
         if (nav.top == Page.Login) stopLogin()
+        shortsAutoAt = 0L
+        val top = nav.top
+        if (top is Page.Home && top.chip != HomeChip.ALL) {
+            pickChip(TubeRows.BAR_HOME, HomeChip.ALL.name)
+            return
+        }
         if (!nav.back()) {
             finish()
             return
@@ -474,12 +516,64 @@ class TubeActivity : ComponentActivity() {
         ui.list.scrollToPosition(0)
     }
 
+    /** 홈으로 (고른 칩 그대로, 맨 위부터) */
     private fun goHome() {
         stopLogin()
-        nav.reset()
+        shortsAutoAt = 0L
+        nav.reset(nav.bottom as? Page.Home ?: Page.Home())
         scrolls.clear()
         show()
         ui.list.scrollToPosition(0)
+    }
+
+    /**
+     * 맨 위 탭: 홈 = 홈으로(이미 홈이면 맨 위로), 나머지 = 홈 위에 그 화면 하나 (탭끼리는 자리만 바꿔 뒤로 = 홈).
+     * Shorts 는 준비되는 대로 Shorts 재생 화면을 바로 연다 (이미 Shorts 면 지금)
+     */
+    private fun pickTab(tab: TubeTab) {
+        val target = when (tab) {
+            TubeTab.HOME -> return goHome()
+            TubeTab.SHORTS -> Page.Shorts
+            TubeTab.SUBS -> Page.Subscriptions()
+            TubeTab.YOU -> Page.Library
+        }
+        val top = nav.top
+        if (top == target || (target is Page.Subscriptions && top is Page.Subscriptions)) {
+            if (target == Page.Shorts) playShortsFromTab() else ui.list.scrollToPosition(0)
+            return
+        }
+        // 0 은 '열지 않음'이라 켠 직후 시계(0)도 1 로
+        if (target == Page.Shorts) shortsAutoAt = SystemClock.elapsedRealtime().coerceAtLeast(1L)
+        if (top.tab != null && top !is Page.Home) {
+            // 탭 화면끼리: 자리만 바꾼다 (뒤로 = 홈)
+            spot()?.let { scrolls[top] = it }
+            nav.swapTop(target)
+            syncSignIn()
+            show()
+            ui.list.scrollToPosition(0)
+        } else {
+            go(target)
+        }
+        maybeOpenShorts()
+    }
+
+    /**
+     * 칩 줄에서 칩을 고름: 그 화면 자리만 바뀐다 (뒤로 가기에 쌓이지 않음). 칩 줄이 맨 위에 오게 —
+     * 바뀐 목록을 위에서부터 보게 (유튜브 앱처럼 칩 줄은 그대로 보임)
+     */
+    private fun pickChip(bar: String, id: String) {
+        val top = nav.top
+        val next = when {
+            bar == TubeRows.BAR_HOME && top is Page.Home -> HomeChip.entries.firstOrNull { it.name == id }?.let { Page.Home(it) }
+            bar == TubeRows.BAR_SUBS && top is Page.Subscriptions -> SubsChip.entries.firstOrNull { it.name == id }?.let { Page.Subscriptions(it) }
+            bar == TubeRows.BAR_CHANNEL && top is Page.Channel -> ChannelTab.entries.firstOrNull { it.name == id }?.let { top.copy(section = it) }
+            else -> null
+        } ?: return
+        if (next == top) return
+        nav.swapTop(next)
+        show()
+        val at = ui.rows.indexOfFirst { it is Row.ChipBar }
+        (ui.list.layoutManager as? LinearLayoutManager)?.scrollToPositionWithOffset(at.coerceAtLeast(0), 0)
     }
 
     private fun showHandoff(h: com.mywatch.kakaomap.tube.Handoff) {
@@ -515,6 +609,7 @@ class TubeActivity : ComponentActivity() {
             is Row.PlaylistItem -> go(
                 Page.Playlist(row.playlist.id, row.playlist.title, row.own, private = row.own && row.playlist.privacy !in OPEN_PLAYLISTS),
             )
+            is Row.ShortCard -> playShorts(row.list, row.index)
             is Row.Action -> onAction(row.id)
             else -> Unit
         }
@@ -528,21 +623,44 @@ class TubeActivity : ComponentActivity() {
         val top = nav.top
         when {
             id == TubeRows.A_UPDATE -> startActivity(UpdateActivity.updateNowIntent(this))
-            id == TubeRows.A_SEARCH -> openInput()
+            id.startsWith(TAB) -> TubeTab.entries.firstOrNull { it.name == id.removePrefix(TAB) }?.let(::pickTab)
+            id.startsWith(CHIP) -> id.removePrefix(CHIP).split(':', limit = 2).takeIf { it.size == 2 }?.let { (bar, chip) -> pickChip(bar, chip) }
+            id == TubeRows.A_SEARCH -> openFind()
+            id == TubeRows.A_INPUT -> openInput()
+            id == TubeRows.A_CLEAR_SEARCHES -> {
+                state.clearSearches()
+                render()
+            }
+            id == TubeRows.A_SHORTS_PLAY -> playShortsFromTab()
+            id == TubeRows.A_SUBS_CHANNELS -> go(Page.SubsChannels)
             id.startsWith(TubeRows.A_QUERY) -> search(id.removePrefix(TubeRows.A_QUERY))
-            id == TubeRows.A_SUBS || id == TubeRows.A_SUBS_MORE -> go(Page.Subscriptions())
-            id == TubeRows.A_LIBRARY -> go(Page.Library)
+            id == TubeRows.A_SUBS || id == TubeRows.A_SUBS_MORE -> pickTab(TubeTab.SUBS)
+            id == TubeRows.A_LIBRARY -> pickTab(TubeTab.YOU)
             id == TubeRows.A_HISTORY -> go(Page.History)
             id == TubeRows.A_LIKED -> go(Page.Liked)
             id == TubeRows.A_MY_PLAYLISTS -> go(Page.MyPlaylists)
             id == TubeRows.A_ACCOUNT -> go(Page.Account)
             id == TubeRows.A_MORE -> moreFeed(top)?.let(loader::more)
             id == TubeRows.A_MORE_PLAYLISTS -> (top as? Page.Channel)?.let { loader.more(Feed.ChannelPlaylists(it.id)) }
+            id == TubeRows.A_NOT_INTERESTED -> (top as? Page.Menu)?.let {
+                state.dismissVideo(it.video.id)
+                goBack()
+                toast(getString(R.string.tube_dismissed))
+            }
+            id == TubeRows.A_NO_CHANNEL -> (top as? Page.Menu)?.video?.channelId?.let { cid ->
+                state.dismissChannel(cid)
+                goBack()
+                toast(getString(R.string.tube_channel_dismissed))
+            }
             id == TubeRows.A_RETRY -> feedsOf(top).filter { loader.slot(it).error != null }.forEach { loader.load(it, force = true) }
             id == TubeRows.A_CLEAR -> {
+                // 본 동영상·검색어·믹스 추천·관심 없음·본 Shorts — 받아 둔 추천 정보도 메모리에서 버린다
                 state.clear()
+                loader.forget("recs/", null)
+                loader.forget("watched/", null)
                 TubeTileService.refresh(this)
-                render()
+                show()
+                toast(getString(R.string.tube_cleared))
             }
             id == TubeRows.A_PHONE_SEARCH -> (top as? Page.Search)?.let { openOnPhone(TubeLinks.searchUrl(it.query), R.string.tube_opened_search_on_phone) {} }
             id == TubeRows.A_PLAY_ALL -> (top as? Page.Playlist)?.let(::playAll)
@@ -594,12 +712,27 @@ class TubeActivity : ComponentActivity() {
         }
     }
 
+    /** 검색 화면(최근 검색어)을 열고 곧바로 말·키보드 입력 (유튜브 앱처럼 검색창에 바로) */
+    private fun openFind() {
+        if (nav.top != Page.Find) go(Page.Find)
+        openInput()
+    }
+
+    /** 검색: 검색 화면에서 했으면 그 자리를 결과로 바꾼다 (뒤로 = 검색 전 화면) */
     private fun search(text: String) {
         val q = SearchHistory.clean(text)
         if (q.isEmpty()) return
         state.addSearch(q)
         // 같은 검색을 다시 하면(3시간 안) 기억한 결과로 — 검색은 하루 100번까지라 아낀다
-        if (nav.top == Page.Search(q)) show() else go(Page.Search(q))
+        when (nav.top) {
+            Page.Search(q) -> show()
+            Page.Find -> {
+                nav.swapTop(Page.Search(q))
+                show()
+                ui.list.scrollToPosition(0)
+            }
+            else -> go(Page.Search(q))
+        }
     }
 
     // ---------------- 로그인 ----------------
@@ -913,6 +1046,155 @@ class TubeActivity : ComponentActivity() {
         }
     }
 
+    // ---------------- Shorts ----------------
+
+    /**
+     * Shorts 탭의 '▶ Shorts 보기'·탭을 다시 누름: 지금 Shorts 목록을 처음부터 — 워치에서 틀 수 있는 첫 것부터
+     * (하나도 없으면 첫 것을 폰에서)
+     */
+    private fun playShortsFromTab() {
+        val (list, _) = feeds.shorts(System.currentTimeMillis())
+        if (list.isNotEmpty()) playShorts(list, firstPlayable(list) ?: 0)
+    }
+
+    /** 워치에서 틀 수 있는 첫 Shorts 의 자리 (없으면 null) */
+    private fun firstPlayable(list: List<TubeVideo>): Int? = list.indexOfFirst { it.embeddable }.takeIf { it >= 0 }
+
+    /**
+     * Shorts 탭으로 들어왔고 Shorts 가 준비됐으면 한 번 바로 연다 — 보고 있을 때만 (손목을 내렸으면 다시 볼 때, 떠났으면 안 엶),
+     * 들어온 지 [SHORTS_AUTO_MS] 안에만. 아직 받는 중이면 받는 대로 다시 불린다
+     */
+    private fun maybeOpenShorts() {
+        val at = shortsAutoAt
+        if (at == 0L || nav.top != Page.Shorts || opening || isFinishing) return
+        if (SystemClock.elapsedRealtime() - at > SHORTS_AUTO_MS) {
+            shortsAutoAt = 0L
+            return
+        }
+        if (left || asleep || !lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) return
+        val (list, load) = feeds.shorts(System.currentTimeMillis())
+        // 워치에서 틀 수 있는 것부터 — 하나도 없으면 저절로 열지 않는다 (폰이 저절로 열리지 않게, 누르면 폰으로)
+        val start = firstPlayable(list)
+        if (start == null) {
+            if (list.isNotEmpty() && !load.loading) shortsAutoAt = 0L
+            return
+        }
+        shortsAutoAt = 0L
+        playShorts(list, start)
+    }
+
+    /**
+     * Shorts 재생 화면(web/tube/shorts.html, 한 장씩 넘기기)으로 [list] 를 [index] 번째부터 — 앱 안 → 워치 인터넷 앱 → 폰 유튜브의 Shorts
+     * ([TubePlay.route] 와 같은 차례). 재생 화면에 닿지 못하면 알리고 폰으로
+     */
+    private fun playShorts(list: List<TubeVideo>, index: Int) {
+        if (opening || list.isEmpty()) return
+        val video = list[index.coerceIn(0, list.lastIndex)]
+        val guard = PlayerGuard.of(this)
+        guard.checkSystemExits(this)
+        val crashed = guard.crashedRecently()
+        val route = TubePlay.route(
+            video, page = WatchPlayer.pageBase() != null, engine = engineCheck(), engineCrashed = crashed, browser = WatchPlayer.available(this),
+        )
+        val base = WatchPlayer.pageBase()
+        if (route == PlayRoute.PHONE || base == null) {
+            shortsOnPhone(video)
+            return
+        }
+        // 워치에서 못 트는 것은 빼고 (고른 것은 그대로 — 막혀 있으면 재생 화면이 알리고 넘긴다)
+        val playable = list.filterIndexed { i, v -> v.embeddable || v == video }
+        val at = playable.indexOf(video)
+        opening = true
+        openingText = R.string.tube_opening
+        render()
+        val page = nav.top
+        lifecycleScope.launch {
+            val reachable = try {
+                WatchPlayer.reachable()
+            } finally {
+                opening = false
+            }
+            whenWatching(page) { startShorts(playable, at, route, crashed, base, reachable) }
+        }
+    }
+
+    private fun startShorts(list: List<TubeVideo>, at: Int, route: PlayRoute, crashed: Boolean, base: String, reachable: Boolean) {
+        val video = list[at]
+        if (!reachable) {
+            render()
+            toast(getString(R.string.tube_watch_unreachable))
+            shortsOnPhone(video)
+            return
+        }
+        val url = TubeLinks.shortsUrl(base, list.map { it.id }, at, nonce = System.currentTimeMillis(), inApp = route == PlayRoute.IN_APP)
+        val link = if (route == PlayRoute.IN_APP) TubePlayerActivity.intent(this, url) else WatchPlayer.browserIntent(this, url)
+        val ok = link != null && try {
+            startActivity(link)
+            true
+        } catch (e: ActivityNotFoundException) {
+            ErrorLog.record("유튜브·Shorts 열기", e)
+            false
+        } catch (e: SecurityException) {
+            ErrorLog.record("유튜브·Shorts 열기", e)
+            false
+        }
+        if (!ok) {
+            render()
+            shortsOnPhone(video)
+            return
+        }
+        // 인터넷 앱의 재생 화면은 본 Shorts 를 알려 주지 않는다 — 처음 것만이라도
+        if (route == PlayRoute.BROWSER) {
+            state.markSeen(video.id)
+            if (crashed) toast(getString(R.string.tube_engine_browser))
+        }
+        render()
+    }
+
+    private fun shortsOnPhone(video: TubeVideo) =
+        openOnPhone(TubeLinks.phoneShortsUrl(video.id), R.string.tube_opened_on_phone) { state.markSeen(video.id) }
+
+    /**
+     * 재생 화면에서 채널 이름을 누름: 그 동영상의 채널 화면 — 워치 기록에 그 동영상이 있으면 바로, 없으면 채널을 찾아서 (1단위).
+     * 찾는 사이 다른 화면으로 갔으면 열지 않는다
+     */
+    private fun openChannelOf(video: String) {
+        shortcut = null
+        closeJob?.cancel()
+        closeJob = null
+        state.played().firstOrNull { it.video.id == video }?.video?.let { v ->
+            v.channelId?.let {
+                go(Page.Channel(it, v.channel))
+                return
+            }
+        }
+        if (opening) return
+        opening = true
+        openingText = R.string.tube_opening
+        render()
+        val at = nav.top
+        lifecycleScope.launch {
+            val ch = try {
+                backend.fetch(Feed.VideoChannel(video), null, null).page.channels.firstOrNull()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                ErrorLog.record("유튜브·채널 찾기", e)
+                null
+            } finally {
+                opening = false
+            }
+            when {
+                ch == null -> {
+                    render()
+                    toast(getString(R.string.tube_channel_not_found))
+                }
+                nav.top == at && !isFinishing -> go(Page.Channel(ch.id, ch.title))
+                else -> render()
+            }
+        }
+    }
+
     /** 폰 유튜브에서 (믹스·재생목록이면 그대로) */
     private fun playOnPhone(req: PlayRequest) {
         val list = (req.queue as? Queue.Playlist)?.id ?: (req.queue as? Queue.Ids)?.list
@@ -982,8 +1264,6 @@ class TubeActivity : ComponentActivity() {
     companion object {
         private const val KEY_QUERY = "query"
         private const val STATE_NAV = "nav"
-        /** 유튜브 '음악' 분류 (인기 음악) */
-        private const val MUSIC = "10"
         /** 구글 계정 > 서드 파티 연결 (이 앱의 접근 권한을 끊는 곳) */
         private const val PERMISSIONS_URL = "https://myaccount.google.com/connections"
         /** 목록 끝에서 이만큼 안쪽 줄이 보이면 다음 쪽을 저절로 */
@@ -998,6 +1278,11 @@ class TubeActivity : ComponentActivity() {
         private const val DEFERRED_PLAY_MS = 60_000L
         /** 타일에서 바로 온 일을 마치고 닫기까지 ('폰에서 열림' 애니메이션 길이쯤) */
         private const val SHORTCUT_CLOSE_MS = 1_800L
+        /** Shorts 탭으로 들어온 뒤 이만큼 안에 Shorts 가 준비되면 재생 화면을 바로 연다 */
+        private const val SHORTS_AUTO_MS = 60_000L
+        /** 탭·칩을 누른 줄 (Row.Action 의 id 앞머리 — [Row.Tabs]·[Row.ChipBar]) */
+        private const val TAB = "tab:"
+        private const val CHIP = "chip:"
 
         /** 타일의 '검색' — 바로 음성·키보드 입력 */
         const val EXTRA_VOICE = "voice"

@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Shorts 선반: 'Shorts' 제목 + 가로로 넘기는 세로 카드들 (카드는 코드에서 채운다) -->
+<!-- Shorts 선반: 'Shorts' 제목 + 가로로 넘기는 세로 카드들 (카드는 코드에서 채운다). 아이콘은 이 앱의 것을 흰색으로 — 유튜브 Shorts 로고처럼 빨갛게 하지 않는다 -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
@@ -18,7 +18,7 @@
             android:layout_height="22dp"
             android:importantForAccessibility="no"
             android:src="@drawable/ic_shorts"
-            android:tint="@color/tube_live" />
+            android:tint="@color/text_primary" />
 
         <TextView
             android:id="@+id/title"

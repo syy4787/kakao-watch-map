@@ -4,8 +4,9 @@ import java.net.URI
 
 /**
  * 앱 안 재생 화면(GeckoView)이 어디로 갈 수 있는지 (단위 테스트로 검증):
- *  · 재생 화면 자신(주소의 # 만 바뀜)과 유튜브 플레이어(iframe) 안의 https 이동만 그대로
- *  · 워치 앱 링크(kakaowatch://tube…, 인터넷 앱용 intent://…scheme=kakaowatch)는 앱이 받는다 — 목록으로·폰에서 이어 보기
+ *  · 재생 화면 자신(동영상 index.html · Shorts shorts.html — 주소의 # 만 바뀜)과 유튜브 플레이어(iframe) 안의 https 이동만 그대로
+ *  · 워치 앱 링크(kakaowatch://tube…, 인터넷 앱용 intent://…scheme=kakaowatch)는 앱이 받는다 — 목록으로·폰에서 이어 보기·채널
+ *  · 재생 화면이 저절로 알리는 것(유튜브 믹스가 고른 다음 동영상들 · 처음 본 Shorts)은 앱의 받은 편지로 — 재생 화면은 그대로
  *  · 유튜브 로고·광고 같은 바깥 https 는 사용자가 눌렀을 때만 폰에서 연다 (워치에서 새 창을 열지 않는다)
  *  · 그 밖(파일·스크립트·다른 앱·http)은 막는다
  */
@@ -14,11 +15,16 @@ object PlayerNav {
     sealed interface Decision {
         data object Allow : Decision
         data object Block : Decision
-        /** 워치 앱이 받을 링크 (kakaowatch://tube 또는 kakaowatch://tube/phone?…) */
+        /** 워치 앱이 받을 링크 (kakaowatch://tube · kakaowatch://tube/phone?… · kakaowatch://tube/channel?…) — 재생 화면을 닫고 앱으로 */
         data class App(val link: String) : Decision
         /** 폰에서 열 주소 */
         data class Phone(val url: String) : Decision
+        /** 앱에 조용히 남길 것 (kakaowatch://tube/recs?… · kakaowatch://tube/seen?…) — 재생 화면은 그대로 */
+        data class Note(val link: String) : Decision
     }
+
+    /** 재생 화면들 (재생 화면 주소 아래) */
+    private val PAGES = listOf("", "index.html", "shorts.html")
 
     private const val PACKAGE = "com.mywatch.kakaomap"
 
@@ -36,11 +42,11 @@ object PlayerNav {
         return if (u == "about:blank" || u == "about:srcdoc" || isHttps(u)) Decision.Allow else Decision.Block
     }
 
-    /** 새 창(유튜브에서 보기·광고) — 워치에선 열지 않고 폰에서 */
+    /** 새 창(유튜브에서 보기·광고) — 워치에선 열지 않고 폰에서. 앱에 남길 것은 새 창으로 받지 않는다 */
     fun newWindow(uri: String, pageBase: String): Decision {
         val u = uri.trim()
         if (isPage(u, pageBase)) return Decision.Block
-        appLink(u)?.let { return it }
+        appLink(u)?.let { return if (it is Decision.Note) Decision.Block else it }
         return if (isHttps(u)) Decision.Phone(u) else Decision.Block
     }
 
@@ -49,7 +55,7 @@ object PlayerNav {
         val b = runCatching { URI(base) }.getOrNull() ?: return false
         if (!"https".equals(a.scheme, ignoreCase = true) || !b.host.equals(a.host, ignoreCase = true) || a.port != b.port) return false
         val path = a.rawPath ?: return false
-        return path == b.rawPath || path == b.rawPath + "index.html"
+        return PAGES.any { path == b.rawPath + it }
     }
 
     private fun isHttps(u: String): Boolean {
@@ -68,7 +74,8 @@ object PlayerNav {
         if (!"kakaowatch".equals(uri.scheme, ignoreCase = true) || uri.host != "tube") return Decision.Block
         return when (uri.rawPath.orEmpty()) {
             "", "/" -> Decision.App("kakaowatch://tube")
-            "/phone" -> Decision.App(link)
+            "/phone", "/channel" -> Decision.App(link)
+            "/recs", "/seen" -> Decision.Note(link)
             else -> Decision.Block
         }
     }

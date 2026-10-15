@@ -33,6 +33,9 @@ class TubeState(context: Context) {
 
     fun removeSearch(query: String) = saveSearches(SearchHistory.remove(searches, query))
 
+    /** 검색 기록만 지운다 (검색 화면의 '검색 기록 지우기') */
+    fun clearSearches() = prefs.edit { remove(K_SEARCHES) }
+
     private fun saveSearches(list: List<String>) = prefs.edit { putString(K_SEARCHES, SearchHistory.encode(list)) }
 
     /**

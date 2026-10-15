@@ -77,6 +77,37 @@ class PlayerNavTest {
     }
 
     @Test
+    fun theShortsPageIsAPlayerPageToo() {
+        assertEquals(Decision.Allow, PlayerNav.top(base + "shorts.html#ids=BzYnNdJhZQw,pSUydWEqKwE&i=1&n=5&app=1", base, userGesture = false))
+        assertEquals(Decision.Allow, PlayerNav.top(base + "shorts.html", base, userGesture = false))
+        for (bad in listOf(base + "shorts.htm", base + "other.html", base + "shorts.html/x", "https://syy4787.github.io/kakao-watch-map/shorts.html")) {
+            assertEquals(bad, Decision.Block, PlayerNav.top(bad, base, userGesture = false))
+        }
+        assertEquals(Decision.Block, PlayerNav.newWindow(base + "shorts.html#ids=BzYnNdJhZQw", base))
+    }
+
+    /**
+     * 재생 화면이 저절로 앱에 알리는 것(누르지 않아도): 유튜브 믹스가 고른 다음 동영상들 · 처음 본 Shorts → 앱의 받은 편지로 (재생 화면은 그대로).
+     * 채널 이름을 누르면 앱의 채널 화면으로. 새 창으로는 받지 않고, 모르는 길은 막는다
+     */
+    @Test
+    fun mixRecommendationsAndSeenShortsAreQuietNotesForTheApp() {
+        val recs = "kakaowatch://tube/recs?seed=BzYnNdJhZQw&ids=pSUydWEqKwE,c9cm8EYfu7w"
+        assertEquals(Decision.Note(recs), PlayerNav.top(recs, base, userGesture = false))
+        assertEquals(Decision.Note("kakaowatch://tube/seen?v=BzYnNdJhZQw"), PlayerNav.top("kakaowatch://tube/seen?v=BzYnNdJhZQw", base, userGesture = false))
+        assertEquals(
+            Decision.Note("kakaowatch://tube/seen?v=BzYnNdJhZQw"),
+            PlayerNav.top("intent://tube/seen?v=BzYnNdJhZQw#Intent;scheme=kakaowatch;package=com.mywatch.kakaomap;end", base, userGesture = false),
+        )
+        assertEquals(Decision.App("kakaowatch://tube/channel?v=BzYnNdJhZQw"), PlayerNav.top("kakaowatch://tube/channel?v=BzYnNdJhZQw", base, userGesture = true))
+        assertEquals(Decision.Block, PlayerNav.newWindow(recs, base))
+        assertEquals(Decision.Block, PlayerNav.newWindow("kakaowatch://tube/seen?v=BzYnNdJhZQw", base))
+        for (bad in listOf("kakaowatch://tube/settings", "kakaowatch://tube/recs/x?seed=a", "kakaowatch://tubes/recs?seed=a")) {
+            assertEquals(bad, Decision.Block, PlayerNav.top(bad, base, userGesture = true))
+        }
+    }
+
+    @Test
     fun newWindowsNeverOpenOnTheWatch() {
         // 플레이어의 '유튜브에서 보기'·광고는 새 창 → 폰에서
         assertEquals(Decision.Phone("https://www.youtube.com/watch?v=BzYnNdJhZQw"), PlayerNav.newWindow("https://www.youtube.com/watch?v=BzYnNdJhZQw", base))

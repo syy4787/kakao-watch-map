@@ -83,6 +83,8 @@ class TubeNav(start: Page = Page.Home()) {
     private val stack = ArrayList<Page>().apply { add(start) }
 
     val top: Page get() = stack.last()
+    /** 맨 아래 (홈 — 고른 칩 그대로) */
+    val bottom: Page get() = stack.first()
     val depth: Int get() = stack.size
 
     fun push(p: Page) {

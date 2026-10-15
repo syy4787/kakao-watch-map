@@ -86,6 +86,16 @@ class TubePlayerTest {
         assertEquals(context.getString(R.string.player_engine_to_browser), ShadowToast.getTextOfLatestToast())
     }
 
+    /** Shorts 재생 화면도 같다: 엔진을 못 띄우면 인터넷 앱으로 (같은 목록·같은 자리, app=1 없이) */
+    @Test
+    fun theShortsPageAlsoContinuesInTheWatchBrowser() {
+        installBrowser()
+        val url = TubeLinks.shortsUrl(base, listOf("BzYnNdJhZQw", "pSUydWEqKwE"), start = 1, nonce = 5, inApp = true)
+        val a = Robolectric.buildActivity(TubePlayerActivity::class.java, TubePlayerActivity.intent(context, url)).setup().get()
+        assertTrue(a.isFinishing)
+        assertEquals(base + "shorts.html#ids=BzYnNdJhZQw,pSUydWEqKwE&i=1&n=5", shadowOf(a).nextStartedActivity?.dataString)
+    }
+
     @Test
     fun withoutABrowserItSaysToUseThePhone() {
         val url = TubeLinks.playerUrl(base, video, Queue.Single, inApp = true)

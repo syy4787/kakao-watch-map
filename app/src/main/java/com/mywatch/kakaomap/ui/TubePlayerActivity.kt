@@ -7,6 +7,7 @@ import android.graphics.Color
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.view.InputDevice
 import android.view.MotionEvent
 import android.view.View
@@ -29,7 +30,9 @@ import com.mywatch.kakaomap.tube.PlayerAudio
 import com.mywatch.kakaomap.tube.PlayerGuard
 import com.mywatch.kakaomap.tube.PlayerPresence
 import com.mywatch.kakaomap.tube.PlayerRecovery
+import com.mywatch.kakaomap.tube.TubeInbox
 import com.mywatch.kakaomap.tube.WatchPlayer
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import org.mozilla.geckoview.AllowOrDeny
 import org.mozilla.geckoview.GeckoResult
@@ -40,6 +43,7 @@ import org.mozilla.geckoview.GeckoSession.PermissionDelegate.ContentPermission
 import org.mozilla.geckoview.GeckoSessionSettings
 import org.mozilla.geckoview.GeckoView
 import org.mozilla.geckoview.MediaSession
+import org.mozilla.geckoview.PanZoomController
 import org.mozilla.geckoview.ScreenLength
 import org.mozilla.geckoview.WebRequestError
 
@@ -49,8 +53,9 @@ import org.mozilla.geckoview.WebRequestError
  *  · 따로 된 프로세스(:player) — 엔진이 죽어도 앱 본체(길 안내 등)는 산다. 엔진이 죽으면 [PlayerGuard] 에 남기고 인터넷 앱으로 이어서
  *  · 화면이 꺼지거나 다른 앱으로 가면 setActive(false) → 재생 화면이 '숨김'을 보고 멈춘다 (보이지 않는 재생 금지)
  *  · 재생 중엔 화면을 켜 둔다 (엔진의 미디어 알림). 소리 자동 재생만 허용 — 방금 고른 동영상을 바로 틀려고
- *  · 링크는 [PlayerNav] 가 정한다: 목록으로·폰에서 이어 보기는 앱이, 바깥 링크는 폰에서
- *  · 베젤·크라운 → 재생 화면 스크롤
+ *  · 링크는 [PlayerNav] 가 정한다: 목록으로·폰에서 이어 보기·채널은 앱이, 바깥 링크는 폰에서.
+ *    재생 화면이 알린 유튜브 믹스 추천·본 Shorts 는 앱의 받은 편지([TubeInbox])에 남긴다 (앱 본체가 다음에 열 때 읽음)
+ *  · 베젤·크라운 → 재생 화면 스크롤 (Shorts 화면은 한 칸 = 한 장)
  */
 class TubePlayerActivity : ComponentActivity() {
 
@@ -70,6 +75,8 @@ class TubePlayerActivity : ComponentActivity() {
     private val audio by lazy { PlayerAudio(this) { mediaNow?.pause() } }
     /** 화면이 안 보일 때 엔진이 꺼졌음 — 다시 보일 때 연다 */
     private var reopenOnStart = false
+    /** Shorts 화면의 베젤 한 칸 = 한 장 */
+    private val pager = RotaryPager()
 
     private val visible: Boolean get() = lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
 
@@ -186,9 +193,18 @@ class TubePlayerActivity : ComponentActivity() {
         super.onDestroy()
     }
 
-    /** 베젤·크라운을 돌리면 재생 화면을 위아래로 */
+    /**
+     * 베젤·크라운을 돌리면 재생 화면을 위아래로. Shorts 화면은 한 칸 = 한 장 (화면 높이만큼 — 페이지가 그 장에 맞춘다, [RotaryPager])
+     */
     private fun rotary(e: MotionEvent): Boolean {
         if (e.action != MotionEvent.ACTION_SCROLL || !e.isFromSource(InputDevice.SOURCE_ROTARY_ENCODER)) return false
+        if (url.startsWith(pageBase + SHORTS_PAGE)) {
+            val n = pager.step(e.getAxisValue(MotionEvent.AXIS_SCROLL), SystemClock.uptimeMillis())
+            if (n != 0) {
+                view?.panZoomController?.scrollBy(ScreenLength.zero(), ScreenLength.fromVisualViewportHeight(n.toDouble()), PanZoomController.SCROLL_BEHAVIOR_AUTO)
+            }
+            return true
+        }
         val factor = ViewConfigurationCompat.getScaledVerticalScrollFactor(ViewConfiguration.get(this), this)
         val dy = -e.getAxisValue(MotionEvent.AXIS_SCROLL) * factor
         view?.panZoomController?.scrollBy(ScreenLength.zero(), ScreenLength.fromPixels(dy.toDouble()))
@@ -275,6 +291,12 @@ class TubePlayerActivity : ComponentActivity() {
         }
         is PlayerNav.Decision.Phone -> {
             handler.post { openOnPhone(d.url) }
+            GeckoResult.deny()
+        }
+        is PlayerNav.Decision.Note -> {
+            // 앱 본체(다른 프로세스)가 다음에 열 때 읽는다 — 파일 쓰기는 엔진 스레드 밖에서
+            val app = applicationContext
+            lifecycleScope.launch(Dispatchers.IO) { TubeInbox.of(app).post(d.link) }
             GeckoResult.deny()
         }
     }
@@ -436,6 +458,8 @@ class TubePlayerActivity : ComponentActivity() {
 
     companion object {
         const val EXTRA_URL = "url"
+        /** Shorts 재생 화면 (재생 화면 주소 아래) */
+        private const val SHORTS_PAGE = "shorts.html"
 
         /** 엔진 만들기 (시험에선 못 뜨는 엔진으로 바꿔 끼운다) */
         @VisibleForTesting

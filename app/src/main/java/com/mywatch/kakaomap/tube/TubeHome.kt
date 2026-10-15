@@ -127,11 +127,11 @@ object TubeHome {
     }
 
     /**
-     * '믹스' 칩의 씨앗: 이 앱에서 본 것(새것부터, 틀 수 있는 것) 중 음악 먼저 [MIX_SEEDS] 개.
+     * '믹스' 칩의 씨앗: 이 앱에서 본 것(새것부터, 틀 수 있는 것 — 생방송·Shorts 빼고) 중 음악 먼저 [MIX_SEEDS] 개.
      * 기록에서 [MIX_MIN_FROM_HISTORY] 개도 안 나오면 [music](인기 음악)으로 채운다
      */
     fun mixSeeds(ctx: HomeContext, music: List<TubeVideo>): List<TubeVideo> {
-        val heard = ctx.history.map { it.video }.filter { it.embeddable && !it.live && notDismissed(it, ctx) }.distinctBy { it.id }
+        val heard = ctx.history.map { it.video }.filter { it.embeddable && !it.live && !it.isShort && notDismissed(it, ctx) }.distinctBy { it.id }
         val (songs, rest) = heard.partition { it.categoryId == MUSIC }
         val seeds = (songs + rest).take(MIX_SEEDS).toMutableList()
         if (seeds.size < MIX_MIN_FROM_HISTORY) {

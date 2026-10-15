@@ -4,6 +4,8 @@ import android.app.Application
 import android.content.Context
 import android.os.Looper
 import androidx.wear.widget.WearableRecyclerView
+import com.mywatch.kakaomap.tube.HomeChip
+import com.mywatch.kakaomap.tube.HomeFeed
 import com.mywatch.kakaomap.tube.TubeState
 import com.mywatch.kakaomap.ui.Row
 import com.mywatch.kakaomap.ui.RowAdapter
@@ -49,7 +51,7 @@ class TubeUpdateTest {
     @Test
     fun youtubeHomeShowsTheUpdateButtonFirstOnlyWhenANewVersionIsOut() {
         fun home(update: Boolean) = TubeRows.home(
-            context, TubeRows.HomeData(emptyList(), emptyList(), null, Slot(), Slot(), TubeRows.Account(configured = false, signedIn = false), update, 0L),
+            context, TubeRows.HomeData(HomeChip.ALL, HomeFeed(emptyList()), TubeRows.Load(), null, update, 0L),
         )
         val withUpdate = home(update = true)
         assertEquals("새 버전 업데이트", withUpdate.filterIsInstance<Row.Action>().first().text)

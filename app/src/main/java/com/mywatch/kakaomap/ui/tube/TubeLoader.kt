@@ -20,6 +20,8 @@ sealed class Feed(val key: String, val mine: Boolean, val ttlMs: Long) {
     data object SubsChannels : Feed("subs/channels", true, SHORT)
     /** 구독 채널([channels])의 Shorts */
     class SubsShorts(val channels: List<String>) : Feed("subs/shorts/" + channels.joinToString(","), true, LONG)
+    /** 구독 채널([channels])의 생방송·지난 방송 */
+    class SubsLive(val channels: List<String>) : Feed("subs/live/" + channels.joinToString(","), true, LONG)
     data object Liked : Feed("liked", true, SHORT)
     data object MyPlaylists : Feed("myplaylists", true, SHORT)
     data object Account : Feed("account", true, LONG)
@@ -133,6 +135,15 @@ class TubeLoader(
                 more(feed)
             }
         }
+    }
+
+    /**
+     * 받은 것으로 새로 정해진 받을 거리만 받는다 — 한 번도 묻지 않은 것 (받았거나 받는 중이거나 실패한 것은 그대로).
+     * 받기가 끝날 때마다 부르므로 실패한 것까지 또 받으면 받기 → 실패 → 또 받기가 끝없이 돈다 (다시 시도는 [load])
+     */
+    fun loadNew(feed: Feed) {
+        if (feed.key in slots || jobs[feed.key]?.isActive == true) return
+        load(feed)
     }
 
     /** 더 보기: 다음 쪽을 아래에 붙인다 (새로 고치는 중이면 끝나고 바로) */

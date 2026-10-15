@@ -108,9 +108,6 @@ sealed class Row {
     data class Skeleton(val n: Int) : Row()
     /** 로그인 코드 (크게) + 폰에서 열 주소 */
     data class Code(val code: String, val url: String) : Row()
-    /** 나란히 놓인 작은 버튼들 (누르면 같은 id 의 [Action] 처럼) */
-    data class Chips(val items: List<Chip>) : Row()
-    data class Chip(val id: String, @param:DrawableRes val icon: Int, val text: String)
     /** 맨 위 탭 (홈 · Shorts · 구독 · 나) — 누르면 Action("tab:<탭>") */
     data class Tabs(val selected: TubeTab) : Row()
     /** 가로로 넘기는 칩 줄 — [bar] 줄 이름(넘긴 자리 기억), [chips] (id, 글), [selected] 고른 칩 id. 누르면 Action("chip:<줄>:<칩>") */
@@ -145,7 +142,6 @@ internal fun keyOf(row: Row): String = when (row) {
     is Row.PlaylistItem -> "l:" + row.playlist.id
     is Row.Skeleton -> "sk"
     is Row.Code -> "code"
-    is Row.Chips -> "chips:" + row.items.joinToString(",") { it.id }
     is Row.Tabs -> "ttabs"
     is Row.ChipBar -> "chipbar:" + row.bar
     is Row.ShortsShelf -> "shelf:" + row.title
@@ -226,7 +222,6 @@ class RowAdapter(
         is Row.PlaylistItem -> R.layout.item_tube_playlist
         is Row.Skeleton -> R.layout.item_tube_skeleton
         is Row.Code -> R.layout.item_tube_code
-        is Row.Chips -> R.layout.item_tube_chips
         is Row.Tabs -> R.layout.item_tube_tabs
         is Row.ChipBar -> R.layout.item_tube_chipbar
         is Row.ShortsShelf -> R.layout.item_tube_shelf
@@ -388,7 +383,6 @@ class RowAdapter(
                 // 읽어 주기는 한 글자씩 (대소문자 그대로 넣어야 하는 코드)
                 v.contentDescription = row.url + ", " + row.code.toList().joinToString(" ")
             }
-            is Row.Chips -> bindChips(v as ViewGroup, row)
             is Row.Tabs -> bindTabs(v, row)
             is Row.ChipBar -> bindChipBar(v as HorizontalScrollView, row)
             is Row.ShortsShelf -> {
@@ -555,20 +549,6 @@ class RowAdapter(
         v.contentDescription = listOfNotNull(video.title, row.meta.ifBlank { null }, row.badge ?: time, live).joinToString(", ")
         v.setOnClickListener { onClick(row) }
         v.longClick(row)
-    }
-
-    /** 나란히 놓인 작은 버튼들 — 누르면 같은 id 의 버튼처럼 */
-    private fun bindChips(group: ViewGroup, row: Row.Chips) {
-        group.removeAllViews()
-        val inflater = LayoutInflater.from(group.context)
-        row.items.forEach { chip ->
-            val item = inflater.inflate(R.layout.item_tube_chip, group, false)
-            item.findViewById<ImageView>(R.id.icon).setImageResource(chip.icon)
-            item.text(R.id.text).text = chip.text
-            item.contentDescription = chip.text
-            item.setOnClickListener { onClick(Row.Action(chip.id, chip.icon, chip.text)) }
-            group.addView(item)
-        }
     }
 
     /** 유튜브 화면 버튼 — 주 버튼은 흰 알약·검은 글자, 나머지는 어두운 회색 알약·흰 글자. 그림(동영상·채널 사진)이 있으면 아이콘 대신 */
