@@ -217,8 +217,18 @@ fun shortsChannels(subscribedOrder: List<String>, history, max=12): List<String>
 
 ### Task 11: Verify
 
-- [ ] Full unit suite, lint, `-Prender`, both simulators (+ random), `YouTube API check` run, independent reviews (code + policy), fix findings.
+- [x] Full unit suite, lint, `-Prender`, both simulators (+ random), `YouTube API check` run, independent reviews (code + policy), fix findings.
+
+**Task 11 results (2026-10-15):** reviews (code + YouTube policy) → fixed in `e542bb0`: Made-for-Kids lookup and tracking off (III.E.4.j),
+inbox/history timestamps and expiry, Shorts auto-open waits and never opens the phone, Shorts search ≤ 4/day only on the Shorts tab, stable
+feed keys, subs chips never stuck, player links only from our page, 284 px Shorts page, loop cap 2 min. Unit 631 passed (0 failed),
+lint 0 errors, renders checked, `sim.mjs` 74/74 · all viewports 518/518 · random 30/30, `shorts_sim.mjs` 85/85 · all viewports 184/184 ·
+random 30/30, API check run 38688359971 (`madeForKids` present on 20/20 chart videos).
 
 ### Task 12: Release
 
-- [ ] Fast-forward `main`, push, watch release + pages workflows, confirm `update.json`/APK/patch and the live `shorts.html`, report.
+- [x] Fast-forward `main`, push, watch release + pages workflows, confirm `update.json`/APK/patch and the live `shorts.html`, report.
+
+**Task 12 results:** `main` = `e542bb0` → release run 38688907282 → **v126** (2.26): APKs + patches from v123–v125 (≈ 8.3 MB each, patch base
+SHA-256 = v125 APKs, verified by applying in CI); pages run 38688907194 → live `tube/shorts.html`, `tube/index.html`, `privacy.html`
+byte-identical to the repo.
