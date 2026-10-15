@@ -195,6 +195,7 @@
     <!-- 타일 -->
     <string name="tube_terms_first">시작하기 전에</string>
     <string name="tube_terms">약관·개인정보</string>
+    <string name="tube_shorts">Shorts</string>
     <string name="tube_terms_text">이 앱은 YouTube API 서비스를 써요. 쓰면 YouTube 서비스 약관과 이 앱의 개인정보 처리방침에 동의하는 거예요. 정보는 워치에만 둬요.</string>
     <string name="tube_terms_agree">동의하고 시작</string>
     <string name="tube_terms_youtube">YouTube 서비스 약관</string>

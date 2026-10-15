@@ -42,6 +42,7 @@ import com.mywatch.kakaomap.tube.TubePlay
 import com.mywatch.kakaomap.tube.TubeRevokeWorker
 import com.mywatch.kakaomap.tube.TubeState
 import com.mywatch.kakaomap.tube.TubeVideo
+import com.mywatch.kakaomap.tube.Uploads
 import com.mywatch.kakaomap.tube.WatchPlayer
 import com.mywatch.kakaomap.ui.TubeRows.LoginState
 import com.mywatch.kakaomap.ui.tube.Feed
@@ -127,7 +128,7 @@ class TubeActivity : ComponentActivity() {
         when {
             !text.isNullOrBlank() -> search(text)
             // 타일의 '검색'을 눌렀다가 취소 → 워치 화면으로
-            shortcut == EXTRA_VOICE && nav.top == Page.Home -> finishAndRemoveTask()
+            shortcut == EXTRA_VOICE && nav.top is Page.Home -> finishAndRemoveTask()
         }
     }
 
@@ -186,7 +187,7 @@ class TubeActivity : ComponentActivity() {
 
     /** 맡긴 확인이 새 버전을 찾으면 홈 맨 위에 '새 버전 업데이트'를 바로 띄운다 */
     private val updateListener = SharedPreferences.OnSharedPreferenceChangeListener { _, _ ->
-        if (nav.top == Page.Home && !opening) render()
+        if (nav.top is Page.Home && !opening) render()
     }
 
     override fun onStart() {
@@ -278,29 +279,28 @@ class TubeActivity : ComponentActivity() {
 
     /** 이 화면이 받을 것들 */
     private fun feedsOf(p: Page): List<Feed> = when (p) {
-        Page.Home -> listOfNotNull(
+        is Page.Home -> listOfNotNull(
             Feed.Popular(MUSIC), Feed.Popular(null),
             if (signedIn) Feed.SubsFeed else null, if (signedIn) Feed.Account else null,
         )
         is Page.Search -> listOf(Feed.Search(p.query))
-        Page.Subscriptions -> if (signedIn) listOf(Feed.SubsFeed, Feed.SubsChannels) else emptyList()
+        is Page.Subscriptions -> if (signedIn) listOf(Feed.SubsFeed, Feed.SubsChannels) else emptyList()
+        Page.SubsChannels -> if (signedIn) listOf(Feed.SubsChannels) else emptyList()
         Page.Library, Page.Account -> if (signedIn) listOf(Feed.Account) else emptyList()
         Page.Liked -> listOf(Feed.Liked)
         Page.MyPlaylists -> listOf(Feed.MyPlaylists)
-        is Page.Chart -> listOf(Feed.Popular(p.category))
-        is Page.Channel -> listOf(Feed.ChannelInfo(p.id), Feed.ChannelVideos(p.id), Feed.ChannelPlaylists(p.id))
+        is Page.Channel -> listOf(Feed.ChannelInfo(p.id), Feed.ChannelUploads(p.id, Uploads.LONG), Feed.ChannelPlaylists(p.id))
         is Page.Playlist -> listOf(Feed.PlaylistVideos(p.id, p.own))
-        Page.History, is Page.Menu, Page.Login, is Page.Handoff, Page.Terms -> emptyList()
+        Page.History, is Page.Menu, Page.Login, is Page.Handoff, Page.Terms, Page.Shorts, Page.Find -> emptyList()
     }
 
     /** '더 보기'로 이어 받을 것 */
     private fun moreFeed(p: Page): Feed? = when (p) {
         is Page.Search -> Feed.Search(p.query)
-        Page.Subscriptions -> Feed.SubsChannels
+        is Page.Subscriptions, Page.SubsChannels -> Feed.SubsChannels
         Page.Liked -> Feed.Liked
         Page.MyPlaylists -> Feed.MyPlaylists
-        is Page.Chart -> Feed.Popular(p.category)
-        is Page.Channel -> Feed.ChannelVideos(p.id)
+        is Page.Channel -> Feed.ChannelUploads(p.id, Uploads.LONG)
         is Page.Playlist -> Feed.PlaylistVideos(p.id, p.own)
         else -> null
     }
@@ -364,7 +364,7 @@ class TubeActivity : ComponentActivity() {
         }
         val now = System.currentTimeMillis()
         ui.rows = when (val p = nav.top) {
-            Page.Home -> TubeRows.home(
+            is Page.Home -> TubeRows.home(
                 this, TubeRows.HomeData(
                     history = state.played(now),
                     searches = state.searches,
@@ -377,14 +377,16 @@ class TubeActivity : ComponentActivity() {
                 ),
             )
             is Page.Search -> TubeRows.search(this, p.query, loader.slot(Feed.Search(p.query)), now)
-            Page.Subscriptions -> TubeRows.subscriptions(this, account(), loader.slot(Feed.SubsFeed), loader.slot(Feed.SubsChannels), now)
+            is Page.Subscriptions -> TubeRows.subscriptions(this, account(), loader.slot(Feed.SubsFeed), loader.slot(Feed.SubsChannels), now)
+            Page.SubsChannels -> TubeRows.subscriptions(this, account(), loader.slot(Feed.SubsFeed), loader.slot(Feed.SubsChannels), now)
+            Page.Shorts -> listOf(Row.Header(getString(R.string.tube_shorts)))
+            Page.Find -> listOf(Row.Header(getString(R.string.tube_search)))
             Page.Library -> TubeRows.library(this, state.played(now).size, account())
             Page.History -> TubeRows.history(this, state.played(now), now)
             Page.Liked -> TubeRows.liked(this, loader.slot(Feed.Liked), now)
             Page.MyPlaylists -> TubeRows.myPlaylists(this, loader.slot(Feed.MyPlaylists))
-            is Page.Chart -> TubeRows.chart(this, p.title, loader.slot(Feed.Popular(p.category)), now)
             is Page.Channel -> TubeRows.channel(
-                this, p.title, loader.slot(Feed.ChannelInfo(p.id)), loader.slot(Feed.ChannelVideos(p.id)), loader.slot(Feed.ChannelPlaylists(p.id)), now,
+                this, p.title, loader.slot(Feed.ChannelInfo(p.id)), loader.slot(Feed.ChannelUploads(p.id, Uploads.LONG)), loader.slot(Feed.ChannelPlaylists(p.id)), now,
             )
             is Page.Playlist -> TubeRows.playlist(this, p.title, p.id, p.own, loader.slot(Feed.PlaylistVideos(p.id, p.own)), now, p.private)
             is Page.Menu -> TubeRows.menu(this, p.video, inHistory = state.played(now).any { it.video.id == p.video.id })
@@ -528,14 +530,12 @@ class TubeActivity : ComponentActivity() {
             id == TubeRows.A_UPDATE -> startActivity(UpdateActivity.updateNowIntent(this))
             id == TubeRows.A_SEARCH -> openInput()
             id.startsWith(TubeRows.A_QUERY) -> search(id.removePrefix(TubeRows.A_QUERY))
-            id == TubeRows.A_SUBS || id == TubeRows.A_SUBS_MORE -> go(Page.Subscriptions)
+            id == TubeRows.A_SUBS || id == TubeRows.A_SUBS_MORE -> go(Page.Subscriptions())
             id == TubeRows.A_LIBRARY -> go(Page.Library)
             id == TubeRows.A_HISTORY -> go(Page.History)
             id == TubeRows.A_LIKED -> go(Page.Liked)
             id == TubeRows.A_MY_PLAYLISTS -> go(Page.MyPlaylists)
             id == TubeRows.A_ACCOUNT -> go(Page.Account)
-            id == TubeRows.A_CHART_MUSIC -> go(Page.Chart(MUSIC, getString(R.string.tube_chart_music)))
-            id == TubeRows.A_CHART_POPULAR -> go(Page.Chart(null, getString(R.string.tube_chart_popular)))
             id == TubeRows.A_MORE -> moreFeed(top)?.let(loader::more)
             id == TubeRows.A_MORE_PLAYLISTS -> (top as? Page.Channel)?.let { loader.more(Feed.ChannelPlaylists(it.id)) }
             id == TubeRows.A_RETRY -> feedsOf(top).filter { loader.slot(it).error != null }.forEach { loader.load(it, force = true) }

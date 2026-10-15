@@ -128,9 +128,10 @@ class TubeJourneyTest {
                 Feed.MyPlaylists -> Fetched(TubePage(emptyList(), null, playlists = listOf(myPl)))
                 Feed.Account -> Fetched(TubePage(emptyList(), null, channels = listOf(me)))
                 is Feed.ChannelInfo -> Fetched(TubePage(emptyList(), null, channels = listOfNotNull(channels.firstOrNull { it.id == feed.id })))
-                is Feed.ChannelVideos -> chanVideos.getValue(feed.id).let { (p1, p2) -> if (token == null) Fetched(TubePage(p1, "C2")) else Fetched(TubePage(p2, null)) }
+                is Feed.ChannelUploads -> chanVideos.getValue(feed.id).let { (p1, p2) -> if (token == null) Fetched(TubePage(p1, "C2")) else Fetched(TubePage(p2, null)) }
                 is Feed.ChannelPlaylists -> if (token == null) Fetched(TubePage(emptyList(), "P2", playlists = listOf(plA, plB))) else Fetched(TubePage(emptyList(), null, playlists = listOf(plC)))
                 is Feed.PlaylistVideos -> Fetched(TubePage(if (feed.id == myPl.id) myPlVideos else listVideos.getValue(feed.id), null))
+                else -> Fetched(TubePage(emptyList(), null))
             }
         }
     }
@@ -206,14 +207,15 @@ class TubeJourneyTest {
 
     /** 지금 화면이면 보여야 할 첫 제목 */
     private fun expectedTitle(p: Page): String? = when (p) {
-        Page.Home -> "유튜브"
+        is Page.Home -> "유튜브"
+        Page.Shorts -> "Shorts"
+        Page.Find -> "검색"
         is Page.Search -> "‘${p.query}’"
-        Page.Subscriptions -> "구독"
+        is Page.Subscriptions, Page.SubsChannels -> "구독"
         Page.Library -> "보관함"
         Page.History -> "시청 기록"
         Page.Liked -> "좋아요 표시한 동영상"
         Page.MyPlaylists -> "내 재생목록"
-        is Page.Chart -> p.title
         is Page.Channel -> p.title
         is Page.Playlist -> p.title
         is Page.Menu -> p.video.title
@@ -289,7 +291,7 @@ class TubeJourneyTest {
         }
         assertTrue("충분히 눌러 봤다: $steps", steps >= 1_400)
         println("들러 본 것: " + visited.sorted())
-        val pages = listOf("Home", "Search", "Subscriptions", "Library", "History", "Liked", "MyPlaylists", "Chart", "Channel", "Playlist", "Menu", "Login", "Account", "Handoff", "Terms")
+        val pages = listOf("Home", "Search", "Subscriptions", "Library", "History", "Liked", "MyPlaylists", "Channel", "Playlist", "Menu", "Login", "Account", "Handoff", "Terms")
         val missing = pages.filter { "page:$it" !in visited }
         assertTrue("모든 화면에 가 봤다 (못 간 곳: $missing)", missing.isEmpty())
         val actions = listOf(TubeRows.A_MORE, TubeRows.A_RETRY, TubeRows.A_PLAY, TubeRows.A_PLAY_ALL, TubeRows.A_CHANNEL, TubeRows.A_LOGIN, TubeRows.A_LOGOUT, TubeRows.A_SEARCH, TubeRows.A_ON_PHONE)

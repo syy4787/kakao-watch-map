@@ -29,6 +29,7 @@ import com.mywatch.kakaomap.tube.TubePlaylist
 import com.mywatch.kakaomap.tube.TubeSource
 import com.mywatch.kakaomap.tube.TubeState
 import com.mywatch.kakaomap.tube.TubeVideo
+import com.mywatch.kakaomap.tube.Uploads
 import com.mywatch.kakaomap.tube.WatchPlayer
 import com.mywatch.kakaomap.tube.playerDir
 import com.mywatch.kakaomap.ui.Row
@@ -294,7 +295,7 @@ class TubeAppTest {
             Fetched(TubePage(listOf(v("searchaaaa1")), null, channels = listOf(channel), playlists = listOf(TubePlaylist("PL1aaaaaaaaaa", "모음", "멜론", null, 3))), TubeSource.YOUTUBE)
         }
         backend.pages[Feed.ChannelInfo(channel.id).key] = { Fetched(TubePage(emptyList(), null, channels = listOf(channel))) }
-        backend.pages[Feed.ChannelVideos(channel.id).key] = { Fetched(TubePage(listOf(v("chanaaaaaa1"), v("chanaaaaaa2")), null)) }
+        backend.pages[Feed.ChannelUploads(channel.id, Uploads.LONG).key] = { Fetched(TubePage(listOf(v("chanaaaaaa1"), v("chanaaaaaa2")), null)) }
         val a = open()
         tapAction(a, TubeRows.A_SEARCH)
         val input = shadowOf(a).nextStartedActivityForResult
@@ -522,7 +523,7 @@ class TubeAppTest {
     @Test
     fun theTrailComesBackWhenTheScreenIsRecreated() {
         backend.pages[Feed.ChannelInfo(channel.id).key] = { Fetched(TubePage(emptyList(), null, channels = listOf(channel))) }
-        backend.pages[Feed.ChannelVideos(channel.id).key] = { Fetched(TubePage(listOf(v("chanaaaaaa1")), null)) }
+        backend.pages[Feed.ChannelUploads(channel.id, Uploads.LONG).key] = { Fetched(TubePage(listOf(v("chanaaaaaa1")), null)) }
         val controller = Robolectric.buildActivity(TubeActivity::class.java).setup()
         val a = controller.get()
         settle { !opening(a) }
@@ -544,7 +545,7 @@ class TubeAppTest {
     @Test
     fun swipingRightStepsBackOneScreenAndHomeLeavesItToTheSystem() {
         backend.pages[Feed.ChannelInfo(channel.id).key] = { Fetched(TubePage(emptyList(), null, channels = listOf(channel))) }
-        backend.pages[Feed.ChannelVideos(channel.id).key] = { Fetched(TubePage(listOf(v("chanaaaaaa1")), null)) }
+        backend.pages[Feed.ChannelUploads(channel.id, Uploads.LONG).key] = { Fetched(TubePage(listOf(v("chanaaaaaa1")), null)) }
         val a = open()
         val swipe = a.findViewById<androidx.wear.widget.SwipeDismissFrameLayout>(R.id.swipe)
         assertFalse(swipe.isSwipeable)
@@ -615,7 +616,7 @@ class TubeAppTest {
     @Test
     fun theChannelButtonOnAVideoOfThisChannelJustClosesTheMenu() {
         backend.pages[Feed.ChannelInfo(channel.id).key] = { Fetched(TubePage(emptyList(), null, channels = listOf(channel))) }
-        backend.pages[Feed.ChannelVideos(channel.id).key] = { Fetched(TubePage(listOf(v("chanaaaaaa1"), v("chanaaaaaa2")), null)) }
+        backend.pages[Feed.ChannelUploads(channel.id, Uploads.LONG).key] = { Fetched(TubePage(listOf(v("chanaaaaaa1"), v("chanaaaaaa2")), null)) }
         val a = open()
         tapCard(a, "musicaaaaa1", long = true)
         tapAction(a, TubeRows.A_CHANNEL)

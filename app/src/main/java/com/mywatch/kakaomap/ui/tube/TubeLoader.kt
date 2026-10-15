@@ -3,6 +3,7 @@ package com.mywatch.kakaomap.ui.tube
 import com.mywatch.kakaomap.tube.SignInNeededException
 import com.mywatch.kakaomap.tube.TubePage
 import com.mywatch.kakaomap.tube.TubeSource
+import com.mywatch.kakaomap.tube.Uploads
 import com.mywatch.kakaomap.tube.YouTubeQuotaException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -11,18 +12,34 @@ import kotlinx.coroutines.launch
 
 /** 받을 거리 — [key] 로 기억한다. [mine] = 내 계정 데이터 (로그아웃하면 지움), [ttlMs] = 이만큼은 다시 받지 않는다 */
 sealed class Feed(val key: String, val mine: Boolean, val ttlMs: Long) {
+    /** 인기 차트 (한국). [category] "10" 음악 · "20" 게임 · "25" 뉴스 · null 전체 */
     class Popular(val category: String?) : Feed("popular/${category ?: "all"}", false, LONG)
     /** 검색은 하루 100번 한도(1번 = 100 단위)라 3시간 기억한다 (같은 검색어를 다시 해도) */
     class Search(val query: String) : Feed("search/$query", false, EXTENDED)
     data object SubsFeed : Feed("subs/feed", true, SHORT)
     data object SubsChannels : Feed("subs/channels", true, SHORT)
+    /** 구독 채널([channels])의 Shorts */
+    class SubsShorts(val channels: List<String>) : Feed("subs/shorts/" + channels.joinToString(","), true, LONG)
     data object Liked : Feed("liked", true, SHORT)
     data object MyPlaylists : Feed("myplaylists", true, SHORT)
     data object Account : Feed("account", true, LONG)
     class ChannelInfo(val id: String) : Feed("channel/$id", false, LONG)
-    class ChannelVideos(val id: String) : Feed("channel/$id/videos", false, SHORT)
+    /** 채널의 업로드 — 종류별 ([kind] 긴 동영상 · Shorts · 생방송) */
+    class ChannelUploads(val id: String, val kind: Uploads) : Feed("channel/$id/" + kind.name.lowercase(), false, SHORT)
     class ChannelPlaylists(val id: String) : Feed("channel/$id/playlists", false, LONG)
     class PlaylistVideos(val id: String, val own: Boolean) : Feed("playlist/$id", own, SHORT)
+    /** 받아 둔 유튜브 믹스 추천 [ids] 의 정보 — 추천이 새로 오면 열쇠가 바뀐다 (예전 것은 [TubeLoader.forget]) */
+    class Recs(val ids: List<String>) : Feed("recs/" + ids.joinToString(",").hashCode().toUInt().toString(16), false, LONG)
+    /** 이 앱에서 본 채널(구독 안 한) [channels] 의 새 긴 동영상 */
+    class Watched(val channels: List<String>) : Feed("watched/" + channels.joinToString(","), false, LONG)
+    /** Shorts 후보: 채널 [channels](구독 앞 8 + 최근 본 4)의 최신 Shorts */
+    class ShortsPool(val channels: List<String>) : Feed("shorts/pool/" + channels.joinToString(","), false, LONG)
+    /** Shorts 가 모자랄 때 채우는 검색 (검색 한도라 3시간) */
+    data object ShortsSearch : Feed("shorts/search", false, EXTENDED)
+    /** 지금 생방송 검색 (검색 한도라 3시간 — '실시간' 칩을 열 때만) */
+    data object Live : Feed("live", false, EXTENDED)
+    /** 동영상 [video] 를 올린 채널 (재생 화면의 채널 이름을 눌렀을 때) */
+    class VideoChannel(val video: String) : Feed("vchannel/$video", false, LONG)
 
     override fun equals(other: Any?) = other is Feed && other.key == key
     override fun hashCode() = key.hashCode()
@@ -170,14 +187,24 @@ class TubeLoader(
     /** 더 보기 실패 알림 (한 번만) */
     fun takeMoreError(feed: Feed): String? = moreErrors.remove(feed.key)
 
+    /**
+     * 열쇠가 [prefix] 로 시작하는 받을 거리를 [keep] 말고 모두 잊는다 (받는 중이던 것도 버림) —
+     * 믹스 추천·본 채널처럼 내용에 따라 열쇠가 바뀌는 것의 예전 것 (메모리에 쌓이지 않게)
+     */
+    fun forget(prefix: String, keep: Feed?) {
+        (slots.keys + jobs.keys).filter { it.startsWith(prefix) && it != keep?.key }.toSet().forEach(::drop)
+    }
+
+    private fun drop(key: String) {
+        jobs.remove(key)?.cancel()
+        slots.remove(key)
+        moreErrors.remove(key)
+        pendingMore.remove(key)
+    }
+
     /** 로그아웃: 내 계정 데이터를 지운다 (받는 중이던 것도 버림) */
     fun clearMine() {
-        (slots.keys + jobs.keys).filter(::isMine).toSet().forEach { key ->
-            jobs.remove(key)?.cancel()
-            slots.remove(key)
-            moreErrors.remove(key)
-            pendingMore.remove(key)
-        }
+        (slots.keys + jobs.keys).filter(::isMine).toSet().forEach(::drop)
     }
 
     /** 내 계정 데이터의 키 (받을 때 기억해 둔다 — 로그아웃하면 이것들을 지움) */

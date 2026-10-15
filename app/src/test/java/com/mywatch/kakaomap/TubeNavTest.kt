@@ -2,18 +2,23 @@ package com.mywatch.kakaomap
 
 import com.mywatch.kakaomap.net.ApiException
 import com.mywatch.kakaomap.tube.Handoff
+import com.mywatch.kakaomap.tube.HomeChip
 import com.mywatch.kakaomap.tube.SignInNeededException
 import com.mywatch.kakaomap.tube.TubeChannel
 import com.mywatch.kakaomap.tube.TubePage
 import com.mywatch.kakaomap.tube.TubeSource
 import com.mywatch.kakaomap.tube.TubeVideo
+import com.mywatch.kakaomap.tube.Uploads
 import com.mywatch.kakaomap.tube.YouTubeQuotaException
 import com.mywatch.kakaomap.ui.tube.Feed
 import com.mywatch.kakaomap.ui.tube.Fetched
+import com.mywatch.kakaomap.ui.tube.ChannelTab
 import com.mywatch.kakaomap.ui.tube.Page
+import com.mywatch.kakaomap.ui.tube.SubsChip
 import com.mywatch.kakaomap.ui.tube.TubeBackend
 import com.mywatch.kakaomap.ui.tube.TubeLoader
 import com.mywatch.kakaomap.ui.tube.TubeNav
+import com.mywatch.kakaomap.ui.tube.TubeTab
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -36,7 +41,7 @@ class TubeNavTest {
     @Test
     fun backAlwaysGoesOneStepAndStopsAtHome() {
         val nav = TubeNav()
-        assertEquals(Page.Home, nav.top)
+        assertEquals(Page.Home(), nav.top)
         assertFalse("처음 화면에서 뒤로 = 앱을 닫는다", nav.back())
         nav.push(Page.Search("아이유"))
         nav.push(Page.Channel("UCweOkPb1wVVH0Q0Tlj4a5Pw", "1theK"))
@@ -50,7 +55,7 @@ class TubeNavTest {
         assertTrue(nav.back())
         assertEquals(Page.Search("아이유"), nav.top)
         nav.reset()
-        assertEquals(Page.Home, nav.top)
+        assertEquals(Page.Home(), nav.top)
         assertEquals(1, nav.depth)
     }
 
@@ -60,7 +65,7 @@ class TubeNavTest {
         repeat(40) { nav.push(Page.Channel("UC" + "%022d".format(it), "채널 $it")) }
         assertTrue(nav.depth <= TubeNav.MAX)
         while (nav.back()) Unit
-        assertEquals(Page.Home, nav.top)
+        assertEquals(Page.Home(), nav.top)
     }
 
     @Test
@@ -89,7 +94,7 @@ class TubeNavTest {
     fun theTrailSurvivesTheAppBeingClosedInTheBackground() {
         val nav = TubeNav()
         nav.push(Page.Search("아이유 \"밤편지\""))
-        nav.push(Page.Chart("10", "인기 음악"))
+        nav.push(Page.Shorts)
         nav.push(Page.Channel("UCweOkPb1wVVH0Q0Tlj4a5Pw", "1theK (원더케이)"))
         nav.push(Page.Playlist("PLmine0000001", "내 모음", own = true))
         nav.push(Page.Library)
@@ -106,22 +111,90 @@ class TubeNavTest {
         assertTrue(back.back())
         assertEquals(Page.Channel("UCweOkPb1wVVH0Q0Tlj4a5Pw", "1theK (원더케이)"), back.top)
         assertTrue(back.back())
-        assertEquals(Page.Chart("10", "인기 음악"), back.top)
+        assertEquals(Page.Shorts, back.top)
         assertTrue(back.back())
         assertEquals(Page.Search("아이유 \"밤편지\""), back.top)
         assertTrue(back.back())
-        assertEquals(Page.Home, back.top)
+        assertEquals(Page.Home(), back.top)
 
         val login = TubeNav()
-        login.push(Page.Subscriptions)
+        login.push(Page.Subscriptions())
         login.push(Page.Login)
         val again = TubeNav()
         again.restore(login.save())
-        assertEquals("로그인 화면은 새로 열 때 다시", Page.Subscriptions, again.top)
+        assertEquals("로그인 화면은 새로 열 때 다시", Page.Subscriptions(), again.top)
         val broken = TubeNav()
         broken.restore("{이상한 값")
-        assertEquals(Page.Home, broken.top)
+        assertEquals(Page.Home(), broken.top)
         assertEquals(1, broken.depth)
+    }
+
+    /** 홈의 칩·탭을 바꾸면 그 자리만 바뀐다 (뒤로 가기에 쌓이지 않음) — 탭에서 뒤로 = 홈 (고른 칩 그대로) */
+    @Test
+    fun chipsAndTabsSwapInPlace() {
+        val nav = TubeNav()
+        assertEquals(Page.Home(), nav.top)
+        nav.swapTop(Page.Home(HomeChip.MUSIC))
+        assertEquals(1, nav.depth)
+        assertEquals(Page.Home(HomeChip.MUSIC), nav.top)
+        nav.push(Page.Shorts)
+        nav.swapTop(Page.Subscriptions(SubsChip.SHORTS))
+        assertEquals(2, nav.depth)
+        assertEquals(Page.Subscriptions(SubsChip.SHORTS), nav.top)
+        nav.swapTop(Page.Subscriptions(SubsChip.SHORTS))
+        assertEquals("같은 것이면 그대로", 2, nav.depth)
+        assertTrue(nav.back())
+        assertEquals(Page.Home(HomeChip.MUSIC), nav.top)
+        assertEquals(TubeTab.HOME, nav.top.tab)
+        assertEquals(TubeTab.SHORTS, Page.Shorts.tab)
+        assertEquals(TubeTab.SUBS, Page.Subscriptions(SubsChip.LIVE).tab)
+        assertEquals(TubeTab.YOU, Page.Library.tab)
+        assertNull(Page.Find.tab)
+        assertNull(Page.Channel("UCweOkPb1wVVH0Q0Tlj4a5Pw", "1theK").tab)
+    }
+
+    @Test
+    fun theNewPagesSurviveTheAppBeingClosedAndOldChartsAreDropped() {
+        val ch = "UCweOkPb1wVVH0Q0Tlj4a5Pw"
+        val nav = TubeNav()
+        nav.swapTop(Page.Home(HomeChip.NEW))
+        nav.push(Page.Find)
+        nav.push(Page.Subscriptions(SubsChip.LIVE))
+        nav.push(Page.SubsChannels)
+        nav.push(Page.Channel(ch, "1theK", ChannelTab.SHORTS))
+        val back = TubeNav()
+        back.restore(nav.save())
+        assertEquals(5, back.depth)
+        assertEquals(Page.Channel(ch, "1theK", ChannelTab.SHORTS), back.top)
+        assertTrue(back.back())
+        assertEquals(Page.SubsChannels, back.top)
+        assertTrue(back.back())
+        assertEquals(Page.Subscriptions(SubsChip.LIVE), back.top)
+        assertTrue(back.back())
+        assertEquals(Page.Find, back.top)
+        assertTrue(back.back())
+        assertEquals("처음 화면의 칩도 그대로", Page.Home(HomeChip.NEW), back.top)
+
+        // 예전 판이 저장한 것: 인기 차트 화면은 없어졌다 · 칩이 없는 홈·구독은 '전체' · 모르는 칩 이름도 '전체'
+        val old = TubeNav()
+        old.restore("""[{"t":"home"},{"t":"chart","c":"10","title":"인기 음악"},{"t":"subs"},{"t":"channel","id":"$ch","title":"1theK","sec":"???"}]""")
+        assertEquals(3, old.depth)
+        assertEquals(Page.Channel(ch, "1theK"), old.top)
+        assertTrue(old.back())
+        assertEquals(Page.Subscriptions(), old.top)
+        assertTrue(old.back())
+        assertEquals(Page.Home(), old.top)
+    }
+
+    @Test
+    fun signingOutDropsSubscriptionTabsAndTheChannelList() {
+        val nav = TubeNav()
+        nav.push(Page.Subscriptions(SubsChip.VIDEOS))
+        nav.push(Page.SubsChannels)
+        nav.push(Page.Channel("UCweOkPb1wVVH0Q0Tlj4a5Pw", "1theK"))
+        nav.dropMine()
+        assertEquals(Page.Home(), nav.top)
+        assertEquals(1, nav.depth)
     }
 
     // ---------------- 받기 ----------------
@@ -198,7 +271,7 @@ class TubeNavTest {
     fun moreAppendsTheNextPageAndStopsAtTheEnd() {
         val fake = Fake()
         val l = loader(fake)
-        val f = Feed.ChannelVideos("UCweOkPb1wVVH0Q0Tlj4a5Pw")
+        val f = Feed.ChannelUploads("UCweOkPb1wVVH0Q0Tlj4a5Pw", Uploads.LONG)
         l.load(f)
         l.more(f)
         l.more(f)
@@ -218,7 +291,7 @@ class TubeNavTest {
     fun anExtendedListOrASearchIsNotShrunkByComingBack() {
         val fake = Fake()
         val l = loader(fake)
-        val ch = Feed.ChannelVideos("UCweOkPb1wVVH0Q0Tlj4a5Pw")
+        val ch = Feed.ChannelUploads("UCweOkPb1wVVH0Q0Tlj4a5Pw", Uploads.LONG)
         l.load(ch)
         l.more(ch)
         now += Feed.SHORT + 1
@@ -308,5 +381,28 @@ class TubeNavTest {
         l.clearMine()   // 받는 중에 로그아웃
         fake.gate!!.complete(Unit)
         assertNull("로그아웃 전에 묻던 내 데이터가 늦게 와도 남기지 않는다", l.slot(Feed.Liked).page)
+    }
+
+    /** 믹스 추천이 새로 오면 홈이 받을 거리(Recs)의 열쇠가 바뀐다 — 예전 것은 지우고 받는 중이던 것도 버린다 (메모리) */
+    @Test
+    fun forgettingOldFeedsDropsTheirSlotsAndRunningJobs() {
+        val fake = Fake()
+        val l = loader(fake)
+        val old = Feed.Recs(listOf("aaaaaaaaaaa"))
+        val keep = Feed.Recs(listOf("bbbbbbbbbbb"))
+        l.load(old)
+        l.load(keep)
+        assertEquals(2, l.slot(old).page?.videos?.size)
+        fake.gate = CompletableDeferred()
+        val slow = Feed.Recs(listOf("ccccccccccc"))
+        l.load(slow)
+        assertTrue(l.slot(slow).loading)
+        l.forget("recs/", keep)
+        assertNull(l.slot(old).page)
+        assertFalse(l.slot(slow).loading)
+        assertEquals("남기라고 한 것은 그대로", 2, l.slot(keep).page?.videos?.size)
+        fake.gate!!.complete(Unit)
+        assertNull("늦게 온 답은 버린다", l.slot(slow).page)
+        assertTrue("다른 열쇠는 그대로", Feed.Popular("10").key.startsWith("popular/"))
     }
 }
