@@ -28,11 +28,16 @@ object PlayerNav {
 
     private const val PACKAGE = "com.mywatch.kakaomap"
 
-    /** 화면 전체(최상위)의 이동. [userGesture] = 사용자가 눌러서 가는 것 */
-    fun top(uri: String, pageBase: String, userGesture: Boolean): Decision {
+    /**
+     * 화면 전체(최상위)의 이동. [userGesture] = 사용자가 눌러서 가는 것, [trigger] = 이동을 시킨 문서의 주소 (엔진이 알려 주면).
+     * 워치 앱 링크·알림은 재생 화면이 보낸 것만 — 다른 곳(플레이어 안의 광고 등)이 시킨 것은 막는다 (모르면 그대로)
+     */
+    fun top(uri: String, pageBase: String, userGesture: Boolean, trigger: String? = null): Decision {
         val u = uri.trim()
         if (u == "about:blank" || isPage(u, pageBase)) return Decision.Allow
-        appLink(u)?.let { return it }
+        appLink(u)?.let { d ->
+            return if (d != Decision.Block && trigger != null && !isPage(trigger.trim(), pageBase)) Decision.Block else d
+        }
         return if (isHttps(u) && userGesture) Decision.Phone(u) else Decision.Block
     }
 

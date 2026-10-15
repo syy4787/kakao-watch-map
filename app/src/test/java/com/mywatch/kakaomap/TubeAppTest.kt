@@ -44,6 +44,7 @@ import com.mywatch.kakaomap.ui.tube.Feed
 import com.mywatch.kakaomap.ui.tube.Fetched
 import com.mywatch.kakaomap.ui.tube.Page
 import com.mywatch.kakaomap.ui.tube.TubeBackend
+import com.mywatch.kakaomap.ui.tube.TubeFeeds
 import com.mywatch.kakaomap.ui.tube.TubeTab
 import kotlinx.coroutines.CompletableDeferred
 import org.junit.After
@@ -77,25 +78,35 @@ class TubeAppTest {
     private val now = System.currentTimeMillis()
     private val browser = ComponentName("com.sec.android.app.sbrowser", "com.sec.android.app.sbrowser.SBrowserMainActivity")
 
-    private fun v(id: String, title: String = "제목 $id", embeddable: Boolean = true) =
-        TubeVideo(id, title, "1theK (원더케이)", 294, channelId = "UCweOkPb1wVVH0Q0Tlj4a5Pw", views = 1_000, publishedAt = now - 86_400_000, embeddable = embeddable)
+    private fun v(id: String, title: String = "제목 $id", embeddable: Boolean = true, kids: Boolean? = false) =
+        TubeVideo(
+            id, title, "1theK (원더케이)", 294, channelId = "UCweOkPb1wVVH0Q0Tlj4a5Pw", views = 1_000, publishedAt = now - 86_400_000,
+            embeddable = embeddable, madeForKids = kids,
+        )
 
     private val music = listOf(v("musicaaaaa1"), v("musicaaaaa2"), v("musicaaaaa3", embeddable = false), v("musicaaaaa4"))
     private val popular = listOf(v("popularaaa1"), v("popularaaa2"))
     private val channel = TubeChannel("UCweOkPb1wVVH0Q0Tlj4a5Pw", "1theK (원더케이)", "https://yt3.ggpht.com/k=s240", 25_300_000, 13_000, "UUweOkPb1wVVH0Q0Tlj4a5Pw")
 
-    /** 가짜 유튜브 (바로 대답 — [holds] 에 있는 물음은 풀어 줄 때까지 기다림: 느린 연결) */
+    /** 가짜 유튜브 (바로 대답 — [holds] 에 있는 물음은 풀어 줄 때까지 기다림: 느린 연결). 동영상 정보는 [known] 에서 */
     private class FakeBackend : TubeBackend {
         val pages = HashMap<String, (String?) -> Fetched>()
         val asked = mutableListOf<String>()
         val holds = HashMap<String, CompletableDeferred<Unit>>()
+        val known = HashMap<String, TubeVideo>()
+        /** 열쇠가 맞으면 풀어 줄 때까지 기다림 (열쇠를 미리 모를 때) */
+        val holdIf = mutableListOf<Pair<(String) -> Boolean, CompletableDeferred<Unit>>>()
         var fail: Exception? = null
         override suspend fun fetch(feed: Feed, token: String?, source: TubeSource?): Fetched {
             val key = feed.key + (token?.let { "@$it" } ?: "")
             asked += key
             holds[key]?.await()
+            holdIf.firstOrNull { it.first(key) }?.second?.await()
             fail?.let { throw it }
-            return pages[feed.key]?.invoke(token) ?: Fetched(TubePage(emptyList(), null))
+            if (feed is Feed.Videos) return Fetched(TubePage(feed.ids.mapNotNull { known[it] }, null))
+            pages[feed.key]?.let { return it(token) }
+            if (feed is Feed.Recs) return Fetched(TubePage(feed.ids.mapNotNull { known[it] }, null))
+            return Fetched(TubePage(emptyList(), null))
         }
     }
 
@@ -244,7 +255,7 @@ class TubeAppTest {
 
     /** Shorts 모양 (세로 · 30초) — 채널은 셋을 돌아가며 */
     private fun short(n: Int, ch: String = "UCshortsshortsshorts%04d".format(n % 3)) =
-        TubeVideo("short%06d".format(n), "Shorts $n", "숏 채널 ${n % 3}", 30, channelId = ch, views = 10, publishedAt = now - 60_000, portrait = true)
+        TubeVideo("short%06d".format(n), "Shorts $n", "숏 채널 ${n % 3}", 30, channelId = ch, views = 10, publishedAt = now - 60_000, portrait = true, madeForKids = false)
 
     private fun cards(a: TubeActivity) = rows(a).filterIsInstance<Row.VideoCard>().map { it.video.id }
 
@@ -849,6 +860,29 @@ class TubeAppTest {
         assertEquals("유튜브", titles(a).first())
     }
 
+    /** 리뷰에서 찾음: 구독 채널이 없거나 못 받으면 구독의 Shorts·실시간 칩이 회색 자리로만 끝없이 남았다 → 비었다는 말 · 실패면 다시 시도 */
+    @Test
+    fun subscriptionChipsSayWhenThereIsNothingOrItFailed() {
+        signIn()
+        backend.pages[Feed.Account.key] = { Fetched(TubePage(emptyList(), null, channels = listOf(channel))) }
+        backend.pages[Feed.SubsChannels.key] = { Fetched(TubePage(emptyList(), null, channels = emptyList())) }
+        val a = open()
+        tapTab(a, TubeTab.SUBS)
+        tapChip(a, "Shorts")
+        assertTrue(rows(a).any { it is Row.Note && it.text == context.getString(R.string.tube_subs_shorts_empty) })
+        assertFalse("회색 자리로 남지 않는다", rows(a).any { it is Row.Skeleton })
+        tapChip(a, "실시간")
+        assertTrue(rows(a).any { it is Row.Note && it.text == context.getString(R.string.tube_subs_live_empty) })
+        a.finish()
+        backend.pages[Feed.SubsChannels.key] = { throw ApiException("네트워크 연결을 확인하세요") }
+        val b = open()
+        tapTab(b, TubeTab.SUBS)
+        tapChip(b, "Shorts")
+        assertTrue(rows(b).any { it is Row.Note && it.text == "네트워크 연결을 확인하세요" })
+        assertTrue(rows(b).any { it is Row.Action && it.id == TubeRows.A_RETRY })
+        assertFalse(rows(b).any { it is Row.Skeleton })
+    }
+
     /** 구독: 채널 사진 줄 — 누르면 그 채널, 끝의 '전체' = 구독 채널 모두 */
     @Test
     fun theAvatarStripOpensAChannelOrAllSubscriptions() {
@@ -885,17 +919,78 @@ class TubeAppTest {
         assertTrue("받은 편지는 읽고 지운다", TubeInbox.of(context).drain().isEmpty())
         // '나'에 추천에 쓰는 것이 보인다 · 기록 지우기 = 믹스 추천도 지운다
         tapTab(a, TubeTab.YOU)
-        assertTrue(rows(a).any { it is Row.Note && it.text == context.getString(R.string.tube_recs_info, 0, 2, 0) })
+        assertTrue(rows(a).any { it is Row.Note && it.text == context.getString(R.string.tube_recs_info, 0, 2, 0, 0) })
         tapAction(a, TubeRows.A_CLEAR)
         assertTrue(TubeState(context).harvests(System.currentTimeMillis()).isEmpty())
         tapTab(a, TubeTab.HOME)
         assertFalse("지운 추천은 '전체'에서도 빠진다", cards(a).contains("recaaaaaaa1"))
     }
 
+    /** 새 믹스 추천이 오면 받는 동안에도 앞의 추천을 그대로 보여 준다 (목록이 비었다 다시 차며 들썩이지 않게) */
+    @Test
+    fun newRecommendationsReplaceTheOldOnesWithoutAGap() {
+        val first = listOf(v("recaaaaaaa1"), v("recaaaaaaa2"))
+        backend.pages[Feed.Recs(first.map { it.id }).key] = { Fetched(TubePage(first, null)) }
+        backend.known["recbbbbbbb1"] = v("recbbbbbbb1")
+        first.forEach { backend.known[it.id] = it }
+        TubeInbox.of(context).post("kakaowatch://tube/recs?seed=musicaaaaa1&ids=recaaaaaaa1,recaaaaaaa2")
+        val c = Robolectric.buildActivity(TubeActivity::class.java).setup()
+        val a = c.get()
+        settle { cards(a).firstOrNull() == "recaaaaaaa1" }
+        // 재생 화면에서 새 믹스 — 받는 데 오래 걸림
+        val gate = CompletableDeferred<Unit>()
+        backend.holdIf += { k: String -> k.startsWith("recs/") && k != Feed.Recs(first.map { it.id }).key } to gate
+        TubeInbox.of(context).post("kakaowatch://tube/recs?seed=musicaaaaa2&ids=recbbbbbbb1")
+        c.pause().resume()
+        settle()
+        assertTrue("새 추천을 받는 중", backend.asked.count { it.startsWith("recs/") } == 2)
+        assertEquals("받는 동안 앞의 추천 그대로", listOf("recaaaaaaa1", "recaaaaaaa2"), cards(a).take(2))
+        gate.complete(Unit)
+        settle { cards(a).firstOrNull() == "recbbbbbbb1" }
+        assertEquals("새 추천이 맨 앞", "recbbbbbbb1", cards(a).first())
+    }
+
+    /** 리뷰에서 찾음: 로그인했을 때 구독 채널을 받기 전에 '본 채널'을 받아(구독 채널까지 섞여) 곧 버리고 또 받았다 → 구독 채널을 받은 뒤에 */
+    @Test
+    fun watchedChannelsWaitForTheSubscriptions() {
+        signIn()
+        val other = "UCotherotherotherother12"
+        TubeState(context).addPlayed(v("seenaaaaaa1"))
+        TubeState(context).addPlayed(TubeVideo("seenbbbbbb1", "제목", "다른 채널", 200, channelId = other, madeForKids = false))
+        val hold = CompletableDeferred<Unit>()
+        backend.holds[Feed.SubsChannels.key] = hold
+        backend.pages[Feed.SubsChannels.key] = { Fetched(TubePage(emptyList(), null, channels = listOf(channel))) }
+        open()
+        assertFalse("구독 채널을 받기 전엔 본 채널을 묻지 않는다: ${backend.asked}", backend.asked.any { it.startsWith("watched/") })
+        hold.complete(Unit)
+        settle { backend.asked.any { it.startsWith("watched/") } }
+        assertEquals("구독 채널은 빼고 한 번", listOf(Feed.Watched(listOf(other)).key), backend.asked.filter { it.startsWith("watched/") })
+    }
+
+    /**
+     * 리뷰에서 찾음: 홈만 열어도 Shorts 를 채우려고 검색(하루 100번 한도 중 1번)을 했고, 앱을 다시 열 때마다(메모리 기억이 사라짐) 또 했다 →
+     * Shorts 검색은 Shorts 탭에서만, 저절로는 하루 몇 번까지 (워치에 센다)
+     */
+    @Test
+    fun shortsAreSearchedOnlyFromTheShortsTabAndAFewTimesADay() {
+        backend.pages[Feed.ShortsSearch.key] = { Fetched(TubePage((1..3).map { short(it) }, null)) }
+        val a = open()
+        assertFalse("홈은 Shorts 를 검색하지 않는다", backend.asked.contains(Feed.ShortsSearch.key))
+        tapTab(a, TubeTab.SHORTS)
+        assertEquals(1, backend.asked.count { it == Feed.ShortsSearch.key })
+        assertEquals(1, TubeState(context).shortsSearchesToday())
+        a.finish()
+        repeat(TubeFeeds.SHORTS_SEARCH_DAILY - 1) { TubeState(context).noteShortsSearch() }
+        val b = open()
+        tapTab(b, TubeTab.SHORTS)
+        assertEquals("오늘 한도만큼 했으면 더 하지 않는다", 1, backend.asked.count { it == Feed.ShortsSearch.key })
+        assertTrue(rows(b).any { it is Row.Note && it.text == context.getString(R.string.tube_shorts_empty) })
+    }
+
     /** 관심 없음 · 채널 추천 안 함: 바로 빠지고, 다시 열어도 (30일 기억) */
     @Test
     fun notInterestedTakesTheCardAwayAndIsRemembered() {
-        val other = TubeVideo("otheraaaaa1", "다른 채널 동영상", "다른 채널", 200, channelId = "UCotherotherotherother12", views = 10, publishedAt = now - 1_000)
+        val other = TubeVideo("otheraaaaa1", "다른 채널 동영상", "다른 채널", 200, channelId = "UCotherotherotherother12", views = 10, publishedAt = now - 1_000, madeForKids = false)
         backend.pages[Feed.Popular(null).key] = { Fetched(TubePage(music + popular + other, null)) }
         val a = open()
         tapCard(a, "popularaaa1", long = true)
@@ -1026,6 +1121,66 @@ class TubeAppTest {
         assertTrue("폰도 저절로 열지 않는다", phoneOpened.isEmpty())
         tapAction(a, TubeRows.A_SHORTS_PLAY)
         assertEquals("누르면 폰의 Shorts 로", listOf(TubeLinks.phoneShortsUrl("short000001")), phoneOpened)
+    }
+
+    /**
+     * 리뷰에서 찾음: 받는 중에 몇 개만 모여도(검색으로 채운 것 등) 바로 열어, 나중에 온 내 채널 Shorts 가 재생 화면 목록에서 빠졌다 →
+     * 다 받거나 충분히(10개) 모였을 때 연다
+     */
+    @Test
+    fun theShortsPlayerWaitsUntilTheShortsAreGathered() {
+        backend.pages[Feed.ShortsSearch.key] = { Fetched(TubePage((1..3).map { short(it) }, null)) }
+        val controller = Robolectric.buildActivity(TubeActivity::class.java).setup()
+        val a = controller.get()
+        settle { !opening(a) }
+        // 처음: 검색으로 채운 Shorts 로 열고 돌아옴
+        tapTab(a, TubeTab.SHORTS)
+        assertNotNull(started(a))
+        controller.pause().stop()
+        controller.start().resume()
+        settle { !opening(a) }
+        // 동영상을 보면 그 채널의 Shorts 도 받는다 — 늦게 온다
+        val pool = Feed.ShortsPool(listOf(music[0].channelId!!))
+        val hold = CompletableDeferred<Unit>()
+        backend.holds[pool.key] = hold
+        backend.pages[pool.key] = { Fetched(TubePage((11..14).map { short(it, music[0].channelId!!) }, null)) }
+        tapTab(a, TubeTab.HOME)
+        tapCard(a, "musicaaaaa1")
+        started(a)
+        controller.pause().stop()
+        controller.start().resume()
+        settle { !opening(a) }
+        assertTrue("홈이 그 채널의 Shorts 를 묻는 중", backend.asked.contains(pool.key))
+        tapTab(a, TubeTab.SHORTS)
+        assertNull("받는 중이고 아직 적으면 기다린다 (검색 3개만으로 열지 않는다)", started(a))
+        hold.complete(Unit)
+        settle { shadowOf(a).peekNextStartedActivity() != null }
+        val ids = Uri.parse(started(a)?.getStringExtra(TubePlayerActivity.EXTRA_URL)?.replace("#", "?")).getQueryParameter("ids").orEmpty()
+        assertTrue("늦게 온 채널 Shorts 도 목록에: $ids", ids.contains("short000011") && ids.contains("short000001"))
+    }
+
+    /** 리뷰에서 찾음: 저절로 열 때 엔진이 멈췄던 워치(인터넷 앱 없음)·재생 화면에 닿지 않으면 폰 유튜브가 저절로 열렸다 → 저절로는 폰을 열지 않는다 */
+    @Test
+    fun openingShortsByItselfNeverOpensThePhone() {
+        backend.pages[Feed.ShortsSearch.key] = { Fetched(TubePage((1..12).map { short(it) }, null)) }
+        PlayerGuard.of(context).failed()   // 엔진이 최근에 멈춤 · 인터넷 앱 없음 → 폰으로 가는 길
+        val a = open()
+        tapTab(a, TubeTab.SHORTS)
+        assertNull(started(a))
+        assertTrue("폰을 저절로 열지 않는다: $phoneOpened", phoneOpened.isEmpty())
+        assertEquals("Shorts", titles(a).first())
+        // 누르면 폰으로 (사용자가 고름)
+        tapAction(a, TubeRows.A_SHORTS_PLAY)
+        assertEquals(listOf(TubeLinks.phoneShortsUrl("short000001")), phoneOpened)
+
+        PlayerGuard.of(context).started()   // 엔진이 다시 됨
+        WatchPlayer.probe = { false }   // 재생 화면에 닿지 않음
+        a.finish()
+        phoneOpened.clear()
+        val b = open()
+        tapTab(b, TubeTab.SHORTS)
+        assertNull(started(b))
+        assertTrue("닿지 않아도 저절로 폰을 열지 않는다: $phoneOpened", phoneOpened.isEmpty())
     }
 
     /** 재생 화면이 알려 준 본 Shorts 는 Shorts 목록에서 뒤로 간다 */
@@ -1214,6 +1369,99 @@ class TubeAppTest {
         settle { titles(a).firstOrNull() != "로그인" }
         assertEquals("로그인 화면은 닫히고 보던 화면으로", "나", titles(a).first())
         assertFalse(rows(a).any { it is Row.Note && it.text == context.getString(R.string.tube_login_expired) })
+    }
+
+    // ---------------- 어린이용 (유튜브 정책 III.E.4.j — 찾아보고 추적 끄기) ----------------
+
+    /** 어린이용 동영상: 앱 안에서 틀되 재생 화면에 k=1 (믹스 추천을 알리지 않음), 시청 기록에 남기지 않는다 */
+    @Test
+    fun aKidsVideoPlaysWithoutBeingRecorded() {
+        val kids = v("kidsaaaaaa1", kids = true)
+        backend.pages[Feed.Popular(null).key] = { Fetched(TubePage(listOf(kids) + popular, null)) }
+        val a = open()
+        tapCard(a, "kidsaaaaaa1")
+        val url = started(a)?.getStringExtra(TubePlayerActivity.EXTRA_URL).orEmpty()
+        assertTrue(url, url.contains("#v=kidsaaaaaa1&mix=1") && url.contains("&k=1"))
+        assertNull("시청 기록에 남기지 않는다", TubeState(context).lastPlayed())
+        assertTrue("그래서 '전체'에서도 빠지지 않는다", cards(a).contains("kidsaaaaaa1"))
+    }
+
+    /** 어린이용인지 모르는 동영상(정보를 다 못 받은 검색 결과 등)은 앱에 넣어 틀기 전에 찾아본다 — 아니면 그대로, 어린이용이면 k=1 + 기록 안 함 */
+    @Test
+    fun aVideoOfUnknownKidsStatusIsLookedUpBeforePlaying() {
+        val unknown = v("unknownaaa1", kids = null)
+        val unknownKids = v("unknownaaa2", kids = null)
+        backend.pages[Feed.Popular(null).key] = { Fetched(TubePage(listOf(unknown, unknownKids) + popular, null)) }
+        backend.known[unknown.id] = unknown.copy(madeForKids = false, title = "새 제목")
+        backend.known[unknownKids.id] = unknownKids.copy(madeForKids = true)
+        val a = open()
+        tapCard(a, unknown.id)
+        assertTrue("먼저 찾아봄: ${backend.asked}", backend.asked.contains(Feed.Videos(listOf(unknown.id)).key))
+        val url = started(a)?.getStringExtra(TubePlayerActivity.EXTRA_URL).orEmpty()
+        assertTrue(url, url.contains("#v=unknownaaa1&") && !url.contains("&k="))
+        assertEquals("찾아본 정보로 기록", "새 제목", TubeState(context).lastPlayed()?.title)
+        assertEquals(false, TubeState(context).lastPlayed()?.madeForKids)
+        tapCard(a, unknownKids.id)
+        assertTrue(started(a)?.getStringExtra(TubePlayerActivity.EXTRA_URL).orEmpty().contains("&k=1"))
+        assertFalse("어린이용은 기록하지 않는다", TubeState(context).played().any { it.video.id == unknownKids.id })
+    }
+
+    /** 찾아보지 못하면(인터넷·한도·없어진 동영상) 워치에 넣어 틀지 않고 폰 유튜브로 */
+    @Test
+    fun ifTheKidsStatusCannotBeLookedUpItOpensOnThePhone() {
+        val unknown = v("unknownaaa3", kids = null)
+        backend.pages[Feed.Popular(null).key] = { Fetched(TubePage(listOf(unknown) + popular, null)) }
+        val a = open()
+        tapCard(a, unknown.id)
+        assertNull("워치에서 열지 않는다", started(a))
+        assertEquals(listOf(TubeLinks.watchUrl(unknown.id, mix = true)), phoneOpened)
+    }
+
+    /** 예전 기록(어린이용인지 모름)은 앱을 열면 한 번 찾아본다: 어린이용·없어진 것은 지우고 나머지는 새 정보로 */
+    @Test
+    fun oldHistoryIsCheckedOnceAndKidsOrGoneVideosAreRemoved() {
+        val keep = v("keepaaaaaa1", kids = null)
+        val kids = v("kidsaaaaaa2", kids = null)
+        val gone = v("goneaaaaaa1", kids = null)
+        listOf(gone, kids, keep).forEach { TubeState(context).addPlayed(it) }
+        backend.known[keep.id] = keep.copy(madeForKids = false, title = "새 제목")
+        backend.known[kids.id] = kids.copy(madeForKids = true)
+        val c = Robolectric.buildActivity(TubeActivity::class.java).setup()
+        settle { TubeState(context).played().size == 1 }
+        val left = TubeState(context).played()
+        assertEquals(listOf(keep.id), left.map { it.video.id })
+        assertEquals("새 제목", left.single().video.title)
+        val asked = backend.asked.count { it.startsWith("videos/") }
+        assertEquals(1, asked)
+        c.pause().resume()
+        settle()
+        assertEquals("확인한 뒤엔 다시 묻지 않는다", asked, backend.asked.count { it.startsWith("videos/") })
+    }
+
+    /** 폰에서 이어 보기: 폰에서 열리면 찾아본 뒤 어린이용이 아니면 기록 */
+    @Test
+    fun continuingOnThePhoneRecordsOnlyAfterCheckingTheVideo() {
+        backend.known["BzYnNdJhZQw"] = v("BzYnNdJhZQw", title = "밤편지", kids = false)
+        backend.known["kidsaaaaaa3"] = v("kidsaaaaaa3", kids = true)
+        val a = open(Intent(Intent.ACTION_VIEW, Uri.parse("kakaowatch://tube/phone?v=BzYnNdJhZQw&t=83&title=x")))
+        tapAction(a, TubeRows.A_HANDOFF)
+        settle { TubeState(context).lastPlayed() != null }
+        assertEquals("BzYnNdJhZQw", TubeState(context).lastPlayed()?.id)
+        val b = open(Intent(Intent.ACTION_VIEW, Uri.parse("kakaowatch://tube/phone?v=kidsaaaaaa3&t=5&title=y")))
+        tapAction(b, TubeRows.A_HANDOFF)
+        settle()
+        assertEquals("어린이용은 기록하지 않는다", "BzYnNdJhZQw", TubeState(context).lastPlayed()?.id)
+    }
+
+    /** 어린이용 Shorts 는 k= 로 알려 '본 Shorts'로 남기지 않게 */
+    @Test
+    fun kidsShortsAreFlaggedForTheShortsPlayer() {
+        val kids = short(2).copy(madeForKids = true)
+        backend.pages[Feed.ShortsSearch.key] = { Fetched(TubePage(listOf(short(1), kids, short(3)), null)) }
+        val a = open()
+        tapTab(a, TubeTab.SHORTS)
+        val url = started(a)?.getStringExtra(TubePlayerActivity.EXTRA_URL).orEmpty()
+        assertEquals(url, "short000002", Uri.parse(url.replace("#", "?")).getQueryParameter("k"))
     }
 
     // ---------------- 링크 · 타일 ----------------

@@ -107,6 +107,27 @@ class PlayerNavTest {
         }
     }
 
+    /**
+     * 리뷰에서 찾음 (지키는 층 하나 더): 워치 앱 링크·알림은 재생 화면이 보낸 것만 — 플레이어 안의 다른 곳(광고 등)이 맨 위 화면을
+     * kakaowatch:// 로 옮기려 하면 막는다 (가짜 추천을 남기거나 재생 화면을 닫지 못하게). 보낸 곳을 모르면(엔진이 안 알려 줌) 그대로
+     */
+    @Test
+    fun appLinksAndNotesMustComeFromThePlayerPage() {
+        val recs = "kakaowatch://tube/recs?seed=BzYnNdJhZQw&ids=pSUydWEqKwE"
+        val page = base + "#v=BzYnNdJhZQw&mix=1&app=1"
+        assertEquals(Decision.Note(recs), PlayerNav.top(recs, base, userGesture = false, trigger = page))
+        assertEquals(Decision.Note(recs), PlayerNav.top(recs, base, userGesture = false, trigger = base + "shorts.html#ids=BzYnNdJhZQw"))
+        assertEquals("보낸 곳을 모르면 그대로", Decision.Note(recs), PlayerNav.top(recs, base, userGesture = false, trigger = null))
+        for (other in listOf("https://www.youtube.com/embed/BzYnNdJhZQw", "https://googleads.g.doubleclick.net/x", "https://syy4787.github.io/other/")) {
+            assertEquals(other, Decision.Block, PlayerNav.top(recs, base, userGesture = false, trigger = other))
+            assertEquals(other, Decision.Block, PlayerNav.top("kakaowatch://tube", base, userGesture = true, trigger = other))
+            assertEquals(other, Decision.Block, PlayerNav.top("kakaowatch://tube/channel?v=BzYnNdJhZQw", base, userGesture = true, trigger = other))
+        }
+        // 재생 화면·바깥 https 는 보낸 곳과 상관없이 전과 같다
+        assertEquals(Decision.Allow, PlayerNav.top(page, base, userGesture = false, trigger = "https://www.youtube.com/embed/x"))
+        assertEquals(Decision.Phone("https://www.youtube.com/watch?v=BzYnNdJhZQw"), PlayerNav.top("https://www.youtube.com/watch?v=BzYnNdJhZQw", base, userGesture = true, trigger = "https://www.youtube.com/embed/x"))
+    }
+
     @Test
     fun newWindowsNeverOpenOnTheWatch() {
         // 플레이어의 '유튜브에서 보기'·광고는 새 창 → 폰에서

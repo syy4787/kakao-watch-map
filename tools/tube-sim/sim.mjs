@@ -175,11 +175,12 @@ async function fitCheck(page) {
 
 // ---------- 믹스 알림 (앱 안 믹스 → kakaowatch://tube/recs?seed=…&ids=…) ----------
 const VID = /^[A-Za-z0-9_-]{11}$/, LISTID = /^[A-Za-z0-9_-]{2,64}$/;
-// 이 주소(#…)로 연 화면이 믹스를 알려도 되는지: 앱 안(app=1) + 믹스(mix=1, 앱의 목록·재생목록이 아님) — 페이지의 params() 와 같은 규칙
+// 이 주소(#…)로 연 화면이 믹스를 알려도 되는지: 앱 안(app=1) + 믹스(mix=1, 앱의 목록·재생목록이 아님) + 어린이용 아님(k=1 이 아님,
+// 유튜브 정책 III.E.4.j) — 페이지의 params() 와 같은 규칙
 function appMix(hash) {
   const q = new URLSearchParams(String(hash || '').replace(/^#/, ''));
   const v = q.get('v');
-  if (!v || !VID.test(v) || q.get('app') !== '1' || q.get('mix') !== '1') return false;
+  if (!v || !VID.test(v) || q.get('app') !== '1' || q.get('mix') !== '1' || q.get('k') === '1') return false;
   if (LISTID.test(q.get('list') || '')) return false;
   return !(q.get('ids') || '').split(',').some(x => VID.test(x) && x !== v);
 }
@@ -252,7 +253,10 @@ class Checker {
     if (s.life !== this.life) { this.life = s.life; this.recsSeen = 0; }
     for (let k = this.recsSeen || 0; k < s.recs.length; k++) {
       const r = s.recs[k];
-      const bad = recsProblem(r.u) || (appMix(r.hash) ? null : '앱 안 믹스가 아닌 화면(' + r.hash + ')');
+      // 씨앗은 앱이 고른 동영상(v)뿐 — 이어 받은 믹스의 씨앗은 어린이용인지 앱이 몰라 알리지 않는다
+      const firstV = new URLSearchParams(String(r.hash || '').replace(/^#/, '')).get('v');
+      const bad = recsProblem(r.u) || (appMix(r.hash) ? (parseRecs(r.u).seed === firstV ? null : '앱이 고른 동영상이 아닌 씨앗(' + parseRecs(r.u).seed + ')')
+        : '앱 안 믹스가 아닌 화면(' + r.hash + ')');
       if (bad) this.fail(step, '믹스 알림 이상: ' + bad + ' — ' + r.u.slice(0, 90), s);
     }
     if (s.recs.length > (this.recsSeen || 0)) {
@@ -347,9 +351,13 @@ const scripted = [
   // 믹스 알림: 앱 안에서 연 믹스의 비슷한 동영상 번호를 앱에 알린다 (씨앗마다 한 번 — 앱의 '전체' 추천). 처음 믹스 3곡은 짧게, 이어 받은 믹스는 길게
   { name: '믹스알림', hash: '#v=dQw4w9WgXcQ&mix=1&app=1&n=NOW', cfg: { autoplay: true, mixLen: 3, duration: 30, speed: 2, durations: Object.fromEntries(MIX0.map(x => [x, 2])) }, steps: [
     ['wait', 1500], ['expect', s => s.recs.length === 1 && parseRecs(s.recs[0].u).seed === 'dQw4w9WgXcQ' && parseRecs(s.recs[0].u).ids.join() === 'dQw4wx00001,dQw4wx00002', '앱 안 믹스 → 씨앗과 나머지 번호를 한 번 알림'],
-    ['wait', 6500], ['expect', s => s.recs.length === 2 && parseRecs(s.recs[1].u).seed === 'dQw4wx00002' && s.player?.state === 1 && !MIX0.includes(s.player?.id), '믹스가 끝나 이어 받은 믹스도 한 번 (씨앗 = 마지막 곡)'],
-    ['hash', '#v=dQw4w9WgXcQ&mix=1&app=1&n=NOW'], ['wait', 2000], ['expect', s => s.recs.length === 2 && MIX0.includes(s.player?.id) && [1, 3, -1].includes(s.player?.state), '같은 씨앗을 다시 열어도 다시 안 알림'],
-    ['hash', '#v=' + ID2 + '&mix=1&app=1&n=NOW'], ['wait', 1500], ['expect', s => s.recs.length === 3 && parseRecs(s.recs[2].u).seed === ID2, '다른 씨앗은 알림'] ] },
+    ['wait', 6500], ['expect', s => s.recs.length === 1 && s.player?.state === 1 && !MIX0.includes(s.player?.id), '믹스가 끝나 이어 받은 믹스는 알리지 않음 (그 씨앗이 어린이용인지 앱이 모름)'],
+    ['hash', '#v=dQw4w9WgXcQ&mix=1&app=1&n=NOW'], ['wait', 2000], ['expect', s => s.recs.length === 1 && MIX0.includes(s.player?.id) && [1, 3, -1].includes(s.player?.state), '같은 씨앗을 다시 열어도 다시 안 알림'],
+    ['hash', '#v=' + ID2 + '&mix=1&app=1&n=NOW'], ['wait', 1500], ['expect', s => s.recs.length === 2 && parseRecs(s.recs[1].u).seed === ID2, '다른 씨앗은 알림'] ] },
+  // 어린이용(Made for Kids — 앱이 찾아봐 k=1 을 붙임): 추적을 끈다 — 믹스 추천을 알리지 않는다 (유튜브 정책 III.E.4.j)
+  { name: '믹스알림_어린이용', hash: '#v=dQw4w9WgXcQ&mix=1&app=1&k=1&n=NOW', cfg: { autoplay: true, mixLen: 3, duration: 30 }, steps: [
+    ['wait', 2000], ['expect', s => s.recs.length === 0 && s.player?.state === 1 && s.player?.len === 3, '어린이용은 믹스로 틀되 알리지 않음'],
+    ['hash', '#v=' + ID2 + '&mix=1&app=1&n=NOW'], ['wait', 1500], ['expect', s => s.recs.length === 1 && parseRecs(s.recs[0].u).seed === ID2, '어린이용이 아닌 다음 곡은 알림'] ] },
   { name: '믹스알림_49개까지', hash: '#v=dQw4w9WgXcQ&mix=1&app=1&n=NOW', cfg: { autoplay: true, mixLen: 60, duration: 30 }, steps: [
     ['wait', 1500], ['expect', s => { const r = s.recs.length === 1 && parseRecs(s.recs[0].u); return r && r.ids.length === 49 && r.ids[0] === 'dQw4wx00001' && r.ids[48] === 'dQw4wx00049'; }, '49개까지 (목록 순서대로)'] ] },
   { name: '믹스알림_인터넷앱', cfg: { autoplay: true, mixLen: 3, duration: 30, speed: 2, durations: Object.fromEntries(MIX0.map(x => [x, 2])) }, steps: [
@@ -594,7 +602,7 @@ function randomScenario(seed, steps) {
   const vp = pick(viewports);
   cfg.playlists = PLAYLISTS;
   const hashes = ['#v=' + ID2 + '&mix=1', '#v=' + ID3, '#v=dQw4w9WgXcQ&mix=1', '#v=' + ID2 + '&t=' + encodeURIComponent('다른 곡'),
-    `#v=${Q1}&ids=${Q2},${Q3},${Q4}`, `#v=${Q2}&list=${PL}&app=1`, `#v=${Q4}&ids=${Q1}&app=1`, '#v=' + ID2 + '&mix=1&app=1'];
+    `#v=${Q1}&ids=${Q2},${Q3},${Q4}`, `#v=${Q2}&list=${PL}&app=1`, `#v=${Q4}&ids=${Q1}&app=1`, '#v=' + ID2 + '&mix=1&app=1', '#v=' + ID3 + '&mix=1&app=1&k=1'];
   const list = [];
   for (let k = 0; k < steps; k++) {
     const x = r();

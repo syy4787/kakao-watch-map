@@ -131,7 +131,7 @@
     <string name="tube_history">시청 기록</string>
     <string name="tube_history_count">%1$d개</string>
     <string name="tube_history_empty">아직 본 동영상이 없어요</string>
-    <string name="tube_history_note">이 앱에서 본 동영상만 워치에 30일 동안 남아요</string>
+    <string name="tube_history_note">이 앱에서 본 동영상만 워치에 30일 동안 남아요 (어린이용은 빼고). 지워도 유튜브 계정의 기록은 그대로예요</string>
     <string name="tube_liked">좋아요 표시한 동영상</string>
     <string name="tube_my_playlists">내 재생목록</string>
     <string name="tube_no_playlists">재생목록이 없어요</string>
@@ -222,7 +222,7 @@
     <string name="tube_subs_live_empty">구독 채널의 실시간 방송이 없어요</string>
     <string name="tube_channel_shorts_empty">Shorts가 없어요</string>
     <string name="tube_channel_live_empty">실시간 방송이 없어요</string>
-    <string name="tube_recs_info">추천에 쓰는 것: 이 앱에서 본 동영상 %1$d개 · 유튜브 믹스 추천 %2$d개 · 관심 없음 %3$d개 — 워치에만 두고 30일·7일·30일 뒤 저절로 지워져요</string>
+    <string name="tube_recs_info">추천에 쓰는 것 (워치에만): 이 앱에서 본 동영상 %1$d개 · 유튜브 믹스 추천 %2$d개 · 관심 없음 %3$d개 · 본 Shorts %4$d개. 믹스 추천은 7일, 나머지는 30일 뒤 저절로 지워져요. 지워도 유튜브 계정의 기록은 그대로예요</string>
     <string name="tube_clear_sub">본 동영상·검색어·추천</string>
     <string name="tube_not_interested">관심 없음</string>
     <string name="tube_no_channel">채널 추천 안 함</string>
@@ -230,7 +230,7 @@
     <string name="tube_channel_dismissed">이 채널은 추천하지 않을게요</string>
     <string name="tube_cleared">기록을 지웠어요</string>
     <string name="tube_channel_not_found">채널을 찾지 못했어요</string>
-    <string name="tube_terms_text">이 앱은 YouTube API 서비스를 써요. 쓰면 YouTube 서비스 약관과 이 앱의 개인정보 처리방침에 동의하는 거예요. 이 앱에서 본 동영상·유튜브 믹스 추천·관심 없음은 워치에만 두고 홈 추천에만 써요.</string>
+    <string name="tube_terms_text">이 앱은 YouTube API 서비스를 써요. 쓰면 YouTube 서비스 약관과 이 앱의 개인정보 처리방침에 동의하는 거예요. 이 앱에서 본 동영상·유튜브 믹스 추천·관심 없음·본 Shorts·검색어는 워치에만 두고 홈 추천에만 써요. 어린이용 동영상은 남기지 않아요.</string>
     <string name="tube_terms_agree">동의하고 시작</string>
     <string name="tube_terms_youtube">YouTube 서비스 약관</string>
     <string name="tube_terms_privacy">개인정보 처리방침</string>

@@ -32,16 +32,21 @@ sealed class Feed(val key: String, val mine: Boolean, val ttlMs: Long) {
     class PlaylistVideos(val id: String, val own: Boolean) : Feed("playlist/$id", own, SHORT)
     /** 받아 둔 유튜브 믹스 추천 [ids] 의 정보 — 추천이 새로 오면 열쇠가 바뀐다 (예전 것은 [TubeLoader.forget]) */
     class Recs(val ids: List<String>) : Feed("recs/" + ids.joinToString(",").hashCode().toUInt().toString(16), false, LONG)
-    /** 이 앱에서 본 채널(구독 안 한) [channels] 의 새 긴 동영상 */
-    class Watched(val channels: List<String>) : Feed("watched/" + channels.joinToString(","), false, LONG)
-    /** Shorts 후보: 채널 [channels](구독 앞 8 + 최근 본 4)의 최신 Shorts */
-    class ShortsPool(val channels: List<String>) : Feed("shorts/pool/" + channels.joinToString(","), false, LONG)
+    /**
+     * 이 앱에서 본 채널(구독 안 한) [channels] 의 새 긴 동영상 (올린 때 차례). 열쇠는 채널 묶음 — 이미 있던 채널의 동영상을 봐 차례만
+     * 바뀌면 같은 것 (또 받지 않게)
+     */
+    class Watched(val channels: List<String>) : Feed("watched/" + channels.sorted().joinToString(","), false, LONG)
+    /** Shorts 후보: 채널 [channels](구독 앞 8 + 최근 본 4)의 최신 Shorts. 열쇠는 채널 묶음 (차례만 바뀌면 같은 것) */
+    class ShortsPool(val channels: List<String>) : Feed("shorts/pool/" + channels.sorted().joinToString(","), false, LONG)
     /** Shorts 가 모자랄 때 채우는 검색 (검색 한도라 3시간) */
     data object ShortsSearch : Feed("shorts/search", false, EXTENDED)
     /** 지금 생방송 검색 (검색 한도라 3시간 — '실시간' 칩을 열 때만) */
     data object Live : Feed("live", false, EXTENDED)
     /** 동영상 [video] 를 올린 채널 (재생 화면의 채널 이름을 눌렀을 때) */
     class VideoChannel(val video: String) : Feed("vchannel/$video", false, LONG)
+    /** 동영상 [ids] 의 정보 (50개까지) — 어린이용인지 찾아볼 때·시청 기록을 새로 받을 때 (기억해 두지 않고 바로 묻는다) */
+    class Videos(val ids: List<String>) : Feed("videos/" + ids.joinToString(","), false, SHORT)
 
     override fun equals(other: Any?) = other is Feed && other.key == key
     override fun hashCode() = key.hashCode()
@@ -202,8 +207,12 @@ class TubeLoader(
      * 열쇠가 [prefix] 로 시작하는 받을 거리를 [keep] 말고 모두 잊는다 (받는 중이던 것도 버림) —
      * 믹스 추천·본 채널처럼 내용에 따라 열쇠가 바뀌는 것의 예전 것 (메모리에 쌓이지 않게)
      */
-    fun forget(prefix: String, keep: Feed?) {
-        (slots.keys + jobs.keys).filter { it.startsWith(prefix) && it != keep?.key }.toSet().forEach(::drop)
+    fun forget(prefix: String, keep: Feed?) = forget(prefix, setOfNotNull(keep))
+
+    /** [forget] — 남길 것이 여럿일 때 (새것을 받는 동안 바로 앞 것도) */
+    fun forget(prefix: String, keep: Set<Feed>) {
+        val kept = keep.mapTo(HashSet()) { it.key }
+        (slots.keys + jobs.keys).filter { it.startsWith(prefix) && it !in kept }.toSet().forEach(::drop)
     }
 
     private fun drop(key: String) {

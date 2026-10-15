@@ -340,8 +340,8 @@ class ScreensRenderTest {
         shortsPictures()
         val signedIn = TubeRows.Account(configured = true, signedIn = true, channel = tubeChannel)
         val history = tubeVideos.take(3).map { Played(it, tubeNow) }
-        tube("tube_you", TubeRows.library(tubeApp, signedIn, history, recs = 96, dismissed = 3, update = false, now = tubeNow), pages = 5)
-        tube("tube_you_out", TubeRows.library(tubeApp, TubeRows.Account(configured = true, signedIn = false), emptyList(), 0, 0, false, tubeNow), pages = 3)
+        tube("tube_you", TubeRows.library(tubeApp, signedIn, history, recs = 96, dismissed = 3, seen = 12, searches = 4, update = false, now = tubeNow), pages = 5)
+        tube("tube_you_out", TubeRows.library(tubeApp, TubeRows.Account(configured = true, signedIn = false), emptyList(), 0, 0, update = false, now = tubeNow), pages = 3)
         val channels = Slot(page = TubePage(emptyList(), "SC2", channels = (1..6).map { tubeChannel.copy(id = "UC" + it.toString().padStart(22, '7'), title = "채널 이름 $it") }))
         tube(
             "tube_subscriptions",

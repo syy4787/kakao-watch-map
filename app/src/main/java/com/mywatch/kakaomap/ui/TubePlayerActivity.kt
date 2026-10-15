@@ -336,7 +336,7 @@ class TubePlayerActivity : ComponentActivity() {
 
     private val navigation = object : GeckoSession.NavigationDelegate {
         override fun onLoadRequest(session: GeckoSession, request: GeckoSession.NavigationDelegate.LoadRequest): GeckoResult<AllowOrDeny> =
-            act(decide("이동") { PlayerNav.top(request.uri, pageBase, request.hasUserGesture) })
+            act(decide("이동") { PlayerNav.top(request.uri, pageBase, request.hasUserGesture, request.triggerUri) })
 
         override fun onSubframeLoadRequest(session: GeckoSession, request: GeckoSession.NavigationDelegate.LoadRequest): GeckoResult<AllowOrDeny> =
             if (decide("플레이어 안 이동") { PlayerNav.frame(request.uri) } == PlayerNav.Decision.Allow) GeckoResult.allow() else GeckoResult.deny()

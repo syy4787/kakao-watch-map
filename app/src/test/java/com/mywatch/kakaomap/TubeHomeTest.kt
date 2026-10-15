@@ -7,6 +7,7 @@ import com.mywatch.kakaomap.tube.Played
 import com.mywatch.kakaomap.tube.TubeHome
 import com.mywatch.kakaomap.tube.TubeVideo
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -172,6 +173,15 @@ class TubeHomeTest {
         assertEquals(listOf(id("a", 2), id("a", 1), id("a", 4)) + (1..5).map { id("m", it) }, ids(seeds))
         val many = (1..10).map { v("b", it, cat = "10") }
         assertEquals((1..8).map { id("b", it) }, ids(TubeHome.mixSeeds(ctx(history = many), chart)))
+    }
+
+    /** 리뷰에서 찾음: '믹스' 칩이 인기 음악으로 채울지를 기록 수로만 봐, 생방송·Shorts·관심 없음뿐이면 씨앗이 모자라도 채우지 않았다 */
+    @Test
+    fun theMixChipTopsUpWhenTheHistoryHasTooFewSeeds() {
+        val few = listOf(v("a", 1, short = true), v("a", 2, live = true), v("a", 3), v("a", 4), v("a", 5))
+        assertTrue("씨앗이 셋뿐", TubeHome.needsMusicTopUp(ctx(history = few, dismissed = setOf(id("a", 5)))))
+        assertFalse(TubeHome.needsMusicTopUp(ctx(history = (1..4).map { v("b", it) })))
+        assertTrue(TubeHome.needsMusicTopUp(ctx()))
     }
 
     /** 메뉴의 '재생'으로 본 Shorts 도 기록에 남지만 믹스의 씨앗은 아니다 (세로 30초짜리로 시작하는 믹스는 이상하다) */

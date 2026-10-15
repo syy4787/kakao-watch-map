@@ -38,6 +38,8 @@ class LiveBackend(private val context: Context) : TubeBackend {
             is Feed.ShortsPool -> Fetched(TubePage(data.shortsOf(feed.channels, SHORTS_PER_CHANNEL), null))
             Feed.ShortsSearch -> Fetched(data.searchVideos(mapOf("videoDuration" to "short", "q" to "#shorts"), token))
             Feed.Live -> Fetched(data.searchVideos(mapOf("eventType" to "live"), token))
+            // 물은 순서대로 (없어진 것 — 지워짐·비공개 — 은 빠진다)
+            is Feed.Videos -> Fetched(TubePage(data.details(feed.ids).let { d -> feed.ids.mapNotNull { d[it] } }, null))
             is Feed.VideoChannel -> Fetched(
                 TubePage(emptyList(), null, channels = listOfNotNull(data.channelOfVideo(feed.video)?.let { (id, title) -> TubeChannel(id, title, null) })),
             )

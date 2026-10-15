@@ -142,10 +142,33 @@ class TubeStateTest {
         assertEquals(setOf("aaaaaaaaaaa"), state.seenShorts(nowMs = 10 * day))
         assertEquals(emptySet<String>(), state.dismissedVideos(nowMs = 10 * day))
 
-        assertFalse("바뀐 것이 없으면 false", state.ingest(listOf("garbage", "", "kakaowatch://tube/phone?v=BzYnNdJhZQw"), nowMs = 10 * day))
+        assertFalse("바뀐 것이 없으면 false", state.ingest(notes(10 * day, "garbage", "", "kakaowatch://tube/phone?v=BzYnNdJhZQw"), nowMs = 10 * day))
         assertFalse(state.ingest(emptyList(), nowMs = 10 * day))
-        assertTrue(state.ingest(listOf("kakaowatch://tube/seen?v=ddddddddddd"), nowMs = 11 * day))
+        assertTrue(state.ingest(notes(11 * day, "kakaowatch://tube/seen?v=ddddddddddd"), nowMs = 11 * day))
         assertEquals(listOf("ddddddddddd", "aaaaaaaaaaa"), state.seenShorts(nowMs = 11 * day).toList())
+    }
+
+    private fun notes(at: Long, vararg texts: String) = texts.map { TubeInbox.Note(it, at) }
+
+    /**
+     * 리뷰에서 찾음: 받아 두는 기간을 앱이 읽은 때부터 셌다 — 재생 화면에서 나가 한참 뒤에 앱을 열면 믹스 추천이 7일을 훨씬 넘게 남았다.
+     * 이제 재생 화면이 보낸 때부터 (믹스 추천 7일 · 본 Shorts 30일)
+     */
+    @Test
+    fun keepingTimesCountFromWhenThePlayerSentTheNote() {
+        val state = TubeState(context)
+        val sent = 10 * day
+        state.ingest(
+            listOf(
+                TubeInbox.Note("kakaowatch://tube/recs?seed=BzYnNdJhZQw&ids=pSUydWEqKwE", sent),
+                TubeInbox.Note("kakaowatch://tube/seen?v=aaaaaaaaaaa", sent),
+            ),
+            nowMs = sent + 6 * day,
+        )
+        assertEquals(sent, state.harvests(nowMs = sent + 6 * day).single().at)
+        assertEquals("보낸 지 7일이 지나면 믹스 추천은 지운다", emptyList<Harvest>(), state.harvests(nowMs = sent + 7 * day + 1))
+        assertEquals(setOf("aaaaaaaaaaa"), state.seenShorts(nowMs = sent + 29 * day))
+        assertEquals("본 Shorts 는 보낸 지 30일", emptySet<String>(), state.seenShorts(nowMs = sent + 30 * day + 1))
     }
 
     @Test

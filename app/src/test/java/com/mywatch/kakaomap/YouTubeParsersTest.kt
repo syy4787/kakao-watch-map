@@ -67,6 +67,26 @@ class YouTubeParsersTest {
         assertFalse("나이 제한 영상은 로그인 안 된 플레이어에서 안 나온다", m.getValue("agelimitxxx").embeddable)
     }
 
+    /** 어린이용(status.madeForKids) — 유튜브 정책 III.E.4.j: 앱에 넣어 트는 동영상마다 찾아보고, 어린이용이면 추적을 끈다 */
+    @Test
+    fun videoDetailsReadWhetherTheVideoIsMadeForKids() {
+        val json = JSONObject(
+            """
+            {"items":[
+              {"id":"kidsvideo01","snippet":{"title":"동요"},"status":{"embeddable":true,"madeForKids":true}},
+              {"id":"notforkids1","snippet":{"title":"뉴스"},"status":{"embeddable":true,"madeForKids":false}},
+              {"id":"unknownkids","snippet":{"title":"모름"},"status":{"embeddable":true}},
+              {"id":"weirdkids01","snippet":{"title":"이상함"},"status":{"madeForKids":"yes"}}
+            ]}
+            """.trimIndent()
+        )
+        val m = TubeParsers.videoDetails(json)
+        assertEquals(true, m.getValue("kidsvideo01").madeForKids)
+        assertEquals(false, m.getValue("notforkids1").madeForKids)
+        assertNull("없으면 모름", m.getValue("unknownkids").madeForKids)
+        assertNull("참·거짓이 아니면 모름", m.getValue("weirdkids01").madeForKids)
+    }
+
     /**
      * 분류(snippet.categoryId)와 세로인지(player.embedWidth/embedHeight — maxHeight=360 으로 물을 때만 옴).
      * 실제 응답(2026-10-14): Shorts 203×360 · 긴 동영상 640×360 · 생방송 0×0. 크기는 글("203")로도 숫자로도 받는다

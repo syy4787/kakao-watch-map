@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Shorts 탭 아이콘 — 세로 화면 + 재생 표시 (이 앱의 그림. 유튜브 Shorts 로고는 쓰지 않는다) -->
+<!-- Shorts 아이콘 — 세로 카드 + 짧다는 번개 표시 (이 앱의 그림. 유튜브·Shorts 로고나 재생 삼각형 모양은 쓰지 않는다) -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="22dp"
     android:height="22dp"
@@ -8,5 +8,5 @@
     <path
         android:fillColor="#FFFFFFFF"
         android:fillType="evenOdd"
-        android:pathData="M9.5,2h5A2.5,2.5 0,0 1,17 4.5v15A2.5,2.5 0,0 1,14.5 22h-5A2.5,2.5 0,0 1,7 19.5v-15A2.5,2.5 0,0 1,9.5 2zM10.6,8.6v6.8l5.1,-3.4z" />
+        android:pathData="M9.5,2h5A2.5,2.5 0,0 1,17 4.5v15A2.5,2.5 0,0 1,14.5 22h-5A2.5,2.5 0,0 1,7 19.5v-15A2.5,2.5 0,0 1,9.5 2zM13.4,6.2L9.8,12.6h2.3l-1.5,5.2 3.6,-6.4h-2.3z" />
 </vector>

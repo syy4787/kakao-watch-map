@@ -97,9 +97,9 @@ object Marks {
     const val MAX = 300
     private const val MAX_ID = 64
 
-    /** [id] 를 맨 앞에 (있던 것은 옮긴다). 지난 것은 빼고 [MAX] 개까지 */
-    fun add(list: List<Mark>, id: String, now: Long): List<Mark> {
-        val all = if (valid(id)) listOf(Mark(id, now)) + list.filterNot { it.id == id } else list
+    /** [id] 를 [at](표시한 때 — 기본은 지금)으로 맨 앞에 (있던 것은 옮긴다). 지난 것은 빼고 [MAX] 개까지 */
+    fun add(list: List<Mark>, id: String, now: Long, at: Long = now): List<Mark> {
+        val all = if (valid(id)) listOf(Mark(id, at)) + list.filterNot { it.id == id } else list
         return prune(all, now).take(MAX)
     }
 

@@ -26,7 +26,8 @@ class TubePlayTest {
     @get:Rule val tmp = TemporaryFolder()
 
     private val base = "https://syy4787.github.io/kakao-watch-map/tube/"
-    private val iu = TubeVideo("BzYnNdJhZQw", "밤편지", "IU")
+    // 어린이용이 아님을 아는 동영상 (모르면 재생 화면 주소에 k=1 이 붙는다 — TubeTest 에서 확인)
+    private val iu = TubeVideo("BzYnNdJhZQw", "밤편지", "IU", madeForKids = false)
     private fun v(id: String, embeddable: Boolean = true) = TubeVideo(id, "제목 $id", "채널", embeddable = embeddable)
 
     @Test

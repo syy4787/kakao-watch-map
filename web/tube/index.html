@@ -297,7 +297,9 @@
     var mode = list ? 'list' : (ids.length ? 'ids' : (q.get('mix') === '1' ? 'mix' : 'single'));
     return {
       v: v, mode: mode, mix: mode === 'mix', ids: mode === 'ids' ? ids : [], list: mode === 'list' ? list : null,
-      t: clean(q.get('t'), 100), c: clean(q.get('c'), 40), n: n > 0 ? n : 0, app: q.get('app') === '1'
+      t: clean(q.get('t'), 100), c: clean(q.get('c'), 40), n: n > 0 ? n : 0, app: q.get('app') === '1',
+      // 어린이용(또는 앱이 모름) — 유튜브 정책 III.E.4.j: 추적을 끈다 (믹스 추천을 앱에 알리지 않음)
+      kids: q.get('k') === '1'
     };
   }
   // 워치 앱으로 가는 링크: 앱 안(GeckoView)에선 kakaowatch:// 를 앱이 받고, 인터넷 앱에선 intent:// 로 앱을 연다
@@ -575,10 +577,11 @@
   }
 
   // 믹스 알림: 앱 안(app=1)에서 연 유튜브 믹스의 목록(유튜브가 고른 비슷한 동영상)을 워치 앱에 한 번 알린다 — 앱의 '전체' 추천에 쓴다.
-  // 씨앗(믹스를 만든 동영상)마다 이 페이지에서 한 번 (같은 곡을 다시 골라 주소만 바뀌어도 다시 안 알림). 인터넷 앱·앱의 목록·재생목록은 알리지 않는다.
+  // 씨앗(앱에서 고른 동영상)마다 이 페이지에서 한 번 (같은 곡을 다시 골라 주소만 바뀌어도 다시 안 알림). 인터넷 앱·앱의 목록·재생목록·
+  // 어린이용(k=1, 정책 III.E.4.j)은 알리지 않는다. 믹스가 끝나 이어 받은 믹스도 알리지 않는다 — 그 씨앗(마지막 곡)이 어린이용인지 앱이 모른다.
   // 앱이 조용히 받는 링크라 재생·안내·화면 켜 두기·타이머는 건드리지 않는다
   function noteMix(seed, list) {
-    if (!seed || mixSent[seed] || !cur || !cur.p || !cur.p.app || cur.p.mode !== 'mix' || !list || list.length < 2) return;
+    if (!seed || mixSent[seed] || !cur || !cur.p || !cur.p.app || cur.p.kids || cur.p.mode !== 'mix' || seed !== cur.p.v || !list || list.length < 2) return;
     var ids = [];
     for (var i = 0; i < list.length && ids.length < MAX_RECS; i++) {
       var x = list[i];
@@ -896,7 +899,6 @@
         endContinue();
         cur.avoid = from;
         var list = playlist();
-        noteMix(from, list);   // 이어 받은 믹스도 앱에 (씨앗 = 마지막으로 들은 곡)
         var start = 0;
         while (start < list.length - 1 && list[start] === from) start++;
         cur.userJump = true;

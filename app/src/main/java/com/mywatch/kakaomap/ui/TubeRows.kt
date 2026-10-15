@@ -458,9 +458,13 @@ object TubeRows {
 
     /**
      * 나 (유튜브 앱의 '나'처럼): 내 채널(또는 '나') · (새 버전) · 탭 · 기록(최근 둘 + 모두 보기) · 내 재생목록·좋아요(로그인) ·
-     * 계정/로그인 · 추천에 쓰는 것(무엇을 얼마나 두는지) · 기록 지우기 · 약관
+     * 계정/로그인 · 추천에 쓰는 것(무엇을 얼마나 두는지 — 믹스 추천 [recs] · 관심 없음 [dismissed] · 본 Shorts [seen]) ·
+     * 기록 지우기(지울 것이 있으면 — 검색어 [searches] 까지) · 약관
      */
-    fun library(c: Context, account: Account, history: List<Played>, recs: Int, dismissed: Int, update: Boolean, now: Long): List<Row> {
+    fun library(
+        c: Context, account: Account, history: List<Played>, recs: Int, dismissed: Int, seen: Int = 0, searches: Int = 0,
+        update: Boolean, now: Long,
+    ): List<Row> {
         val me = account.channel.takeIf { account.signedIn }
         val rows = mutableListOf<Row>(
             if (me != null) Row.Header(me.title, c.getString(R.string.tube_signed_in), avatar = me.thumb) else Row.Header(c.getString(R.string.tube_you)),
@@ -479,8 +483,8 @@ object TubeRows {
             rows += Row.Action(A_LIKED, R.drawable.ic_thumb_up, c.getString(R.string.tube_liked))
         }
         rows += accountRow(c, account)
-        rows += Row.Note(c.getString(R.string.tube_recs_info, history.size, recs, dismissed))
-        if (history.isNotEmpty() || recs > 0 || dismissed > 0) {
+        rows += Row.Note(c.getString(R.string.tube_recs_info, history.size, recs, dismissed, seen))
+        if (history.isNotEmpty() || recs > 0 || dismissed > 0 || seen > 0 || searches > 0) {
             rows += Row.Action(A_CLEAR, R.drawable.ic_delete, c.getString(R.string.tube_clear), sub = c.getString(R.string.tube_clear_sub))
         }
         rows += Row.Action(A_TERMS, R.drawable.ic_info, c.getString(R.string.tube_terms))

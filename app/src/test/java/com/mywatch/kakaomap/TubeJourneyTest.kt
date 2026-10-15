@@ -90,12 +90,13 @@ class TubeJourneyTest {
     private val allChannels = channels + chD
 
     private var serial = 0
-    /** 동영상 번호(11자): 앞 3글자가 어디서 온 것인지 — sub·lik·myp 는 내 계정 데이터 */
+    /** 동영상 번호(11자): 앞 3글자가 어디서 온 것인지 — sub·lik·myp 는 내 계정 데이터. 일곱에 하나는 어린이용 */
     private fun v(kind: String, ch: TubeChannel, embeddable: Boolean = true, live: Boolean = false, cat: String? = null, short: Boolean = false): TubeVideo {
         val id = kind + "%08d".format(++serial)
         return TubeVideo(
             id, "제목 $id", ch.title, if (live) null else if (short) 20 + serial % 40 else 200 + serial, live = live, channelId = ch.id,
             views = 1_000L * serial, publishedAt = now - 3_600_000L * serial, embeddable = embeddable, categoryId = cat, portrait = if (live) null else short,
+            madeForKids = serial % 7 == 0,
         )
     }
 
@@ -177,6 +178,7 @@ class TubeJourneyTest {
                 is Feed.ShortsPool -> Fetched(TubePage(feed.channels.flatMap { chanShorts[it].orEmpty().take(4) }, null))
                 Feed.ShortsSearch -> Fetched(TubePage(searchShorts, null))
                 Feed.Live -> Fetched(TubePage(liveNow, null))
+                is Feed.Videos -> Fetched(TubePage(feed.ids.mapNotNull { everything[it] }, null))
                 is Feed.VideoChannel -> Fetched(
                     TubePage(emptyList(), null, channels = listOfNotNull(everything[feed.video]?.channelId?.let { id -> allChannels.firstOrNull { it.id == id } })),
                 )
@@ -332,13 +334,18 @@ class TubeJourneyTest {
         val composite = shown.filter { parts(it) > 0 }
         val shortRows = shown.filter { it is Row.ShortsShelf || it is Row.ShortsPair }
         val cards = shown.filterIsInstance<Row.VideoCard>()
-        // 아직 안 눌러 본 버튼·탭·칩이 있으면 가끔은 그것부터 (골고루 가 보게)
+        // 아직 안 눌러 본(버튼은 [FRESH_TIMES] 번을 못 채운) 버튼·탭·칩이 있으면 가끔은 그것부터, 그중 가장 덜 눌러 본 것 (골고루 가 보게 —
+        // 한 번 눌러 본 '계정' 같은 버튼 뒤의 화면(로그아웃)에도 다시 가 보도록)
         val fresh = shown.flatMap { r ->
             when (r) {
-                is Row.Action -> if ("action:" + r.id !in visited) listOf(Step.Tap(r)) else emptyList()
+                is Row.Action -> if ((times["action:" + r.id] ?: 0) < FRESH_TIMES) listOf(Step.Tap(r)) else emptyList()
                 is Row.Tabs, is Row.ChipBar, is Row.AvatarStrip -> (0 until parts(r)).filter { partKey(r, it) !in visited }.map { Step.Part(r, it) }
                 else -> emptyList()
             }
+        }.let { all ->
+            fun pressed(s: Step) = ((s as? Step.Tap)?.row as? Row.Action)?.let { times["action:" + it.id] } ?: 0
+            val least = all.minOfOrNull(::pressed)
+            all.filter { pressed(it) == least }
         }
         val x = random.nextDouble()
         return when {
@@ -370,6 +377,12 @@ class TubeJourneyTest {
     /** 들러 본 화면·누른 버튼·탭·칩 (골고루 눌러 봤는지) */
     private val visited = HashSet<String>()
 
+    /** 화면·버튼마다 몇 번 (골고루인지 볼 때 — 끝에 찍는다) */
+    private val times = HashMap<String, Int>()
+
+    /** 버튼은 이만큼 눌러 볼 때까지 '아직 덜 눌러 본 것'으로 */
+    private val FRESH_TIMES = 5
+
     @Test
     fun anyOrderOfTapsNeverGetsStuckAndAlwaysPlaysTheRightThing() {
         var steps = 0
@@ -385,6 +398,7 @@ class TubeJourneyTest {
         }
         assertTrue("충분히 눌러 봤다: $steps", steps >= 1_900)
         println("들러 본 것: " + visited.sorted())
+        println("횟수: " + times.entries.sortedBy { it.key }.joinToString { "${it.key}=${it.value}" })
         val pages = listOf(
             "Home", "Shorts", "Find", "Search", "Subscriptions", "SubsChannels", "Library", "History", "Liked", "MyPlaylists",
             "Channel", "Playlist", "Menu", "Login", "Account", "Handoff", "Terms",
@@ -401,7 +415,7 @@ class TubeJourneyTest {
         val chips = TubeTab.entries.map { "tab:" + it.name } + HomeChip.entries.map { "chip:" + TubeRows.BAR_HOME + ":" + it.name }
         val notTried = chips.filter { it !in visited }
         assertTrue("탭·홈 칩은 다 눌러 봤다 (못 누른 것: $notTried)", notTried.isEmpty())
-        listOf("blocked", "short", "blockedShort", "signedIn", "recs", "seen", "recsShown", "avatar").forEach {
+        listOf("blocked", "short", "blockedShort", "signedIn", "recs", "seen", "recsShown", "avatar", "kids").forEach {
             assertTrue("해 봤다: $it", it in visited)
         }
         assertTrue("최근 검색어를 눌러 봤다", visited.any { it.startsWith("action:" + TubeRows.A_QUERY) })
@@ -432,9 +446,10 @@ class TubeJourneyTest {
             val step = pick(a)
             log += "${topBefore::class.simpleName}(${firstTitle(a)}) → ${describe(step)}"
             visited += "page:" + topBefore::class.simpleName
+            times.merge("page:" + topBefore::class.simpleName, 1, Int::plus)
             when (step) {
                 is Step.Tap -> {
-                    (step.row as? Row.Action)?.let { visited += "action:" + it.id }
+                    (step.row as? Row.Action)?.let { visited += "action:" + it.id; times.merge("action:" + it.id, 1, Int::plus) }
                     if ((step.row as? Row.VideoCard)?.video?.embeddable == false) visited += "blocked"
                 }
                 is Step.Part -> visited += partKey(step.row, step.part)
@@ -509,6 +524,11 @@ class TubeJourneyTest {
         val state = TubeState(context)
         val t = System.currentTimeMillis()
         val history = state.played(t).map { it.video.id }.toSet()
+        // 어린이용은 워치 어디에도 남지 않는다 — 기록·믹스 추천의 씨앗·본 Shorts (유튜브 정책 III.E.4.j)
+        val kidsIds = everything.values.filter { it.madeForKids == true }.map { it.id }.toSet()
+        check(history.none { it in kidsIds }, "어린이용이 시청 기록에")
+        check(state.harvests(t).none { it.seed in kidsIds }, "어린이용이 믹스 추천의 씨앗으로")
+        check(state.seenShorts(t).none { it in kidsIds }, "어린이용이 본 Shorts 로")
         // 로그인 안 했으면 내 데이터는 어디에도 없다
         if (!signedIn()) {
             val shownIds = cards.map { it.video.id } + shortsShown.map { it.id } + shown.filterIsInstance<Row.Header>().mapNotNull { it.art }
@@ -602,12 +622,14 @@ class TubeJourneyTest {
             if (random.nextBoolean()) {
                 val q = Uri.parse(url.replace("#", "?"))
                 val ids = q.getQueryParameter("ids").orEmpty().split(',')
-                ids.getOrNull(q.getQueryParameter("i")?.toIntOrNull() ?: 0)?.let {
+                val kids = q.getQueryParameter("k").orEmpty().split(',').toSet()
+                // 재생 화면처럼: 어린이용(k=)은 알리지 않는다
+                ids.getOrNull(q.getQueryParameter("i")?.toIntOrNull() ?: 0)?.takeIf { it !in kids }?.let {
                     inbox.post("kakaowatch://tube/seen?v=$it")
                     visited += "seen"
                 }
             }
-        } else if (url.contains("&mix=1") && random.nextInt(10) < 6) {
+        } else if (url.contains("&mix=1") && !url.contains("&k=1") && random.nextInt(10) < 6) {
             val seed = Uri.parse(url.replace("#", "?")).getQueryParameter("v") ?: return
             val ids = recVideos.keys.shuffled(random).take(3 + random.nextInt(4)).filter { it != seed }
             inbox.post("kakaowatch://tube/recs?seed=$seed&ids=" + ids.joinToString(","))
@@ -651,14 +673,19 @@ class TubeJourneyTest {
                     val list = (row.queue as? Queue.Playlist)?.id ?: (row.queue as? Queue.Ids)?.list
                     check(phoneOpened == listOf(TubeLinks.watchUrl(v.id, row.queue == Queue.Mix, list = list)), "못 트는 동영상은 폰 유튜브로: $phoneOpened")
                 }
-                check(TubeState(context).lastPlayed()?.id == v.id, "튼 동영상이 '시청 기록' 맨 앞에")
+                if (v.madeForKids == false) check(TubeState(context).lastPlayed()?.id == v.id, "튼 동영상이 '시청 기록' 맨 앞에")
+                else {
+                    visited += "kids"
+                    check(TubeState(context).lastPlayed()?.id == playedBefore, "어린이용은 시청 기록에 남기지 않는다")
+                }
             }
             row is Row.ChannelItem -> check(a.nav.top == Page.Channel(row.channel.id, row.channel.title), "채널을 누르면 그 채널 (${a.nav.top})")
             row !is Row.Action -> Unit
             row.id == TubeRows.A_PLAY -> {
                 val video = (topBefore as Page.Menu).video
                 check(started?.getStringExtra(TubePlayerActivity.EXTRA_URL)?.replace(Regex("&n=\\d+"), "") == TubeLinks.playerUrl(base, video, Queue.Single, inApp = true), "메뉴의 재생 = 그 동영상 하나")
-                check(TubeState(context).lastPlayed()?.id == video.id, "튼 동영상이 '시청 기록' 맨 앞에")
+                if (video.madeForKids == false) check(TubeState(context).lastPlayed()?.id == video.id, "튼 동영상이 '시청 기록' 맨 앞에")
+                else check(TubeState(context).lastPlayed()?.id == playedBefore, "어린이용은 시청 기록에 남기지 않는다")
                 check(a.nav.top !is Page.Menu, "틀면 메뉴는 닫힌다")
             }
             row.id == TubeRows.A_PLAY_ALL -> {
@@ -772,6 +799,8 @@ class TubeJourneyTest {
                     check(ids.getOrNull(at) == video.id, "누른 Shorts 부터 ($ids, $at, ${video.id})")
                     check(ids.all { id -> everything[id]?.embeddable != false }, "워치에서 못 트는 Shorts 는 목록에서 뺀다")
                     check(ids.size <= TubeLinks.MAX_QUEUE && ids.distinct().size == ids.size, "Shorts 목록은 50개까지, 겹치지 않게")
+                    val kids = q.getQueryParameter("k").orEmpty().split(',').filter { it.isNotEmpty() }
+                    check(kids == ids.filter { everything[it]?.madeForKids != false }, "어린이용 Shorts 는 k= 로 ($kids)")
                 }
             }
         }

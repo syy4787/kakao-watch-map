@@ -49,6 +49,9 @@ class YouTubeDataLiveTest {
             assertTrue("인기 음악이 와야 한다", music.videos.size >= 5)
             assertTrue(music.videos.all { it.title.isNotBlank() && it.publishedAt != null && it.channelId != null })
             assertTrue("조회수가 대부분 있어야 한다", music.videos.count { it.views != null } * 2 >= music.videos.size)
+            // 어린이용인지(status.madeForKids — 정책 III.E.4.j)는 모든 동영상에 와야 한다 (모르면 앱이 따로 찾아보고 폰으로 보낸다)
+            line("어린이용 표시", "모름 ${music.videos.count { it.madeForKids == null }} · 어린이용 ${music.videos.count { it.madeForKids == true }} / ${music.videos.size}")
+            assertTrue("어린이용인지가 와야 한다", music.videos.all { it.madeForKids != null })
 
             // 2. 검색 — 검색 결과 글을 &amp; 로 바꿔 보내는지, 영상 정보는 그대로인지 원래 응답으로 확인
             val page = yt.search("Tom & Jerry", null)

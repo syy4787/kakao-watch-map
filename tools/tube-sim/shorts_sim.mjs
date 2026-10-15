@@ -1,6 +1,6 @@
 // 워치 Shorts 재생 화면 시뮬레이터 — web/tube/shorts.html 을 가짜 유튜브 플레이어(fake_yt.js)로 띄워 사용자가 겪을 경우를 돌리고
 // 매 단계 뒤 유튜브 규칙·단단함 불변식을 확인한다 (sim.mjs 의 Shorts 판).
-//   node shorts_sim.mjs [--only=이름] [--allvp=1] [--vp=280] [--retry=1] [--shots=폴더] [--page=경로] [--random=개수 --steps=개수 --seed=시작]
+//   node shorts_sim.mjs [--only=이름] [--allvp=1] [--vp=284] [--retry=1] [--shots=폴더] [--page=경로] [--random=개수 --steps=개수 --seed=시작]
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -28,7 +28,7 @@ function rng(seed) { let s = seed >>> 0 || 1; return () => { s ^= s << 13; s >>>
 
 // ---------- 페이지 띄우기 ----------
 async function openPage(browser, sc) {
-  const vw = sc.vw || 280, vh = sc.vh || vw;
+  const vw = sc.vw || 284, vh = sc.vh || vw;
   // 기본: 소리 자동 재생 됨 · 30초짜리 Shorts (시나리오가 바꿈)
   sc = { ...sc, cfg: { autoplay: true, duration: 30, ...(sc.cfg || {}) } };
   const ctx = await browser.newContext({ viewport: { width: vw, height: vh }, deviceScaleFactor: sc.dpr || 480 / vw, isMobile: true, hasTouch: true, locale: 'ko-KR' });
@@ -246,12 +246,16 @@ class Checker {
     if (s.life !== this.life) { this.life = s.life; this.navSeen = 0; this.seen = new Set(); }
     for (let k = this.navSeen; k < s.navs.length; k++) {
       const { u, hash } = s.navs[k];
-      const app = new URLSearchParams(String(hash || '').replace(/^#/, '')).get('app') === '1';
+      const hq = new URLSearchParams(String(hash || '').replace(/^#/, ''));
+      const app = hq.get('app') === '1';
+      // 어린이용(k=, 앱이 찾아봐 붙임)은 '본 Shorts'로 알리지 않는다 (유튜브 정책 III.E.4.j)
+      const kids = new Set((hq.get('k') || '').split(',').filter(Boolean));
       const kind = (NAV_FORMS.find(([re]) => re.test(u)) || [])[1];
       if (!kind) this.fail(step, '이상한 링크: ' + u, s);
       else if (kind === 'seen') {
         const id = u.split('v=')[1];
         if (!app) this.fail(step, '인터넷 앱인데 본 Shorts 알림: ' + u, s);
+        else if (kids.has(id)) this.fail(step, '어린이용 Shorts 를 알림: ' + id, s);
         else if (this.seen.has(id)) this.fail(step, '같은 Shorts 를 두 번 알림: ' + id, s);
         else if (!s.starts.includes(id)) this.fail(step, '재생되지 않은 Shorts 를 알림: ' + id, s);
         this.seen.add(id);
@@ -386,6 +390,11 @@ const scripted = [
     ['bezel'], ['wait', 1300], ['expect', s => s.active === 3 && s.player?.id === S(4) && s.player.state === 1 && s.pcount === 4, '세 칸 → 세 장 (플레이어는 늘 하나)'],
     ['expect', s => seenIds(s).join() === [S(1), S(2), S(3), S(4)].join(), '본 Shorts 마다 한 번 알림'],
     ['bezelUp'], ['wait', 1300], ['expect', s => s.active === 2 && s.player?.id === S(3) && s.player.state === 1 && seenIds(s).length === 4, '반대로 한 칸 = 앞 장 (다시 알리지 않음)'] ] },
+  // 어린이용(k=)은 틀되 '본 Shorts'로 알리지 않는다 (유튜브 정책 III.E.4.j — 추적 끄기)
+  { name: '어린이용_알리지않음', hash: `#ids=${L(3)}&k=${S(2)},${S(3)}&n=NOW&app=1`, steps: [
+    ['wait', 1300], ['expect', s => seenIds(s).join() === S(1), '처음 것은 알림'],
+    ['bezel'], ['wait', 1300], ['expect', s => s.active === 1 && s.player?.id === S(2) && s.player.state === 1 && seenIds(s).join() === S(1), '어린이용은 틀되 알리지 않음'],
+    ['bezel'], ['wait', 1300], ['expect', s => s.player?.id === S(3) && s.player.state === 1 && seenIds(s).length === 1, '목록의 어린이용 모두'] ] },
   { name: '베젤_빠르게세칸', hash: `#ids=${L(6)}&n=NOW`, steps: [
     ['wait', 1300], ['bezelBurst', 3], ['wait', 1500], ['expect', s => s.active === 3 && s.player?.id === S(4) && s.player.state === 1, '빠르게 세 칸도 세 장'] ] },
   { name: '살짝_제자리', hash: `#ids=${L(4)}&n=NOW`, steps: [
@@ -512,7 +521,7 @@ const scripted = [
     ['wait', 1300], ['resize', [280, 240]], ['wait', 1200], ['expect', s => s.active === 1 && Math.abs(s.H - s.vh) <= 1 && Math.abs(s.scrollY - s.H) <= 1, '높이가 바뀌면 장 크기·자리도 맞춤'],
     ['resize', [280, 280]], ['wait', 1200], ['expect', s => s.active === 1 && Math.abs(s.scrollY - s.H) <= 1 && s.player?.state === 1, '되돌려도 그대로 재생'] ] },
 ];
-const viewports = [{ tag: '280', vw: 280 }, { tag: '240', vw: 240 }, { tag: '300', vw: 300 }, { tag: '226', vw: 226 }];
+const viewports = [{ tag: '284', vw: 284 }, { tag: '240', vw: 240 }, { tag: '300', vw: 300 }, { tag: '226', vw: 226 }];
 
 async function runScenario(browser, sc, label) {
   const { ctx, page, errors, nav } = await openPage(browser, sc);
@@ -573,7 +582,7 @@ function randomScenario(seed, steps) {
   };
   const vp = pick(viewports);
   const app = r() < 0.5 ? '&app=1' : '';
-  const hashes = [`#ids=${L(n)}${app}`, `#ids=${L(3)}&i=1${app}`, `#ids=${S(7)},${S(8)}${app}`, `#ids=${L(5)}&i=4${app}`];
+  const hashes = [`#ids=${L(n)}${app}`, `#ids=${L(3)}&i=1${app}`, `#ids=${S(7)},${S(8)}${app}`, `#ids=${L(5)}&i=4${app}`, `#ids=${L(4)}&k=${S(2)},${S(4)}${app}`];
   const list = [];
   for (let k = 0; k < steps; k++) {
     const x = r();

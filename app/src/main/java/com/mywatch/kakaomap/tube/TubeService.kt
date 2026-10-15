@@ -59,6 +59,30 @@ class TubeState(context: Context) {
         prefs.edit { putString(K_PLAYED, PlayedHistory.encode(played(nowMs).filterNot { it.video.id == id })) }
     }
 
+    /** 새로 받아 확인할 기록 (어린이용인지 모르는 예전 기록 · 정보를 받은 지 7일이 지난 것) — [PlayedHistory.needsCheck] */
+    fun playedToCheck(nowMs: Long = System.currentTimeMillis()): List<String> = PlayedHistory.needsCheck(played(nowMs), nowMs)
+
+    /**
+     * 오늘(유튜브 한도 날 — 미국 서부 자정까지) 저절로 한 Shorts 검색 수. 검색은 하루 100번 한도라 저절로는 몇 번만 —
+     * 앱을 다시 열면 받아 둔 결과(메모리)가 사라져도 세는 것은 남는다
+     */
+    fun shortsSearchesToday(nowMs: Long = System.currentTimeMillis()): Int {
+        val day = quotaDay(Instant.ofEpochMilli(nowMs)).toString()
+        val saved = prefs.getString(K_SHORTS_SEARCHES, null)?.split(':') ?: return 0
+        return if (saved.getOrNull(0) == day) saved.getOrNull(1)?.toIntOrNull()?.coerceAtLeast(0) ?: 0 else 0
+    }
+
+    /** Shorts 검색을 한 번 했음 */
+    fun noteShortsSearch(nowMs: Long = System.currentTimeMillis()) = synchronized(LOCK) {
+        val day = quotaDay(Instant.ofEpochMilli(nowMs)).toString()
+        prefs.edit { putString(K_SHORTS_SEARCHES, day + ":" + (shortsSearchesToday(nowMs) + 1)) }
+    }
+
+    /** 확인한 결과로 기록을 고친다: 새 정보로, 없어진·어린이용은 지움 — [PlayedHistory.refresh] */
+    fun refreshPlayed(checked: Set<String>, fresh: Map<String, TubeVideo>, nowMs: Long = System.currentTimeMillis()) = synchronized(LOCK) {
+        prefs.edit { putString(K_PLAYED, PlayedHistory.encode(PlayedHistory.refresh(played(nowMs), checked, fresh, nowMs))) }
+    }
+
     /** 받아 둔 믹스 추천 (새것부터 · 7일 · 12개). 지난 것은 보여 주지 않을 뿐 아니라 저장소에서도 지운다 */
     fun harvests(nowMs: Long = System.currentTimeMillis()): List<Harvest> = synchronized(LOCK) {
         val all = MixHarvests.decode(prefs.getString(K_HARVESTS, null))
@@ -98,17 +122,17 @@ class TubeState(context: Context) {
 
     /**
      * 재생 화면이 보낸 것([TubeInbox])을 적용 — 믹스 추천(recs)은 받아 두고 본 Shorts(seen)는 표시한다. 그 밖은 버린다.
-     * 바뀐 것이 있으면 true
+     * 받아 두는 기간(7일·30일)은 보낸 때부터 센다. 바뀐 것이 있으면 true
      */
-    fun ingest(links: List<String>, nowMs: Long = System.currentTimeMillis()): Boolean = synchronized(LOCK) {
-        val mixes = links.mapNotNull { TubeLinks.recs(it, nowMs) }
-        val seen = links.mapNotNull { TubeLinks.seen(it) }
+    fun ingest(notes: List<TubeInbox.Note>, nowMs: Long = System.currentTimeMillis()): Boolean = synchronized(LOCK) {
+        val mixes = notes.mapNotNull { TubeLinks.recs(it.text, it.at.coerceAtMost(nowMs)) }
+        val seen = notes.mapNotNull { n -> TubeLinks.seen(n.text)?.let { it to n.at.coerceAtMost(nowMs) } }
         if (mixes.isNotEmpty()) {
             val list = mixes.fold(harvests(nowMs)) { acc, h -> MixHarvests.add(acc, h, nowMs) }
             prefs.edit { putString(K_HARVESTS, MixHarvests.encode(list)) }
         }
         if (seen.isNotEmpty()) {
-            val list = seen.fold(marks(K_SEEN_SHORTS, nowMs)) { acc, id -> Marks.add(acc, id, nowMs) }
+            val list = seen.fold(marks(K_SEEN_SHORTS, nowMs)) { acc, (id, at) -> Marks.add(acc, id, nowMs, at) }
             prefs.edit { putString(K_SEEN_SHORTS, Marks.encode(list)) }
         }
         mixes.isNotEmpty() || seen.isNotEmpty()
@@ -171,6 +195,7 @@ class TubeState(context: Context) {
         private const val K_DISMISSED_CHANNELS = "dismissed_channels"
         private const val K_SEEN_SHORTS = "seen_shorts"
         private const val K_AGREED = "terms_agreed"
+        private const val K_SHORTS_SEARCHES = "shorts_searches"
         /** 동의받는 처리방침의 판 — 1: 처음 · 2: 워치 안 기록으로 추천 (2026-10) */
         private const val TERMS_VERSION = 2
         /** 예전 버전의 '듣는 곳' (지금은 쓰지 않음 — 기록 지우기 때 정리) */

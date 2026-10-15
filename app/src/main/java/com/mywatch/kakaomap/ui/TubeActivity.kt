@@ -128,6 +128,8 @@ class TubeActivity : ComponentActivity() {
     private var deferred: Pair<Long, () -> Unit>? = null
     /** 지난번에 볼 때 로그인돼 있었는지 — 계정에서 앱 접근을 끊는 등으로 로그아웃되면 내 데이터·내 화면을 걷어 낸다 */
     private var wasSignedIn = false
+    /** 시청 기록 확인 ([checkHistory]) — 돌고 있으면 또 묻지 않는다 */
+    private var historyCheck: Job? = null
 
     /**
      * 타일에서 바로 들어온 한 번의 일([EXTRA_VOICE]·[EXTRA_MIX]). 폰에서 열면 잠깐 알려 주고 닫는다(워치 화면으로).
@@ -159,7 +161,13 @@ class TubeActivity : ComponentActivity() {
         setContentView(R.layout.activity_list)
         state = TubeState(this)
         ui = WearList(this, ::onRow, ::onLongRow, Look.TUBE)
-        backend = backendOverride ?: LiveBackend(applicationContext)
+        // 저절로 하는 Shorts 검색은 워치에 센다 (하루 몇 번까지 — 검색은 하루 100번 한도)
+        backend = (backendOverride ?: LiveBackend(applicationContext)).let { inner ->
+            object : TubeBackend {
+                override suspend fun fetch(feed: Feed, token: String?, source: com.mywatch.kakaomap.tube.TubeSource?) =
+                    inner.fetch(feed, token, source).also { if (feed == Feed.ShortsSearch && token == null) state.noteShortsSearch() }
+            }
+        }
         loader = TubeLoader(lifecycleScope, backend) { feed ->
             loader.takeMoreError(feed)?.let(::toast)
             if (!isFinishing) {
@@ -243,6 +251,7 @@ class TubeActivity : ComponentActivity() {
         if (!opening) show()
         // 손목을 내린 사이 Shorts 가 준비됐으면 이제 연다 (onStart 에선 아직 '보이는 중'이 아니라 여기서)
         maybeOpenShorts()
+        checkHistory()
         UpdateManager.prefsForListening(this).registerOnSharedPreferenceChangeListener(updateListener)
         UpdateWorker.onAppOpened(this)
         prewarm()
@@ -342,6 +351,7 @@ class TubeActivity : ComponentActivity() {
         val nowSignedIn = signedIn
         if (wasSignedIn && !nowSignedIn) {
             loader.clearMine()
+            feeds.reset()
             nav.dropMine()
         }
         wasSignedIn = nowSignedIn
@@ -408,7 +418,8 @@ class TubeActivity : ComponentActivity() {
             Page.SubsChannels -> TubeRows.subsChannels(this, loader.slot(Feed.SubsChannels))
             Page.Library -> TubeRows.library(
                 this, account(), state.played(now), recs = MixHarvests.order(state.harvests(now), Int.MAX_VALUE).size,
-                dismissed = state.dismissedVideos(now).size + state.dismissedChannels(now).size, update = hasUpdate(), now = now,
+                dismissed = state.dismissedVideos(now).size + state.dismissedChannels(now).size, seen = state.seenShorts(now).size,
+                searches = state.searches.size, update = hasUpdate(), now = now,
             )
             Page.History -> TubeRows.history(this, state.played(now), now)
             Page.Liked -> TubeRows.liked(this, loader.slot(Feed.Liked), now)
@@ -428,9 +439,8 @@ class TubeActivity : ComponentActivity() {
 
     private fun hasUpdate() = runCatching { UpdateManager.hasUpdate(this) }.getOrDefault(false)
 
-    /** 구독 화면의 Shorts·실시간 칩이 받은 것 (그 칩을 받는 중이 아니면 null) */
-    private fun subsSlot(p: Page.Subscriptions, chip: SubsChip) =
-        feedsOf(p).firstOrNull { (chip == SubsChip.SHORTS && it is Feed.SubsShorts) || (chip == SubsChip.LIVE && it is Feed.SubsLive) }?.let(loader::slot)
+    /** 구독 화면의 Shorts·실시간 칩이 보여 줄 것 (그 칩이 아니면 null — [TubeFeeds.subsChipSlot]) */
+    private fun subsSlot(p: Page.Subscriptions, chip: SubsChip) = feeds.subsChipSlot(p, chip)
 
     private fun spot(): Spot? {
         val lm = ui.list.layoutManager as? LinearLayoutManager ?: return null
@@ -587,10 +597,28 @@ class TubeActivity : ComponentActivity() {
     /** 폰 유튜브에서 그 동영상을 그 시각부터 (믹스·재생목록이었으면 그대로) — 열리면 기록하고 앞 화면으로 */
     private fun doHandoff(h: com.mywatch.kakaomap.tube.Handoff) {
         openOnPhone(TubeLinks.watchUrl(h.video.id, h.mix, h.startSec, h.list), R.string.tube_opened_on_phone) {
-            state.addPlayed(h.video.copy(title = h.video.title.ifBlank { getString(R.string.tube_handoff_untitled) }))
-            TubeTileService.refresh(this)
+            recordHandoff(h)
             // 그 사이 재생 화면에서 또 넘겨 왔으면 그것은 남겨 둔다 (다시 묻도록)
             if ((nav.top as? Page.Handoff)?.handoff == h) goBack()
+        }
+    }
+
+    /** 폰에서 이어 본 것을 기록 — 어린이용이 아닌 것만 (재생 화면의 링크로 온 것은 어린이용인지 몰라 찾아보고) */
+    private fun recordHandoff(h: com.mywatch.kakaomap.tube.Handoff) {
+        val video = h.video.copy(title = h.video.title.ifBlank { getString(R.string.tube_handoff_untitled) })
+        if (video.madeForKids != null) {
+            if (video.madeForKids == false) {
+                state.addPlayed(video)
+                TubeTileService.refresh(this)
+            }
+            return
+        }
+        lifecycleScope.launch {
+            val found = lookUp(video.id) ?: return@launch
+            if (found.madeForKids != false) return@launch
+            state.addPlayed(found)
+            TubeTileService.refresh(this@TubeActivity)
+            if (!opening && !isFinishing) render()
         }
     }
 
@@ -656,6 +684,7 @@ class TubeActivity : ComponentActivity() {
             id == TubeRows.A_CLEAR -> {
                 // 본 동영상·검색어·믹스 추천·관심 없음·본 Shorts — 받아 둔 추천 정보도 메모리에서 버린다
                 state.clear()
+                feeds.reset()
                 loader.forget("recs/", null)
                 loader.forget("watched/", null)
                 TubeTileService.refresh(this)
@@ -861,6 +890,7 @@ class TubeActivity : ComponentActivity() {
         login = LoginState.Starting
         // 다른 계정이었을 수 있다 — 받아 둔 내 데이터는 버리고 새로
         loader.clearMine()
+        feeds.reset()
         wasSignedIn = true
         loader.load(Feed.Account, force = true)
         if (nav.top == Page.Login) {
@@ -884,6 +914,7 @@ class TubeActivity : ComponentActivity() {
             if (!auth.revoke(tokens) || auth.hasPendingRevokes) TubeRevokeWorker.enqueue(app)
         }
         loader.clearMine()
+        feeds.reset()
         if (nav.top == Page.Account) nav.back()
         nav.dropMine()
         show()
@@ -978,6 +1009,11 @@ class TubeActivity : ComponentActivity() {
      */
     private fun play(req: PlayRequest) {
         if (opening) return
+        // 어린이용인지 모르면(예전 기록·정보를 다 못 받은 검색 결과) 먼저 찾아본다 — 정책 III.E.4.j: 앱에 넣어 트는 동영상마다 확인
+        if (req.video.madeForKids == null) {
+            checkThenPlay(req)
+            return
+        }
         val guard = PlayerGuard.of(this)
         // 재생 화면 프로세스가 네이티브로 죽었으면 시스템 기록에 남는다 — 다시 누르면 또 죽는 고리를 끊는다
         guard.checkSystemExits(this)
@@ -990,6 +1026,57 @@ class TubeActivity : ComponentActivity() {
             browser = WatchPlayer.available(this),
         )
         if (route == PlayRoute.PHONE) playOnPhone(req) else openOnWatch(req, route, crashed)
+    }
+
+    /** 어린이용인지 찾아본 뒤 틀기. 찾지 못하면(인터넷·한도·없어진 동영상) 워치에 넣어 틀지 않고 폰 유튜브로 */
+    private fun checkThenPlay(req: PlayRequest) {
+        opening = true
+        openingText = R.string.tube_opening
+        render()
+        val at = nav.top
+        lifecycleScope.launch {
+            val found = try {
+                lookUp(req.video.id)
+            } finally {
+                opening = false
+            }
+            whenWatching(at) {
+                // 찾아봐도 모르면 어린이용처럼 (다시 찾지 않게)
+                if (found != null) play(req.copy(video = found.copy(madeForKids = found.madeForKids ?: true))) else playOnPhone(req)
+            }
+        }
+    }
+
+    /** 동영상 하나의 정보 (어린이용인지까지 — 1단위). 못 받으면 null */
+    private suspend fun lookUp(id: String): TubeVideo? = try {
+        backend.fetch(Feed.Videos(listOf(id)), null, null).page.videos.firstOrNull { it.id == id }
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        ErrorLog.record("유튜브·동영상 확인", e)
+        null
+    }
+
+    /**
+     * 시청 기록 확인: 어린이용인지 모르는 예전 기록 · 정보를 받은 지 7일이 지난 것을 새로 받아 고친다 (없어진·어린이용은 지움 —
+     * 정책 III.E.4: 받은 정보는 30일 안에 새로 받거나 지우기, III.E.4.j). 확인할 것이 없으면 묻지 않는다. 실패하면 다음에 열 때
+     */
+    private fun checkHistory() {
+        if (historyCheck?.isActive == true || !state.agreed) return
+        val ids = state.playedToCheck().take(TubeLinks.MAX_QUEUE)
+        if (ids.isEmpty()) return
+        historyCheck = lifecycleScope.launch {
+            try {
+                val fresh = backend.fetch(Feed.Videos(ids), null, null).page.videos.associateBy { it.id }
+                state.refreshPlayed(ids.toSet(), fresh)
+                TubeTileService.refresh(this@TubeActivity)
+                if (!opening) render()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                ErrorLog.record("유튜브·기록 확인", e)
+            }
+        }
     }
 
     private fun openOnWatch(req: PlayRequest, route: PlayRoute, crashed: Boolean) {
@@ -1073,21 +1160,20 @@ class TubeActivity : ComponentActivity() {
         }
         if (left || asleep || !lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) return
         val (list, load) = feeds.shorts(System.currentTimeMillis())
-        // 워치에서 틀 수 있는 것부터 — 하나도 없으면 저절로 열지 않는다 (폰이 저절로 열리지 않게, 누르면 폰으로)
+        // 다 받았거나 충분히 모였을 때 — 일부만 받은 목록으로 열면 재생 화면의 목록이 그대로라 늦게 온 것(내 채널 Shorts 등)이 빠진다
+        if (load.loading && list.count { it.embeddable } < TubeFeeds.SHORTS_ENOUGH) return
+        // 워치에서 틀 수 있는 것부터 — 하나도 없으면 저절로 열지 않는다 (누르면 폰으로)
         val start = firstPlayable(list)
-        if (start == null) {
-            if (list.isNotEmpty() && !load.loading) shortsAutoAt = 0L
-            return
-        }
         shortsAutoAt = 0L
-        playShorts(list, start)
+        if (start != null) playShorts(list, start, auto = true)
     }
 
     /**
      * Shorts 재생 화면(web/tube/shorts.html, 한 장씩 넘기기)으로 [list] 를 [index] 번째부터 — 앱 안 → 워치 인터넷 앱 → 폰 유튜브의 Shorts
      * ([TubePlay.route] 와 같은 차례). 재생 화면에 닿지 못하면 알리고 폰으로
      */
-    private fun playShorts(list: List<TubeVideo>, index: Int) {
+    /** [auto] = 사용자가 고르지 않고 Shorts 탭이 저절로 연 것 — 워치에서 못 열면 폰을 열지 않고 그만둔다 (폰이 저절로 열리지 않게) */
+    private fun playShorts(list: List<TubeVideo>, index: Int, auto: Boolean = false) {
         if (opening || list.isEmpty()) return
         val video = list[index.coerceIn(0, list.lastIndex)]
         val guard = PlayerGuard.of(this)
@@ -1098,7 +1184,7 @@ class TubeActivity : ComponentActivity() {
         )
         val base = WatchPlayer.pageBase()
         if (route == PlayRoute.PHONE || base == null) {
-            shortsOnPhone(video)
+            if (!auto) shortsOnPhone(video)
             return
         }
         // 워치에서 못 트는 것은 빼고 (고른 것은 그대로 — 막혀 있으면 재생 화면이 알리고 넘긴다)
@@ -1114,19 +1200,22 @@ class TubeActivity : ComponentActivity() {
             } finally {
                 opening = false
             }
-            whenWatching(page) { startShorts(playable, at, route, crashed, base, reachable) }
+            whenWatching(page) { startShorts(playable, at, route, crashed, base, reachable, auto) }
         }
     }
 
-    private fun startShorts(list: List<TubeVideo>, at: Int, route: PlayRoute, crashed: Boolean, base: String, reachable: Boolean) {
+    private fun startShorts(list: List<TubeVideo>, at: Int, route: PlayRoute, crashed: Boolean, base: String, reachable: Boolean, auto: Boolean) {
         val video = list[at]
         if (!reachable) {
             render()
+            if (auto) return   // 저절로 연 것 — 폰은 열지 않는다 (격자에서 고르면 그때)
             toast(getString(R.string.tube_watch_unreachable))
             shortsOnPhone(video)
             return
         }
-        val url = TubeLinks.shortsUrl(base, list.map { it.id }, at, nonce = System.currentTimeMillis(), inApp = route == PlayRoute.IN_APP)
+        // 어린이용(또는 모름)은 재생 화면이 '본 Shorts'로 알리지 않게 (정책 III.E.4.j)
+        val kids = list.filter { it.madeForKids != false }.mapTo(HashSet()) { it.id }
+        val url = TubeLinks.shortsUrl(base, list.map { it.id }, at, nonce = System.currentTimeMillis(), inApp = route == PlayRoute.IN_APP, kids = kids)
         val link = if (route == PlayRoute.IN_APP) TubePlayerActivity.intent(this, url) else WatchPlayer.browserIntent(this, url)
         val ok = link != null && try {
             startActivity(link)
@@ -1140,19 +1229,19 @@ class TubeActivity : ComponentActivity() {
         }
         if (!ok) {
             render()
-            shortsOnPhone(video)
+            if (!auto) shortsOnPhone(video)
             return
         }
-        // 인터넷 앱의 재생 화면은 본 Shorts 를 알려 주지 않는다 — 처음 것만이라도
+        // 인터넷 앱의 재생 화면은 본 Shorts 를 알려 주지 않는다 — 처음 것만이라도 (어린이용은 빼고)
         if (route == PlayRoute.BROWSER) {
-            state.markSeen(video.id)
+            if (video.madeForKids == false) state.markSeen(video.id)
             if (crashed) toast(getString(R.string.tube_engine_browser))
         }
         render()
     }
 
     private fun shortsOnPhone(video: TubeVideo) =
-        openOnPhone(TubeLinks.phoneShortsUrl(video.id), R.string.tube_opened_on_phone) { state.markSeen(video.id) }
+        openOnPhone(TubeLinks.phoneShortsUrl(video.id), R.string.tube_opened_on_phone) { if (video.madeForKids == false) state.markSeen(video.id) }
 
     /**
      * 재생 화면에서 채널 이름을 누름: 그 동영상의 채널 화면 — 워치 기록에 그 동영상이 있으면 바로, 없으면 채널을 찾아서 (1단위).
@@ -1201,10 +1290,15 @@ class TubeActivity : ComponentActivity() {
         openOnPhone(TubeLinks.watchUrl(req.video.id, req.queue == Queue.Mix, list = list), R.string.tube_opened_on_phone) { played(req.video) }
     }
 
-    /** 틀었음: 기록하고, 메뉴에서 틀었으면 메뉴는 닫는다 (재생 화면에서 돌아오면 목록의 보던 자리가 보이게) */
+    /**
+     * 틀었음: 기록하고, 메뉴에서 틀었으면 메뉴는 닫는다 (재생 화면에서 돌아오면 목록의 보던 자리가 보이게).
+     * 어린이용(또는 모름)은 기록하지 않는다 — 정책 III.E.4.j (추적 끄기)
+     */
     private fun played(video: TubeVideo) {
-        state.addPlayed(video)
-        TubeTileService.refresh(this)
+        if (video.madeForKids == false) {
+            state.addPlayed(video)
+            TubeTileService.refresh(this)
+        }
         if (nav.top is Page.Menu) closeMenu() else render()
     }
 

@@ -141,6 +141,9 @@ object TubeHome {
         return seeds
     }
 
+    /** '믹스' 칩: 기록에서 나오는 씨앗([mixSeeds] 와 같은 규칙)이 모자라 인기 음악으로 채워야 하는지 */
+    fun needsMusicTopUp(ctx: HomeContext): Boolean = mixSeeds(ctx, emptyList()).size < MIX_MIN_FROM_HISTORY
+
     /** '전체'에 새 동영상을 섞을 채널: 이 앱에서 본 채널(최근 것부터) 중 구독·'채널 추천 안 함' 아닌 것 [max] 개 */
     fun watchedChannels(ctx: HomeContext, max: Int = WATCHED_CHANNELS): List<String> =
         ctx.history.mapNotNull { it.video.channelId }.distinct()

@@ -30,6 +30,11 @@ data class TubeVideo(
     val categoryId: String? = null,
     /** 세로 동영상(높이 ≥ 너비). 모르면 null — 생방송은 크기를 알려 주지 않는다 */
     val portrait: Boolean? = null,
+    /**
+     * 어린이용(Made for Kids, videos.list status.madeForKids). 모르면 null — 유튜브 정책 III.E.4.j: 앱에 넣어 트는 동영상마다 찾아보고
+     * 어린이용이면 추적을 끈다 (시청 기록·믹스 추천·본 Shorts 에 남기지 않음). 모르면 어린이용처럼 다룬다
+     */
+    val madeForKids: Boolean? = null,
 ) {
     /** Shorts 로 볼 것: 세로 · [SHORT_MAX_SEC] 초 이하 · 생방송 아님 (유튜브가 'Shorts' 표시를 따로 주지 않아 모양으로 가린다) */
     val isShort: Boolean get() = portrait == true && !live && durationSec != null && durationSec <= SHORT_MAX_SEC
@@ -284,6 +289,8 @@ object TubeLinks {
         }
         takeChars(video.title.trim(), MAX_TITLE).takeIf { it.isNotEmpty() }?.let { append("&t=").append(encode(it)) }
         takeChars(video.channel.trim(), MAX_CHANNEL).takeIf { it.isNotEmpty() }?.let { append("&c=").append(encode(it)) }
+        // 어린이용(또는 모름): 재생 화면이 이 동영상의 믹스 추천을 앱에 알리지 않는다 (정책 III.E.4.j — 추적 끄기)
+        if (video.madeForKids != false) append("&k=1")
         if (nonce != null) append("&n=").append(nonce)
         if (inApp) append("&app=1")
     }
@@ -296,13 +303,16 @@ object TubeLinks {
      * 이상한 번호·같은 번호는 빼고 [start] 는 다듬은 목록에서 다시 센다 (이상하면 처음부터).
      * 고른 것이 50개 뒤에 있으면 그 자리부터 50개 — 고른 Shorts 가 빠지지 않게
      */
-    fun shortsUrl(base: String, ids: List<String>, start: Int = 0, nonce: Long? = null, inApp: Boolean = false): String {
+    fun shortsUrl(base: String, ids: List<String>, start: Int = 0, nonce: Long? = null, inApp: Boolean = false, kids: Set<String> = emptySet()): String {
         val clean = ids.filter(::isId).distinct()
         val at = ids.getOrNull(start)?.let(clean::indexOf)?.takeIf { it >= 0 } ?: 0
         val from = if (at < MAX_QUEUE) 0 else at
+        val list = clean.drop(from).take(MAX_QUEUE)
         return buildString {
-            append(base).append("shorts.html#ids=").append(clean.drop(from).take(MAX_QUEUE).joinToString(","))
+            append(base).append("shorts.html#ids=").append(list.joinToString(","))
             append("&i=").append(at - from)
+            // 어린이용(또는 모름)인 것 — 재생 화면이 '본 Shorts'로 알리지 않는다 (정책 III.E.4.j)
+            list.filter { it in kids }.takeIf { it.isNotEmpty() }?.let { append("&k=").append(it.joinToString(",")) }
             if (nonce != null) append("&n=").append(nonce)
             if (inApp) append("&app=1")
         }
@@ -452,7 +462,8 @@ object SearchHistory {
 }
 
 /** 워치에서 튼 곡 */
-data class Played(val video: TubeVideo, val atMs: Long)
+/** 본 동영상: [atMs] 본 때(차례·30일), [fetchedMs] 그 정보(제목 등)를 유튜브에서 받은 때 — 30일 안에 새로 받거나 지운다 */
+data class Played(val video: TubeVideo, val atMs: Long, val fetchedMs: Long = atMs)
 
 /**
  * 최근 본 영상 — 유튜브 API 로 받은 정보는 30일까지만 보관할 수 있어서 그보다 오래된 건 지운다.
@@ -463,10 +474,41 @@ object PlayedHistory {
     const val MAX = 30
     const val KEEP_MS = 30L * 24 * 3_600_000
 
-    fun add(list: List<Played>, video: TubeVideo, nowMs: Long): List<Played> =
-        prune(listOf(Played(video, nowMs)) + list.filterNot { it.video.id == video.id }, nowMs).take(MAX)
+    /** 정보를 받은 지 이만큼 지나면 새로 받는다 (30일보다 훨씬 전에 — 앱을 며칠 안 열어도 넘지 않게) */
+    const val REFRESH_MS = 7L * 24 * 3_600_000
 
-    fun prune(list: List<Played>, nowMs: Long): List<Played> = list.filter { nowMs - it.atMs <= KEEP_MS }
+    /**
+     * [video] 를 맨 앞에. 이미 있던 것이면 정보를 받은 때는 그대로 둔다 — 남아 있던 정보로 다시 튼 것(타일 믹스·기록에서 틀기)일 수 있어
+     * 30일을 넘기지 않게 (새로 받은 정보라도 일찍 새로 받을 뿐). 어린이용은 남기지 않는다 (있던 것도 지움)
+     */
+    fun add(list: List<Played>, video: TubeVideo, nowMs: Long): List<Played> {
+        val rest = list.filterNot { it.video.id == video.id }
+        if (video.madeForKids == true) return prune(rest, nowMs)
+        val fetched = list.firstOrNull { it.video.id == video.id }?.fetchedMs?.coerceAtMost(nowMs) ?: nowMs
+        return prune(listOf(Played(video, nowMs, fetched)) + rest, nowMs).take(MAX)
+    }
+
+    /** 본 지 30일 · 정보를 받은 지 30일이 지난 것과 어린이용은 뺀다 */
+    fun prune(list: List<Played>, nowMs: Long): List<Played> =
+        list.filter { nowMs - it.atMs <= KEEP_MS && nowMs - it.fetchedMs <= KEEP_MS && it.video.madeForKids != true }
+
+    /** 새로 받을 동영상 번호: 어린이용인지 모르는 것(예전 기록) · 정보를 받은 지 [REFRESH_MS] 가 지난 것 (기록 차례대로) */
+    fun needsCheck(list: List<Played>, nowMs: Long): List<String> =
+        list.filter { it.video.madeForKids == null || nowMs - it.fetchedMs > REFRESH_MS }.map { it.video.id }
+
+    /**
+     * [checked] 를 새로 받은 결과([fresh])로: 정보를 바꾸고 받은 때 = 지금 (본 때·차례는 그대로). 받지 못한 것(지워짐·비공개)과
+     * 어린이용은 지운다. 물어보지 않은 것은 그대로
+     */
+    fun refresh(list: List<Played>, checked: Set<String>, fresh: Map<String, TubeVideo>, nowMs: Long): List<Played> =
+        prune(
+            list.mapNotNull { p ->
+                if (p.video.id !in checked) return@mapNotNull p
+                val f = fresh[p.video.id] ?: return@mapNotNull null
+                Played(f, p.atMs, nowMs)
+            },
+            nowMs,
+        )
 
     fun encode(list: List<Played>): String = JSONArray().apply {
         list.forEach { p ->
@@ -480,7 +522,9 @@ object PlayedHistory {
                 if (!p.video.embeddable) put("emb", false)
                 p.video.categoryId?.let { put("cat", it) }
                 p.video.portrait?.let { put("por", it) }
+                p.video.madeForKids?.let { put("mfk", it) }
                 put("at", p.atMs)
+                put("f", p.fetchedMs)
             })
         }
     }.toString()
@@ -510,8 +554,12 @@ object PlayedHistory {
                     // 예전 기록엔 없다 (모름). 참·거짓이 아닌 값은 모르는 것으로
                     categoryId = o.optString("cat").takeIf(TubeLinks::isCategoryId),
                     portrait = o.opt("por") as? Boolean,
+                    // 예전 기록엔 없다 — 모름 (새로 받아 확인)
+                    madeForKids = o.opt("mfk") as? Boolean,
                 ),
                 o.optLong("at"),
+                // 예전 기록: 받은 때 = 본 때
+                if (o.has("f")) o.optLong("f") else o.optLong("at"),
             )
         }
     }

@@ -13,6 +13,7 @@
 
         <ImageView
             style="@style/TubeTabIcon"
+            android:importantForAccessibility="no"
             android:src="@drawable/ic_home" />
 
         <TextView
@@ -26,6 +27,7 @@
 
         <ImageView
             style="@style/TubeTabIcon"
+            android:importantForAccessibility="no"
             android:src="@drawable/ic_shorts" />
 
         <TextView
@@ -39,6 +41,7 @@
 
         <ImageView
             style="@style/TubeTabIcon"
+            android:importantForAccessibility="no"
             android:src="@drawable/ic_subscriptions" />
 
         <TextView
@@ -52,6 +55,7 @@
 
         <ImageView
             style="@style/TubeTabIcon"
+            android:importantForAccessibility="no"
             android:src="@drawable/ic_person" />
 
         <TextView

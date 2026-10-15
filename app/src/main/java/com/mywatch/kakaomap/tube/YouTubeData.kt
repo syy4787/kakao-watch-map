@@ -401,7 +401,7 @@ class YouTubeData(
         private const val THUMBS = "thumbnails(default/url,medium/url,high/url)"
         const val VIDEO_PARTS = "snippet,contentDetails,statistics,status,player"
         const val VIDEO_FIELDS = "nextPageToken,items(id,snippet(publishedAt,channelId,title,channelTitle,liveBroadcastContent,categoryId)," +
-            "contentDetails(duration,contentRating/ytRating),statistics/viewCount,status/embeddable,player(embedWidth,embedHeight))"
+            "contentDetails(duration,contentRating/ytRating),statistics/viewCount,status(embeddable,madeForKids),player(embedWidth,embedHeight))"
         /**
          * 동영상 정보를 물을 때 함께 보내는 플레이어 높이 — 유튜브는 maxHeight(또는 maxWidth)를 보낸 요청에만
          * player.embedWidth/embedHeight 를 준다(문서). 그 비율로 세로(Shorts)를 가린다. 한도는 그대로 1단위

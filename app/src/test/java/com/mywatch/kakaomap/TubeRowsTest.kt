@@ -390,7 +390,7 @@ class TubeRowsTest {
         assertEquals("약관·개인정보", (later.first() as Row.Header).title)
         assertEquals("이미 동의했으면 볼 것만", listOf(TubeRows.A_YT_TERMS, TubeRows.A_PRIVACY), actions(later))
         assertEquals("처리방침 주소를 모르면(로컬 빌드) 약관만", listOf(TubeRows.A_YT_TERMS), actions(TubeRows.terms(c, agreed = true, privacy = false)))
-        assertTrue("'나'에서 언제든", actions(TubeRows.library(c, Account(configured = true, signedIn = false), emptyList(), 0, 0, false, now)).contains(TubeRows.A_TERMS))
+        assertTrue("'나'에서 언제든", actions(TubeRows.library(c, Account(configured = true, signedIn = false), emptyList(), 0, 0, update = false, now = now)).contains(TubeRows.A_TERMS))
     }
 
     @Test
@@ -405,5 +405,20 @@ class TubeRowsTest {
         val inn = TubeRows.library(c, Account(configured = true, signedIn = true, channel = channel), emptyList(), 0, 0, update = true, now = now)
         assertEquals("1theK (원더케이)", (inn[0] as Row.Header).title)
         assertEquals(listOf(TubeRows.A_UPDATE, TubeRows.A_MY_PLAYLISTS, TubeRows.A_LIKED, TubeRows.A_ACCOUNT, TubeRows.A_TERMS), actions(inn))
+    }
+
+    /**
+     * 리뷰에서 찾음: Shorts 만 본 사람은 '본 Shorts'가 30일 남는데 '기록 지우기'가 보이지 않았다 (처리방침은 지울 수 있다고 함) →
+     * 본 Shorts·검색어만 있어도 지울 수 있게, 무엇을 얼마나 두는지에 본 Shorts 도. 지워도 유튜브 계정 쪽은 그대로라고 (정책 III.E.4.g)
+     */
+    @Test
+    fun clearingIsOfferedForSeenShortsAndSearchesToo() {
+        val out = TubeRows.library(c, Account(configured = true, signedIn = false), emptyList(), recs = 0, dismissed = 0, seen = 3, searches = 0, update = false, now = now)
+        assertTrue("본 Shorts 만 있어도", actions(out).contains(TubeRows.A_CLEAR))
+        val info = out.filterIsInstance<Row.Note>().map { it.text }
+        assertTrue(info.toString(), info.any { it.contains("본 Shorts 3개") })
+        assertTrue("지워도 유튜브 계정 쪽은 그대로", info.any { it.contains("유튜브 계정") })
+        assertTrue("검색어만 있어도", actions(TubeRows.library(c, Account(configured = true, signedIn = false), emptyList(), 0, 0, seen = 0, searches = 2, update = false, now = now)).contains(TubeRows.A_CLEAR))
+        assertFalse("아무것도 없으면 없다", actions(TubeRows.library(c, Account(configured = true, signedIn = false), emptyList(), 0, 0, update = false, now = now)).contains(TubeRows.A_CLEAR))
     }
 }

@@ -2,6 +2,7 @@ package com.mywatch.kakaomap
 
 import com.mywatch.kakaomap.tube.Harvest
 import com.mywatch.kakaomap.tube.MixHarvests
+import com.mywatch.kakaomap.tube.Played
 import com.mywatch.kakaomap.tube.PlayedHistory
 import com.mywatch.kakaomap.tube.Queue
 import com.mywatch.kakaomap.tube.SearchHistory
@@ -80,14 +81,14 @@ class TubeTest {
     @Test
     fun watchPlayerLinkCarriesTheSongAfterTheHashSoItIsNeverSentToTheServer() {
         val base = "https://syy4787.github.io/kakao-watch-map/tube/"
-        val song = TubeVideo("BzYnNdJhZQw", "밤편지 & Night", "IU 아이유")
+        val song = TubeVideo("BzYnNdJhZQw", "밤편지 & Night", "IU 아이유", madeForKids = false)
         assertEquals(
             base + "#v=BzYnNdJhZQw&mix=1&t=%EB%B0%A4%ED%8E%B8%EC%A7%80%20%26%20Night&c=IU%20%EC%95%84%EC%9D%B4%EC%9C%A0",
             TubeLinks.playerUrl(base, song, Queue.Mix),
         )
         assertEquals(base + "#v=BzYnNdJhZQw&t=%EB%B0%A4%ED%8E%B8%EC%A7%80%20%26%20Night&c=IU%20%EC%95%84%EC%9D%B4%EC%9C%A0", TubeLinks.playerUrl(base, song, Queue.Single))
         // 제목·채널을 모르면 빼고, 너무 긴 제목은 잘라 주소가 끝없이 길어지지 않게
-        assertEquals(base + "#v=BzYnNdJhZQw&mix=1", TubeLinks.playerUrl(base, TubeVideo("BzYnNdJhZQw", " ", ""), Queue.Mix))
+        assertEquals(base + "#v=BzYnNdJhZQw&mix=1", TubeLinks.playerUrl(base, TubeVideo("BzYnNdJhZQw", " ", "", madeForKids = false), Queue.Mix))
         val long = TubeLinks.playerUrl(base, TubeVideo("BzYnNdJhZQw", "가".repeat(500), "나".repeat(500)), Queue.Mix)
         assertTrue(long.length < 1_500)
         assertFalse(long.substringBefore('#').contains("BzYnNdJhZQw"))
@@ -98,7 +99,31 @@ class TubeTest {
         assertEquals("가".repeat(99) + "🎵", t)
         assertEquals("📻".repeat(40), c)
         // 같은 곡을 다시 골라도 주소가 달라지게 (같은 탭에서 다시 틀도록)
-        assertEquals(base + "#v=BzYnNdJhZQw&mix=1&n=1700000000000", TubeLinks.playerUrl(base, TubeVideo("BzYnNdJhZQw", "", ""), Queue.Mix, nonce = 1_700_000_000_000))
+        assertEquals(base + "#v=BzYnNdJhZQw&mix=1&n=1700000000000", TubeLinks.playerUrl(base, TubeVideo("BzYnNdJhZQw", "", "", madeForKids = false), Queue.Mix, nonce = 1_700_000_000_000))
+    }
+
+    /**
+     * 유튜브 정책 III.E.4.j: 어린이용(Made for Kids)으로 지정된 동영상은 추적을 끈다 — 재생 화면에 k=1 을 붙여
+     * 그 동영상의 믹스 추천을 앱에 알리지 않게. 어린이용인지 모르면(찾아보지 못함) 어린이용처럼
+     */
+    @Test
+    fun madeForKidsVideosTellThePlayerPageNotToReport() {
+        val base = "https://syy4787.github.io/kakao-watch-map/tube/"
+        assertEquals(
+            base + "#v=BzYnNdJhZQw&mix=1&t=%EB%8F%99%EC%9A%94&k=1&n=5&app=1",
+            TubeLinks.playerUrl(base, TubeVideo("BzYnNdJhZQw", "동요", "", madeForKids = true), Queue.Mix, nonce = 5, inApp = true),
+        )
+        assertTrue("모르면 어린이용처럼", TubeLinks.playerUrl(base, TubeVideo("BzYnNdJhZQw", "", ""), Queue.Mix).endsWith("&k=1"))
+        assertFalse(TubeLinks.playerUrl(base, TubeVideo("BzYnNdJhZQw", "", "", madeForKids = false), Queue.Mix).contains("k="))
+        // Shorts: 어린이용(또는 모름)인 것의 번호를 k= 로 — 그것들은 '본 Shorts'로 알리지 않는다
+        val a = "BzYnNdJhZQw"
+        val b = "pSUydWEqKwE"
+        val c = "jfKfPfyJRdk"
+        assertEquals(
+            base + "shorts.html#ids=$a,$b,$c&i=0&k=$a,$c&n=7&app=1",
+            TubeLinks.shortsUrl(base, listOf(a, b, c), nonce = 7, inApp = true, kids = setOf(c, a, "zzzzzzzzzzz")),
+        )
+        assertEquals("목록에서 빠진 것은 k= 에도 없다", base + "shorts.html#ids=$b&i=0", TubeLinks.shortsUrl(base, listOf("bad", b), kids = setOf("bad")))
     }
 
     @Test
@@ -390,6 +415,60 @@ class TubeTest {
         assertTrue(SearchHistory.clean("가".repeat(300)).length <= SearchHistory.MAX_LENGTH)
         assertEquals(h, SearchHistory.decode(SearchHistory.encode(h)))
         assertEquals(emptyList<String>(), SearchHistory.decode(null))
+    }
+
+    /**
+     * 유튜브 정책 III.E.4: 받은 정보는 30일까지 — 기록에 남은 정보로 다시 틀어도(타일 믹스·기록에서 틀기) 정보를 받은 때는 처음 그대로라
+     * 30일 안에 새로 받거나 지운다. III.E.4.j: 어린이용 동영상은 기록하지 않는다
+     */
+    @Test
+    fun historyRemembersWhenTheInfoWasFetchedAndNeverKeepsKidsVideos() {
+        val day = 24 * 3_600_000L
+        val now = 100 * day
+        val a = TubeVideo("BzYnNdJhZQw", "밤편지", "1theK", 294, madeForKids = false)
+        val kids = TubeVideo("pSUydWEqKwE", "동요", "핑크퐁", 120, madeForKids = true)
+        var list = PlayedHistory.add(emptyList(), a, now - 20 * day)
+        list = PlayedHistory.add(list, kids, now - 19 * day)
+        assertEquals("어린이용은 남기지 않는다", listOf(a), list.map { it.video })
+        list = PlayedHistory.add(list, a, now)
+        assertEquals(now, list.single().atMs)
+        assertEquals("다시 틀어도 정보를 받은 때는 그대로", now - 20 * day, list.single().fetchedMs)
+        assertEquals("정보를 받은 지 30일이 넘으면 지운다", emptyList<Any>(), PlayedHistory.prune(list, now + 11 * day))
+        // 저장했다 읽어도 그대로 (어린이용이 아님·받은 때)
+        val back = PlayedHistory.decode(PlayedHistory.encode(list), now)
+        assertEquals(list, back)
+        assertEquals(false, back.single().video.madeForKids)
+        // 예전 기록: 받은 때 = 본 때, 어린이용인지 모름
+        val old = PlayedHistory.decode("""[{"id":"BzYnNdJhZQw","title":"t","channel":"c","at":1000}]""", 1_000).single()
+        assertEquals(1_000L, old.fetchedMs)
+        assertNull(old.video.madeForKids)
+    }
+
+    /** 새로 받을 것: 어린이용인지 모르는 것 · 정보를 받은 지 7일이 넘은 것. 받으면 정보를 바꾸고(본 때·차례는 그대로) 없어진·어린이용은 지운다 */
+    @Test
+    fun refreshingTheHistoryUpdatesInfoAndDropsGoneOrKidsVideos() {
+        val day = 24 * 3_600_000L
+        val now = 100 * day
+        val a = TubeVideo("BzYnNdJhZQw", "밤편지", "1theK", 294, madeForKids = false)
+        val unknown = TubeVideo("pSUydWEqKwE", "예전 기록", "누군가", 100)
+        val fresh = TubeVideo("jfKfPfyJRdk", "방금", "누군가", 100, madeForKids = false)
+        val nowKids = TubeVideo("aaaaaaaaaaa", "어린이용으로 바뀜", "누군가", 100, madeForKids = false)
+        val list = listOf(
+            Played(fresh, now, now), Played(a, now - day, now - 10 * day), Played(unknown, now - 2 * day, now - 2 * day),
+            Played(nowKids, now - 3 * day, now - 8 * day),
+        )
+        assertEquals(listOf(a.id, unknown.id, nowKids.id), PlayedHistory.needsCheck(list, now))
+        val answers = mapOf(
+            a.id to a.copy(title = "밤편지 (새 제목)"),
+            nowKids.id to nowKids.copy(madeForKids = true),
+        )   // unknown 은 없어짐(지워짐·비공개)
+        val after = PlayedHistory.refresh(list, checked = setOf(a.id, unknown.id, nowKids.id), fresh = answers, nowMs = now)
+        assertEquals(listOf(fresh.id, a.id), after.map { it.video.id })
+        assertEquals("밤편지 (새 제목)", after[1].video.title)
+        assertEquals("본 때는 그대로", now - day, after[1].atMs)
+        assertEquals("받은 때는 지금", now, after[1].fetchedMs)
+        assertEquals("물어본 것만 바꾼다", Played(fresh, now, now), after[0])
+        assertEquals(emptyList<String>(), PlayedHistory.needsCheck(after, now))
     }
 
     @Test

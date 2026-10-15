@@ -80,7 +80,7 @@ object TubeParsers {
 
     /**
      * videos.list(part=snippet,contentDetails,statistics,status,player) → 번호별 동영상: 제목·채널·길이·조회수·올린 때·틀 수 있는지·
-     * 분류·세로인지. 아직 시작 안 한 생방송·예정 영상은 뺀다
+     * 분류·세로인지·어린이용인지. 아직 시작 안 한 생방송·예정 영상은 뺀다
      */
     fun videoDetails(json: JSONObject): Map<String, TubeVideo> {
         val out = LinkedHashMap<String, TubeVideo>()
@@ -104,6 +104,8 @@ object TubeParsers {
                 embeddable = item.optJSONObject("status")?.optBoolean("embeddable", true) != false && !ageLimited,
                 categoryId = sn.optString("categoryId").takeIf(TubeLinks::isCategoryId),
                 portrait = portrait(item.optJSONObject("player")),
+                // 참·거짓이 아니면 모름 (어린이용처럼 다룬다)
+                madeForKids = item.optJSONObject("status")?.opt("madeForKids") as? Boolean,
             )
         }
         return out

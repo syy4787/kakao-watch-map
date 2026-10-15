@@ -412,6 +412,20 @@ class TubeNavTest {
         assertEquals(2, l.slot(g).page?.videos?.size)
     }
 
+    /**
+     * 리뷰에서 찾음: '본 채널'·Shorts 후보의 열쇠가 채널 차례에 따라 달라, 이미 있던 채널의 동영상을 봐 차례만 바뀌어도 같은 것을 또 받았다
+     * (약 18단위씩) → 채널 묶음이 같으면 같은 열쇠
+     */
+    @Test
+    fun theSameChannelsInAnotherOrderAreTheSameFeed() {
+        val a = "UCaaaaaaaaaaaaaaaaaaaaaa"
+        val b = "UCbbbbbbbbbbbbbbbbbbbbbb"
+        assertEquals(Feed.Watched(listOf(a, b)).key, Feed.Watched(listOf(b, a)).key)
+        assertEquals(Feed.ShortsPool(listOf(a, b)).key, Feed.ShortsPool(listOf(b, a)).key)
+        assertEquals(Feed.Watched(listOf(a, b)), Feed.Watched(listOf(b, a)))
+        assertFalse(Feed.Watched(listOf(a)).key == Feed.Watched(listOf(a, b)).key)
+    }
+
     /** 믹스 추천이 새로 오면 홈이 받을 거리(Recs)의 열쇠가 바뀐다 — 예전 것은 지우고 받는 중이던 것도 버린다 (메모리) */
     @Test
     fun forgettingOldFeedsDropsTheirSlotsAndRunningJobs() {
