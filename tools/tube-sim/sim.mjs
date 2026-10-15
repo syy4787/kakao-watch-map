@@ -41,7 +41,13 @@ async function openPage(browser, sc) {
     if (cfg.pageReadyMs) window.__kwReadyMs = cfg.pageReadyMs;
     if (cfg.stallMs) window.__kwStallMs = cfg.stallMs;
     window.__navs = [];
-    window.__kwNavigate = u => window.__navs.push(u);
+    // 링크마다 그때 페이지가 연 주소(#…) — 페이지의 hashchange 처리보다 먼저 바꿔 둔다 (이 스크립트가 먼저 등록됨).
+    // 믹스 알림이 '앱 안에서 연 믹스'에서만 나갔는지 확인하는 데 쓴다
+    window.__navHash = [];
+    window.__lastHash = location.hash;
+    window.__life = Math.random();   // 새로 고침마다 새 페이지 (알림은 페이지마다 씨앗당 한 번)
+    window.addEventListener('hashchange', () => { window.__lastHash = location.hash; });
+    window.__kwNavigate = u => { window.__navs.push(u); window.__navHash.push(window.__lastHash); };
     window.__playClicks = 0;
     // ▶/⏸ 가 실제로 눌린 횟수와 눌린 순간의 표시 (페이지의 버튼 처리보다 먼저 기록)
     document.addEventListener('click', e => { const b = e.target && e.target.closest && e.target.closest('#play'); if (b) { window.__playClicks++; window.__playClickLabel = b.getAttribute('aria-label'); } }, true);
@@ -131,7 +137,10 @@ async function snap(page) {
       auto: document.getElementById('play')?.getAttribute('data-auto') === '1',
       stage: document.getElementById('stageMsg')?.hidden ? '' : (document.getElementById('stageMsg')?.textContent || '').trim(),
       upnext: !document.getElementById('upnext')?.hidden, nUp: document.querySelectorAll('#list li').length,
-      thumbs, navs: window.__navs.slice(), pcount: fy.players.length, errs: fy.errors || 0,
+      // navs = 사용자가 누른 링크, recs = 앱에 조용히 알리는 믹스 추천 (앱 안 믹스에서 저절로)
+      thumbs, navs: window.__navs.filter(u => !/tube\/recs\?/.test(u)), pcount: fy.players.length, errs: fy.errors || 0,
+      recs: window.__navs.map((u, k) => ({ u, hash: window.__navHash[k] })).filter(x => /tube\/recs\?/.test(x.u)), life: window.__life,
+      chan: (() => { const c = document.getElementById('channel'); if (!c) return null; return { tag: c.tagName, text: (document.getElementById('channelName') || c).textContent, label: c.getAttribute('aria-label') || '', hidden: !!c.hidden || !c.offsetParent, h: c.offsetHeight }; })(),
       back: { text: (document.getElementById('back')?.textContent || '').trim(), href: document.getElementById('back')?.getAttribute('href') || '' },
       log: (fy.log || []).slice(-12),
     };
@@ -162,6 +171,29 @@ async function fitCheck(page) {
     }
     return bad;
   });
+}
+
+// ---------- 믹스 알림 (앱 안 믹스 → kakaowatch://tube/recs?seed=…&ids=…) ----------
+const VID = /^[A-Za-z0-9_-]{11}$/, LISTID = /^[A-Za-z0-9_-]{2,64}$/;
+// 이 주소(#…)로 연 화면이 믹스를 알려도 되는지: 앱 안(app=1) + 믹스(mix=1, 앱의 목록·재생목록이 아님) — 페이지의 params() 와 같은 규칙
+function appMix(hash) {
+  const q = new URLSearchParams(String(hash || '').replace(/^#/, ''));
+  const v = q.get('v');
+  if (!v || !VID.test(v) || q.get('app') !== '1' || q.get('mix') !== '1') return false;
+  if (LISTID.test(q.get('list') || '')) return false;
+  return !(q.get('ids') || '').split(',').some(x => VID.test(x) && x !== v);
+}
+function parseRecs(u) { const m = /^kakaowatch:\/\/tube\/recs\?seed=([^&]*)&ids=([^&]*)$/.exec(u) || []; return { seed: m[1], ids: (m[2] || '').split(',').filter(Boolean) }; }
+// 알림 하나의 모양: 씨앗 하나 + 씨앗 아닌 번호 1~49개 (같은 번호 없이)
+function recsProblem(u) {
+  if (!/^kakaowatch:\/\/tube\/recs\?seed=[^&]*&ids=[^&]*$/.test(u)) return '모양';
+  const { seed, ids } = parseRecs(u);
+  if (!VID.test(seed)) return '씨앗';
+  if (!ids.length || ids.length > 49) return `개수 ${ids.length}`;
+  if (ids.some(x => !VID.test(x))) return '이상한 번호';
+  if (new Set(ids).size !== ids.length) return '같은 번호';
+  if (ids.includes(seed)) return '씨앗이 목록에';
+  return null;
 }
 
 // ---------- 불변식 ----------
@@ -216,6 +248,18 @@ class Checker {
       if (!canNext && !s.next.disabled && s.player.len <= 1) this.fail(step, '목록이 없는데 ⏭ 켜짐', s);
     }
     for (const t of s.thumbs) if (t.vis && (t.w < 119.5 || t.h < 69.5 || t.t)) this.fail(step, `미리보기 ${t.w}×${t.h} 변형 ${t.t}`, s);
+    // 저절로 나가는 링크는 믹스 알림뿐: 앱 안에서 연 믹스에서만, 모양이 맞게, 한 페이지에서 씨앗마다 한 번
+    if (s.life !== this.life) { this.life = s.life; this.recsSeen = 0; }
+    for (let k = this.recsSeen || 0; k < s.recs.length; k++) {
+      const r = s.recs[k];
+      const bad = recsProblem(r.u) || (appMix(r.hash) ? null : '앱 안 믹스가 아닌 화면(' + r.hash + ')');
+      if (bad) this.fail(step, '믹스 알림 이상: ' + bad + ' — ' + r.u.slice(0, 90), s);
+    }
+    if (s.recs.length > (this.recsSeen || 0)) {
+      const seeds = s.recs.map(r => parseRecs(r.u).seed);
+      if (new Set(seeds).size !== seeds.length) this.fail(step, '같은 씨앗을 두 번 알림: ' + seeds.join(','), s);
+      this.recsSeen = s.recs.length;
+    }
   }
 }
 
@@ -277,6 +321,7 @@ const ID2 = 'kJQP7kiw5Fk', ID3 = '9bZkp7q19f0';
 const Q1 = 'qAAAAAAAAA1', Q2 = 'qAAAAAAAAA2', Q3 = 'qAAAAAAAAA3', Q4 = 'qAAAAAAAAA4';
 const PL = 'PLtestlist0001';
 const PLAYLISTS = { [PL]: [Q1, Q2, Q3, Q4] };
+const MIX0 = ['dQw4w9WgXcQ', 'dQw4wx00001', 'dQw4wx00002'];   // 가짜 플레이어의 첫 믹스 (mixLen 3)
 const scripted = [
   { name: '목록재생_ids', hash: `#v=${Q1}&ids=${Q2},${Q3},${Q4}&t=${encodeURIComponent('첫 동영상')}&n=NOW`, cfg: { autoplay: true, duration: 8, speed: 2 }, steps: [
     ['wait', 1500], ['expect', s => s.player?.len === 4 && s.player?.idx === 0 && s.player?.id === Q1 && s.player?.state === 1, '고른 동영상부터 앱의 목록 그대로'],
@@ -299,6 +344,29 @@ const scripted = [
   { name: '앱안_링크', hash: `#v=${Q1}&ids=${Q2}&app=1&t=${encodeURIComponent('앱 동영상')}&n=NOW`, cfg: { autoplay: true, duration: 30 }, steps: [
     ['wait', 1500], ['scroll', 1], ['wait', 300], ['expect', s => s.back.text === '목록으로' && s.back.href === 'kakaowatch://tube', '앱 안에선 목록으로'],
     ['tap', '#toPhone'], ['wait', 500], ['expect', s => s.navs.length === 1 && /^kakaowatch:\/\/tube\/phone\?v=qAAAAAAAAA1&t=\d+&title=/.test(s.navs[0]) && !/#Intent/.test(s.navs[0]), '앱 안: 폰에서 이어 보기도 kakaowatch:// 로'] ] },
+  // 믹스 알림: 앱 안에서 연 믹스의 비슷한 동영상 번호를 앱에 알린다 (씨앗마다 한 번 — 앱의 '전체' 추천). 처음 믹스 3곡은 짧게, 이어 받은 믹스는 길게
+  { name: '믹스알림', hash: '#v=dQw4w9WgXcQ&mix=1&app=1&n=NOW', cfg: { autoplay: true, mixLen: 3, duration: 30, speed: 2, durations: Object.fromEntries(MIX0.map(x => [x, 2])) }, steps: [
+    ['wait', 1500], ['expect', s => s.recs.length === 1 && parseRecs(s.recs[0].u).seed === 'dQw4w9WgXcQ' && parseRecs(s.recs[0].u).ids.join() === 'dQw4wx00001,dQw4wx00002', '앱 안 믹스 → 씨앗과 나머지 번호를 한 번 알림'],
+    ['wait', 6500], ['expect', s => s.recs.length === 2 && parseRecs(s.recs[1].u).seed === 'dQw4wx00002' && s.player?.state === 1 && !MIX0.includes(s.player?.id), '믹스가 끝나 이어 받은 믹스도 한 번 (씨앗 = 마지막 곡)'],
+    ['hash', '#v=dQw4w9WgXcQ&mix=1&app=1&n=NOW'], ['wait', 2000], ['expect', s => s.recs.length === 2 && MIX0.includes(s.player?.id) && [1, 3, -1].includes(s.player?.state), '같은 씨앗을 다시 열어도 다시 안 알림'],
+    ['hash', '#v=' + ID2 + '&mix=1&app=1&n=NOW'], ['wait', 1500], ['expect', s => s.recs.length === 3 && parseRecs(s.recs[2].u).seed === ID2, '다른 씨앗은 알림'] ] },
+  { name: '믹스알림_49개까지', hash: '#v=dQw4w9WgXcQ&mix=1&app=1&n=NOW', cfg: { autoplay: true, mixLen: 60, duration: 30 }, steps: [
+    ['wait', 1500], ['expect', s => { const r = s.recs.length === 1 && parseRecs(s.recs[0].u); return r && r.ids.length === 49 && r.ids[0] === 'dQw4wx00001' && r.ids[48] === 'dQw4wx00049'; }, '49개까지 (목록 순서대로)'] ] },
+  { name: '믹스알림_인터넷앱', cfg: { autoplay: true, mixLen: 3, duration: 30, speed: 2, durations: Object.fromEntries(MIX0.map(x => [x, 2])) }, steps: [
+    ['wait', 8000], ['expect', s => s.recs.length === 0 && s.player?.state === 1 && !MIX0.includes(s.player?.id), '인터넷 앱(app=1 없음)에서는 이어 받아도 알리지 않음'] ] },
+  { name: '믹스알림_목록', hash: `#v=${Q1}&ids=${Q2},${Q3}&app=1&n=NOW`, cfg: { autoplay: true, duration: 30, playlists: PLAYLISTS }, steps: [
+    ['wait', 1500], ['expect', s => s.recs.length === 0 && s.player?.len === 3 && s.player?.state === 1, '앱의 목록(ids=)은 알리지 않음'],
+    ['hash', `#v=${Q3}&list=${PL}&app=1&n=NOW`], ['wait', 1500], ['expect', s => s.recs.length === 0 && s.player?.len === 4 && s.player?.state === 1, '재생목록(list=)도 알리지 않음'] ] },
+  // 채널 이름을 누르면 지금 동영상의 채널로 (앱이 채널을 찾아 채널 화면) — 멈추고 간다
+  { name: '채널링크', hash: `#v=${Q1}&ids=${Q2},${Q3}&app=1&c=${encodeURIComponent('첫 채널')}&n=NOW`, cfg: { autoplay: true, duration: 30 }, steps: [
+    ['wait', 1500], ['scrollToNow'], ['wait', 300], ['expect', s => s.chan?.tag === 'BUTTON' && !s.chan.hidden && s.chan.h >= 32 && s.chan.label === '채널 qAA 채널로 가기' && /›/.test(s.channel), '채널 이름 = 누를 수 있는 단추 (32px 이상, › 표시)'],
+    ['tap', '#next'], ['wait', 1500], ['expect', s => s.player?.id === Q2 && s.player?.state === 1, '다음 동영상 재생 중'],
+    ['tap', '#channel'], ['wait', 500], ['expect', s => s.navs.length === 1 && s.navs[0] === 'kakaowatch://tube/channel?v=' + Q2 && s.player?.state !== 1, '앱 안: 지금 동영상의 채널로 + 멈춤'] ] },
+  { name: '채널링크_인터넷앱', hash: `#v=${ID2}&n=NOW`, cfg: { autoplay: true, duration: 30 }, steps: [
+    ['wait', 1500], ['scrollToNow'], ['wait', 300], ['tap', '#channel'], ['wait', 500],
+    ['expect', s => s.navs.length === 1 && s.navs[0] === 'intent://tube/channel?v=' + ID2 + '#Intent;scheme=kakaowatch;package=com.mywatch.kakaomap;end' && s.player?.state !== 1, '인터넷 앱: intent:// 로 앱의 채널 화면 + 멈춤'] ] },
+  { name: '채널링크_이름모름', hash: `#v=${ID2}&n=NOW`, cfg: { autoplay: true, duration: 30, oembedFail: true }, steps: [
+    ['wait', 1500], ['scrollToNow'], ['wait', 300], ['expect', s => s.chan && s.chan.hidden, '채널 이름을 모르면 숨김'], ['tap', '#channel'], ['wait', 300], ['expect', s => s.navs.length === 0 && s.player?.state === 1, '숨긴 단추는 눌리지 않음'] ] },
   { name: '자동재생OK_믹스_기본', cfg: { autoplay: true, mixLen: 6, duration: 3, speed: 2 }, steps: [
     ['wait', 2500], ['scrollToNow'], ['wait', 600], ['tap', '#next'], ['wait', 1500], ['tap', '#prev'], ['wait', 1500],
     ['tapUpNext', 1], ['wait', 1500], ['tap', '#play'], ['wait', 700], ['tap', '#play'], ['wait', 1500],
@@ -482,9 +550,11 @@ async function runScenario(browser, sc, label) {
         continue;
       }
       // ⏸ 를 실제로 눌렀는지는 누른 뒤에 안다 (스크롤 중이면 탭이 빗나갈 수 있음)
-      let before = null;
+      let before = null, navsBefore = null;
       if (act === 'tap' && a1 === '#play') before = await page.evaluate(() => ({ n: window.__playClicks }));
       else if ((act === 'tap' && ['#next', '#prev'].includes(a1)) || ['tapUpNext', 'tapPlayerButton', 'hash', 'reload', 'back'].includes(act)) { ck.pausedAt = null; ck.userAct(); }
+      // 채널로 가기도 멈추고 떠나는 것 — 그 뒤 저절로 다시 재생되면 안 된다
+      if (act === 'tap' && a1 === '#channel') navsBefore = await page.evaluate(() => window.__navs.length);
       if (act === 'back' && !(ck.depth > 0)) continue;
       if (act === 'hash') ck.depth = (ck.depth || 0) + 1;
       if (act === 'back') ck.depth--;
@@ -495,6 +565,7 @@ async function runScenario(browser, sc, label) {
         const after = await page.evaluate(() => ({ n: window.__playClicks, lab: window.__playClickLabel })).catch(() => before);
         if (after.n > before.n) { ck.pausedAt = after.lab === '일시정지' ? Date.now() : null; ck.userAct(); }
       }
+      if (navsBefore != null && (await page.evaluate(() => window.__navs.length).catch(() => navsBefore)) > navsBefore) ck.pausedAt = Date.now();
       await page.waitForTimeout(120);
       ck.check(i, await snap(page), errors);
     }
@@ -523,12 +594,12 @@ function randomScenario(seed, steps) {
   const vp = pick(viewports);
   cfg.playlists = PLAYLISTS;
   const hashes = ['#v=' + ID2 + '&mix=1', '#v=' + ID3, '#v=dQw4w9WgXcQ&mix=1', '#v=' + ID2 + '&t=' + encodeURIComponent('다른 곡'),
-    `#v=${Q1}&ids=${Q2},${Q3},${Q4}`, `#v=${Q2}&list=${PL}&app=1`, `#v=${Q4}&ids=${Q1}&app=1`];
+    `#v=${Q1}&ids=${Q2},${Q3},${Q4}`, `#v=${Q2}&list=${PL}&app=1`, `#v=${Q4}&ids=${Q1}&app=1`, '#v=' + ID2 + '&mix=1&app=1'];
   const list = [];
   for (let k = 0; k < steps; k++) {
     const x = r();
     if (x < 0.14) list.push(['wait', 200 + Math.floor(r() * 2500)]);
-    else if (x < 0.26) list.push(['tap', pick(['#play', '#next', '#prev', '#volUp', '#volDown', '#repeat', '#sleep'])]);
+    else if (x < 0.26) list.push(['tap', pick(['#play', '#next', '#prev', '#volUp', '#volDown', '#repeat', '#sleep', '#play', '#channel'])]);
     else if (x < 0.34) list.push(['tapPlayerButton']);
     else if (x < 0.42) list.push(['tapUpNext', Math.floor(r() * 5)]);
     else if (x < 0.55) list.push(['scroll', r()]);

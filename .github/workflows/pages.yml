@@ -1,7 +1,7 @@
 name: Watch player page
 
 # web/ (워치에서 유튜브를 트는 둥근 화면용 재생 화면) 을 gh-pages 브랜치로 올린다
-#   → GitHub Pages: https://<owner>.github.io/<repo>/tube/
+#   → GitHub Pages: https://<owner>.github.io/<repo>/tube/ (동영상) · …/tube/shorts.html (Shorts)
 # 앱(유튜브 음악)이 곡을 고르면 워치의 인터넷 앱이 이 화면을 열고, 그 안의 유튜브 공식 플레이어가 재생한다.
 # 기존 gh-pages 위에 커밋을 쌓는다 (강제로 덮어쓰지 않음).
 on:
@@ -20,12 +20,14 @@ concurrency:
 jobs:
   publish:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # 시뮬레이터 둘 (동영상 ≈ 11분 + Shorts ≈ 8분) + 설치
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v7
 
       # 올리기 전에 시뮬레이터로 확인: 실제 크로미움 + 실제 플레이어 동작을 흉내 낸 가짜 유튜브 플레이어로
       # 사용자 시나리오(자동 재생 막힘·막힌 곡·믹스 끝·화면 꺼짐·뒤로 가기 …)를 돌리고 유튜브 규칙·단단함을 확인.
+      # 동영상 화면(sim.mjs)과 Shorts 화면(shorts_sim.mjs: 한 장씩 넘기기·반복·보일 때만 재생 …) 둘 다.
       # 하나라도 실패하면 워치가 여는 화면을 바꾸지 않는다 (실패한 시나리오만 한 번 더 돌려 봄)
       - name: Check the player page (simulator)
         working-directory: tools/tube-sim
@@ -34,6 +36,7 @@ jobs:
           npm install --no-save --no-package-lock --no-audit --no-fund playwright@1.56.0
           npx playwright install --with-deps chromium
           node sim.mjs --retry=1 --shots="$RUNNER_TEMP/tube-sim-shots"
+          node shorts_sim.mjs --retry=1 --shots="$RUNNER_TEMP/tube-sim-shots"
 
       # 실패하면 그 순간의 화면과 기록(report.json)을 남긴다 (Actions 실행 화면의 Artifacts)
       - name: Keep simulator screenshots
