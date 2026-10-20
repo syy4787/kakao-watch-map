@@ -1,0 +1,58 @@
+POWER MANAGER (dumpsys power)
+Power Manager State:
+  mDirty=0x0
+  mWakefulness=Asleep
+  mWakefulnessChanging=false
+  mIsPowered=false
+  mPlugType=0
+  mBatteryLevel=48
+  mBatteryLevelWhenDreamStarted=0
+  mDockState=0
+  mStayOn=false
+  mProximityPositive=false
+  mBootCompleted=true
+  mSystemReady=true
+  mHalAutoSuspendModeEnabled=true
+  mHalInteractiveModeEnabled=false
+  mWakeLockSummary=0x1
+  mUserActivitySummary=0x0
+  mRequestWaitForNegativeProximity=false
+  mSandmanScheduled=false
+  mSandmanSummoned=false
+  mBatteryLevelLow=false
+  mLightDeviceIdleMode=false
+  mDeviceIdleMode=true
+  mDeviceIdleWhitelist=[10012, 10045, 10013, 10123]
+  mDeviceIdleTempWhitelist=[]
+  mLastWakeTime=27612345 (-9m12s0ms ago)
+  mLastSleepTime=27700000 (-7m45s0ms ago)
+  mLastUserActivityTime=27612000 (-9m12s345ms ago)
+  mLastUserActivityTimeNoChangeLights=0 (-7h40m0s0ms ago)
+  mLastInteractivePowerHintTime=27612345 (-9m12s0ms ago)
+  mLastScreenBrightnessBoostTime=0 (-7h40m0s0ms ago)
+  mScreenBrightnessBoostInProgress=false
+  mDisplayReady=true
+  mHoldingWakeLockSuspendBlocker=true
+  mHoldingDisplaySuspendBlocker=false
+
+Settings and Configuration:
+  mDecoupleHalAutoSuspendModeFromDisplayConfig=false
+  mDecoupleHalInteractiveModeFromDisplayConfig=true
+  mWakeUpWhenPluggedOrUnpluggedConfig=true
+  mScreenOffTimeoutSetting=30000
+  mMaximumScreenOffTimeoutFromDeviceAdmin=2147483647 (enforced=false)
+
+Wake Locks: size=2
+  PARTIAL_WAKE_LOCK              '*job*/com.example.drain/.SyncJob' ACQ=-3m12s345ms (uid=10123 pid=3456 ws=WorkSource{10123 com.example.drain})
+  PARTIAL_WAKE_LOCK              'AudioMix' ACQ=-1m0s0ms (uid=1041 pid=800)
+
+Suspend Blockers: size=4
+  PowerManagerService.WakeLocks: ref count=1
+  PowerManagerService.Display: ref count=0
+  PowerManagerService.Broadcasts: ref count=0
+  PowerManagerService.WirelessChargerDetector: ref count=0
+
+Display Power: state=OFF
+
+Battery saver policy:
+  (생략)

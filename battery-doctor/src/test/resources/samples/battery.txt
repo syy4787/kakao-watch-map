@@ -1,0 +1,21 @@
+Current Battery Service state:
+  AC powered: false
+  USB powered: false
+  Wireless powered: false
+  Dock powered: false
+  Max charging current: 0
+  Max charging voltage: 0
+  Charge counter: 196800
+  status: 3
+  health: 2
+  present: true
+  level: 48
+  scale: 100
+  voltage: 3812
+  temperature: 298
+  technology: Li-ion
+  mSavedBatteryAsoc: 96
+  mSavedBatteryMaxTableWh: 1700
+  mSavedBatteryUsage: 1234
+  mSavedBatteryBsoh: 98.4
+  mSecPlugTypeSummary: 0

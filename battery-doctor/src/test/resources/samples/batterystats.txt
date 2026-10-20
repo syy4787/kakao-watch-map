@@ -1,0 +1,171 @@
+Battery History (3% used, 128KB used of 4096KB, 41 strings using 3104):
+                        0 (9) RESET:TIME: 2026-10-19-13-49-02
+                        0 (2) 100 status=discharging health=good plug=none temp=291 volt=4120 charge=410000 modemRailChargemAh=0 wifiRailChargemAh=0 +running +wake_lock +screen +phone_scanning +wifi +wifi_running
+                 +4m10s503ms (2) 099 -screen -wake_lock
+                 +1h02m14s000ms (2) 095 +wake_lock=u0a123:"*job*/com.example.drain/.SyncJob"
+                 +1h03m01s221ms (2) 095 -wake_lock
+                 +8h12m03ms (2) 060 -running
+
+Per-PID Stats:
+  PID 3456 wake time: +42m10s0ms
+  PID 2210 wake time: +2m10s0ms
+
+Discharge step durations:
+  #0: +9m12s0ms to 60 (screen-off, power-save-off, device-idle-on)
+  #1: +10m05s0ms to 61 (screen-off, power-save-off, device-idle-on)
+  #2: +11m40s0ms to 62 (screen-off, power-save-off, device-idle-on)
+  Estimated discharge time remaining: 9h 12m 0s 0ms
+  Estimated screen off time: 10h 0m 0s 0ms
+  Estimated screen off device idle time: 11h 0m 0s 0ms
+
+Daily stats:
+  Current start time: 2026-10-19-00-00-00
+  Next min deadline: 2026-10-20-01-00-00
+  Next max deadline: 2026-10-20-03-00-00
+
+Statistics since last charge:
+  System starts: 0, currently on battery: true
+  Estimated battery capacity: 445 mAh
+  Last learned battery capacity: 440 mAh
+  Min learned battery capacity: 440 mAh
+  Max learned battery capacity: 445 mAh
+  Time on battery: 8h 12m 3s 123ms (99.2%) realtime, 1h 35m 10s 0ms (19.3%) uptime
+  Time on battery screen off: 7h 47m 3s 0ms (94.9%) realtime, 1h 10m 10s 0ms (15.0%) uptime
+  Time on battery screen doze: 6h 50m 0s 0ms (83.3%)
+  Total run time: 8h 16m 0s 0ms realtime, 1h 38m 0s 0ms uptime
+  Discharge: 178 mAh
+  Screen off discharge: 150 mAh
+  Screen doze discharge: 120 mAh
+  Screen on discharge: 28 mAh
+  Device light doze discharge: 10 mAh
+  Device deep doze discharge: 110 mAh
+  Start clock time: 2026-10-19-13-49-02
+  Screen on: 25m 0s 123ms (5.1%) 42x, Interactive: 25m 30s 0ms (5.2%)
+  Screen brightnesses:
+    dark 10m 0s 0ms (40.0%)
+    dim 12m 0s 0ms (48.0%)
+    medium 3m 0s 123ms (12.0%)
+  Total full wakelock time: 1m 2s 0ms
+  Total partial wakelock time: 1h 5m 20s 0ms
+  Connectivity changes: 12
+  Mobile radio active time: 6m 30s 0ms (1.3%) 45x
+  Mobile radio active adjusted time: 6m 30s 0ms (1.3%)
+  Device battery use since last full charge
+    Amount discharged (lower bound): 40
+    Amount discharged (upper bound): 41
+    Amount discharged while screen on: 6
+    Amount discharged while screen off: 34
+    Amount discharged while screen doze: 27
+  Bluetooth total received: 1.21MB, sent: 0.40MB (packets: 0 received, 0 sent)
+  Bluetooth scan time: 12m 0s 0ms
+  Wifi Statistics:
+     Wifi kernel active time: 20m 10s 0ms (4.1%)
+     WiFi Scan time:  2m 20s 0ms (0.5%)
+     WiFi Battery drain: 4.2mAh
+  Wifi on: 8h 12m 0s 0ms (99.2%), Wifi running: 8h 12m 0s 0ms (99.2%)
+  Wifi states:
+    (unknown) 8h 12m 0s 0ms (100.0%)
+
+  Estimated power use (mAh):
+    Capacity: 445, Computed drain: 182, actual drain: 174-178
+    Uid u0a123: 48.5 ( cpu=20.1 wake=28.4 ) Including smearing: 52.0 ( proportional=3.5 )
+    Screen: 30.2 Excluded from smearing
+    Uid 1000: 25.1 ( cpu=22.0 wake=3.1 ) Including smearing: 27.0 ( proportional=1.9 )
+    Idle: 22.0 Excluded from smearing
+    Bluetooth: 18.3 ( cpu=0.3 bluetooth=18.0 ) Excluded from smearing
+    Uid u0a45: 16.4 ( cpu=10.2 wake=4.0 sensor=2.2 ) Including smearing: 17.6 ( proportional=1.2 )
+    Uid u0a87: 9.9 ( cpu=4.0 wake=1.0 sensor=4.9 ) Including smearing: 10.6 ( proportional=0.7 )
+    Wifi: 4.2 ( cpu=0.1 wifi=4.1 ) Including smearing: 4.5 ( proportional=0.3 )
+    Cell standby: 3.1 Excluded from smearing
+    Uid u0a67: 2.4 ( cpu=1.4 wake=1.0 ) Including smearing: 2.6 ( proportional=0.2 )
+    Uid 0: 1.2 ( cpu=1.2 )
+    Unaccounted: 0.7
+
+  All kernel wake locks:
+  Kernel Wake lock PowerManagerService.WakeLocks: 1h 12m 0s 0ms (1210 times) realtime
+  Kernel Wake lock PowerManagerService.Display: 25m 30s 0ms (42 times) realtime
+  Kernel Wake lock qcom_rx_wakelock: 10m 2s 0ms (3100 times) realtime
+  Kernel Wake lock alarmtimer: 5m 0s 0ms (980 times) realtime
+  Kernel Wake lock event0-1234: 2m 0s 0ms (400 times) realtime
+  Kernel Wake lock bluetooth_timer: 1m 40s 0ms (2200 times) realtime
+
+  All partial wake locks:
+  Wake lock u0a123 *job*/com.example.drain/.SyncJob: 42m 10s 0ms (310 times) max=180000 actual=2530000 realtime
+  Wake lock u0a123 DrainService: 12m 50s 0ms (900 times) max=9000 actual=770000 realtime
+  Wake lock u0a87 HealthTracker: 3m 0s 0ms (40 times) max=12000 actual=180000 realtime
+  Wake lock u0a45 *net_scheduler*: 2m 10s 0ms (60 times) max=8000 actual=130000 realtime
+  Wake lock 1000 *alarm*: 2m 0s 0ms (500 times) max=2000 actual=120000 realtime
+  Wake lock u0a45 Icing: 1m 50s 0ms (12 times) max=30000 actual=110000 realtime
+  Wake lock u0a67 WeatherSync: 20s 0ms (5 times) max=6000 actual=20000 realtime
+
+  All wakeup reasons:
+  Wakeup reason 173:qcom,smd-rpm:222:fc4: 20m 0s 0ms (1234 times) realtime
+  Wakeup reason Abort:Pending Wakeup Sources: alarmtimer: 3m 0s 0ms (200 times) realtime
+  Wakeup reason 200:qcom,glink-smem-native-xprt-modem: 1m 30s 0ms (150 times) realtime
+  Wakeup reason unknown: 1m 0s 0ms (33 times) realtime
+
+  0:
+    Wake lock PowerManagerService.Booting: 10s 0ms partial (1 times, max 10000 ms, actual 10000 ms) realtime
+    Total cpu time: u=1s 100ms s=2s 200ms
+    Proc init:
+      CPU: 1s 100ms usr + 2s 200ms krn ; 0ms fg
+
+  1000:
+    Wake lock *alarm*: 2m 0s 0ms partial (500 times, max 2000 ms, actual 120000 ms) realtime
+    Wake lock ActivityManager-Sleep: 30s 0ms partial (12 times, max 5000 ms, actual 30000 ms) realtime
+    TOTAL wake: 2m 30s 0ms partial realtime
+    Sensor 0x00000001: 8h 12m 0s 0ms realtime (1 times)
+    Total cpu time: u=10m 0s 0ms s=12m 0s 0ms
+    Apk android:
+      12 wakeup alarms
+
+  u0a45:
+    Wi-Fi network: 220.11KB received, 80.00KB sent (packets 400 received, 300 sent)
+    Wake lock *net_scheduler*: 2m 10s 0ms partial (60 times, max 8000 ms, actual 130000 ms) realtime
+    Wake lock Icing: 1m 50s 0ms partial (12 times, max 30000 ms, actual 110000 ms) realtime
+    Wake lock GCoreFlp: 40s 0ms partial (20 times, max 3000 ms, actual 40000 ms) realtime
+    TOTAL wake: 4m 40s 0ms partial realtime
+    Sensor 0x00000001: 2h 10m 0s 0ms realtime (3 times)
+    Wifi Scan (blamed): 1m 10s 0ms (14 times)
+    Wifi Scan (actual): 1m 10s 0ms (14 times)
+    Total cpu time: u=5m 0s 0ms s=5m 12s 0ms
+    Apk com.google.android.gms:
+      30 wakeup alarms
+      Service com.google.android.gms.chimera.PersistentBoundBrokerService:
+        Created for: 2m 0s 0ms uptime
+        Starts: 0, launches: 12
+
+  u0a67:
+    Wi-Fi network: 12.00KB received, 4.00KB sent (packets 40 received, 30 sent)
+    Wake lock WeatherSync: 20s 0ms partial (5 times, max 6000 ms, actual 20000 ms) realtime
+    TOTAL wake: 20s 0ms partial realtime
+    Wifi Scan (blamed): 10s 0ms (2 times)
+    Total cpu time: u=30s 0ms s=20s 0ms
+    Apk com.example.weather:
+      4 wakeup alarms
+
+  u0a87:
+    Wake lock HealthTracker: 3m 0s 0ms partial (40 times, max 12000 ms, actual 180000 ms) realtime
+    TOTAL wake: 3m 0s 0ms partial realtime
+    Sensor 0x00000001: 8h 12m 0s 0ms realtime (1 times)
+    Sensor 0x00000016: 1h 40m 0s 0ms realtime (48 times)
+    Sensor GPS: 12m 0s 0ms realtime (2 times)
+    Total cpu time: u=3m 0s 0ms s=2m 0s 0ms
+    Apk com.samsung.android.wear.shealth:
+      6 wakeup alarms
+
+  u0a123:
+    Wi-Fi network: 2.10MB received, 1.02MB sent (packets 3000 received, 2200 sent)
+    Wake lock *job*/com.example.drain/.SyncJob: 42m 10s 0ms partial (310 times, max 180000 ms, actual 2530000 ms) realtime
+    Wake lock DrainService: 12m 50s 0ms partial (900 times, max 9000 ms, actual 770000 ms) realtime
+    TOTAL wake: 55m 0s 0ms partial realtime
+    Sensor 0x00000001: 7h 50m 0s 0ms realtime (2 times)
+    Job com.example.drain/.SyncJob: 41m 0s 0ms realtime (310 times), 310 completed: canceled(0x) constraints(0x) preempt(0x) timeout(0x) successful(310x)
+    Wifi Scan (blamed): 1m 0s 0ms (12 times)
+    Wifi Scan (actual): 1m 0s 0ms (12 times)
+    Total cpu time: u=12m 0s 0ms s=8m 0s 0ms
+    Apk com.example.drain:
+      200 wakeup alarms
+      Service com.example.drain.DrainService:
+        Created for: 7h 50m 0s 0ms uptime
+        Starts: 1, launches: 1

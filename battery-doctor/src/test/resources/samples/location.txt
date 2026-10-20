@@ -1,0 +1,31 @@
+Location Manager State:
+  User Info:
+    Current User: 0 []
+    Visible Users: [0]
+  Location Settings:
+    Location Enabled: [u0] true
+    Location Mode: [u0] 3
+  Location Providers:
+    fused provider:
+      mode=NORMAL
+      request=Request[@30s interval=30s minUpdateInterval=10s quality=BALANCED_POWER_ACCURACY]
+      last location=Location[fused 36.1234,127.5678 hAcc=12.0 et=+8h12m0s0ms alt=58.0 vAcc=4.0 vel=0.0 bear=0.0]
+      registered listeners:
+        CallerIdentity[10123/3456 com.example.drain] Request[@30s interval=30s minUpdateInterval=10s quality=BALANCED_POWER_ACCURACY]
+        CallerIdentity[10045/2877 com.google.android.gms] Request[@1h interval=1h minUpdateInterval=10m quality=LOW_POWER]
+    gps provider:
+      mode=NORMAL
+      request=Request[PASSIVE]
+      last location=Location[gps 36.1234,127.5678 hAcc=5.0 et=+6h1m0s0ms alt=60.0 vAcc=3.0 vel=1.2 bear=120.0]
+      registered listeners:
+        CallerIdentity[10087/2210 com.samsung.android.wear.shealth] Request[@1s interval=1s minUpdateInterval=1s quality=HIGH_ACCURACY] (passive)
+    network provider:
+      mode=NORMAL
+      request=Request[PASSIVE]
+    passive provider:
+      request=Request[PASSIVE]
+  Location Request Statistics:
+    com.example.drain: Interval 30s: Active: 0, Request #: 12, Duration 4h10m0s0ms
+    com.samsung.android.wear.shealth: Interval 1s: Active: 0, Request #: 2, Duration 12m0s0ms
+  Geofences:
+    (none)

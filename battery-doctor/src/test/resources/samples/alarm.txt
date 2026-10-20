@@ -1,0 +1,68 @@
+Current Alarm Manager state:
+  Settings:
+    min_futurity=+5s0ms
+    min_interval=+1m0s0ms
+    max_interval=+365d0h0m0s0ms
+    allow_while_idle_quota=72
+    allow_while_idle_window=+1h0m0s0ms
+    listener_timeout=+5s0ms
+
+  App Standby Parole: false
+
+  nowRTC=1792414865123=2026-10-19 22:01:05 nowELAPSED=+8h30m12s0ms
+  mLastTimeChangeClockTime=1792385342000=2026-10-19 13:49:02
+  mLastTimeChangeRealtime=+2m1s0ms
+  mLastTickReceived=2026-10-19 22:01:00
+  mLastTickSet=2026-10-19 22:01:00
+
+  Next non-wakeup alarm: +4m55s0ms = 2026-10-19 22:06:00
+    set at +8h25m12s0ms = 2026-10-19 21:56:05
+  Next wakeup alarm: +1m2s0ms = 2026-10-19 22:02:07
+    set at +8h29m10s0ms = 2026-10-19 22:00:03
+  Next kernel non-wakeup alarm: +4m54s876ms
+  Next kernel wakeup alarm: +1m1s876ms
+  Last wakeup: +8h29m50s0ms = 2026-10-19 22:00:43
+    set at +8h28m50s0ms = 2026-10-19 21:59:43
+  Last trigger: +8h29m50s0ms = 2026-10-19 22:00:43
+  Num time change events: 1
+
+  Pending alarm batches: 6
+  Batch{a1b2c3 num=1 start=1234567 end=1234567 flgs=0x1}:
+    RTC_WAKEUP #0: Alarm{d4e5f6 type 0 when 1792414927000 com.example.drain}
+      tag=*walarm*:com.example.drain.SYNC
+      type=0 expectedWhenElapsed=+1m2s0ms expectedMaxWhenElapsed=+1m2s0ms whenElapsed=+1m2s0ms maxWhenElapsed=+1m2s0ms when=+1m2s0ms
+      window=0 repeatInterval=60000 count=0 flags=0x1
+      operation=PendingIntent{1a2b3c: PendingIntentRecord{4d5e6f com.example.drain broadcastIntent}}
+
+  Past-due non-wakeup alarms: (none)
+
+  Top Alarms:
+    +3m12s543ms running, 200 wakeups, 420 alarms: u0a123:com.example.drain
+      *walarm*:com.example.drain.SYNC
+    +1m40s0ms running, 30 wakeups, 110 alarms: u0a45:com.google.android.gms
+      *walarm*:com.google.android.gms.gcm.ACTION_CHECK_QUEUE
+    +1m0s0ms running, 12 wakeups, 510 alarms: 1000:android
+      *alarm*:android.intent.action.TIME_TICK
+
+  Alarm Stats:
+  u0a123:com.example.drain +3m12s543ms running, 200 wakeups:
+    +3m0s0ms 190 wakes 400 alarms, last -1m10s0ms:
+      *walarm*:com.example.drain.SYNC
+    +12s543ms 10 wakes 20 alarms, last -1h2m0s0ms:
+      *alarm*:com.example.drain.POLL
+  u0a45:com.google.android.gms +1m40s0ms running, 30 wakeups:
+    +1m20s0ms 28 wakes 100 alarms, last -4m0s0ms:
+      *walarm*:com.google.android.gms.gcm.ACTION_CHECK_QUEUE
+    +20s0ms 2 wakes 10 alarms, last -2h0m0s0ms:
+      *walarm*:com.google.android.gms.nearby.HEARTBEAT
+  1000:android +1m0s0ms running, 12 wakeups:
+    +50s0ms 0 wakes 500 alarms, last -5s0ms:
+      *alarm*:android.intent.action.TIME_TICK
+    +10s0ms 12 wakes 10 alarms, last -30m0s0ms:
+      *walarm*:android.appwidget.action.APPWIDGET_UPDATE
+  u0a67:com.example.weather +5s0ms running, 4 wakeups:
+    +5s0ms 4 wakes 4 alarms, last -40m0s0ms:
+      *walarm*:com.example.weather.REFRESH
+  u0a87:com.samsung.android.wear.shealth +8s0ms running, 6 wakeups:
+    +8s0ms 6 wakes 12 alarms, last -12m0s0ms:
+      *walarm*:com.samsung.android.wear.shealth.SLEEP_CHECK

@@ -1,0 +1,62 @@
+  Settings:
+    flex_time_short=+1m0s0ms
+    light_after_inactive_to=+4m0s0ms
+    light_idle_to=+5m0s0ms
+    light_idle_factor=2.0
+    light_max_idle_to=+15m0s0ms
+    inactive_to=+30m0s0ms
+    sensing_to=+4m0s0ms
+    locating_to=+30s0ms
+    location_accuracy=20.0m
+    motion_inactive_to=+10m0s0ms
+    idle_after_inactive_to=+30m0s0ms
+    idle_pending_to=+5m0s0ms
+    idle_to=+1h0m0s0ms
+    max_idle_to=+6h0m0s0ms
+    idle_factor=2.0
+    min_time_to_alarm=+30m0s0ms
+    max_temp_app_whitelist_duration=+5m0s0ms
+    mms_temp_app_whitelist_duration=+1m0s0ms
+    sms_temp_app_whitelist_duration=+20s0ms
+    notification_whitelist_duration=+30s0ms
+    wait_for_unlock=true
+  Idling history:
+     normal: -1h0m0s0ms (light-maint)
+     normal: -55m0s0ms (light-idle)
+     normal: -10m0s0ms (deep-idle)
+  Whitelist (except idle) system apps:
+    com.android.providers.calendar
+    com.google.android.gms
+  Whitelist system apps:
+    com.android.providers.downloads
+  Whitelist user apps:
+    com.example.drain
+  Whitelist (except idle) all app ids:
+    10012
+    10045
+  Whitelist system app ids:
+    10013
+  Whitelist all app ids:
+    10012
+    10013
+    10045
+    10123
+  Whitelist user app ids:
+    10123
+  mLightEnabled=true  mDeepEnabled=true
+  mForceIdle=false
+  mUseMotionSensor=true mMotionSensor={Sensor name="LSM6DSO Significant Motion", vendor="STMicro", version=1, type=17}
+  mScreenOn=false
+  mScreenLocked=true
+  mNetworkConnected=true
+  mCharging=false
+  mMotionActive=false
+  mNotMoving=true
+  mMaintenanceStartTime=+7h50m0s0ms
+  mState=IDLE mLightState=OVERRIDE
+  mInactiveTimeout=+30m0s0ms
+  mNextAlarmTime=+8h40m0s0ms
+  mNextIdlePendingDelay=+10m0s0ms
+  mNextIdleDelay=+2h0m0s0ms
+  mNextLightAlarmTime=+8h0m0s0ms
+  mCurLightIdleBudget=+1m0s0ms

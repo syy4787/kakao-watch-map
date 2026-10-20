@@ -1,0 +1,48 @@
+Captured at: 22:01:05.233
+Sensor Device:
+Total 12 h/w sensors, 12 running 2 disabled clients:
+0x00000001) active-count = 3; sampling_period(ms) = {20.0, 20.0, 200.0}, selected = 20.00 ms; batching_period(ms) = {0.0, 0.0, 1000.0}, selected = 0.00 ms
+0x00000016) active-count = 1; sampling_period(ms) = {1000.0}, selected = 1000.00 ms; batching_period(ms) = {0.0}, selected = 0.00 ms
+Sensor List:
+0x00000001) LSM6DSO Accelerometer           | STMicro         | ver: 1 | type: android.sensor.accelerometer(1) | perm: n/a | flags: 0x00000000
+	continuous | minRate=1.00Hz | maxRate=400.00Hz | FIFO (max,reserved) = (2048, 0) events | non-wakeUp |
+0x00000002) LSM6DSO Gyroscope               | STMicro         | ver: 1 | type: android.sensor.gyroscope(4) | perm: n/a | flags: 0x00000000
+	continuous | minRate=1.00Hz | maxRate=400.00Hz | FIFO (max,reserved) = (2048, 0) events | non-wakeUp |
+0x00000016) Samsung HR Sensor               | Samsung         | ver: 2 | type: android.sensor.heart_rate(21) | perm: android.permission.BODY_SENSORS | flags: 0x00000000
+	on-change | maxRate=25.00Hz | FIFO (max,reserved) = (0, 0) events | non-wakeUp |
+0x0000002c) Pressure Sensor                 | Bosch           | ver: 1 | type: android.sensor.pressure(6) | perm: n/a | flags: 0x00000000
+	continuous | minRate=1.00Hz | maxRate=25.00Hz | FIFO (max,reserved) = (512, 0) events | non-wakeUp |
+Fusion states:
+9-axis fusion disabled (0 clients), gyro-rate= 200.00Hz, q=< 0, 0, 0, 0 > (0), b=< 0, 0, 0 >
+Recent Sensor events:
+0x00000001) LSM6DSO Accelerometer: last 10 events
+	1 (ts=30612.123456789, wall=22:01:05.100) 0.12, 0.34, 9.78,
+Active sensors:
+LSM6DSO Accelerometer (handle=0x00000001, connections=3)
+Samsung HR Sensor (handle=0x00000016, connections=1)
+Socket Buffer size = 4096 events
+WakeLock Status: not held
+Mode : NORMAL
+Sensor Privacy: disabled
+3 active connections
+Connection Number: 0
+	Operating Mode: NORMAL
+	 com.samsung.android.wear.shealth | WakeLockRefCount 0 | uid 10087 | cache size 0 | max cache size 0
+	 LSM6DSO Accelerometer 0x00000001 | status: active | pending flush events 0
+	 Samsung HR Sensor 0x00000016 | status: active | pending flush events 0
+Connection Number: 1
+	Operating Mode: NORMAL
+	 com.example.drain | WakeLockRefCount 0 | uid 10123 | cache size 0 | max cache size 0
+	 LSM6DSO Accelerometer 0x00000001 | status: active | pending flush events 0
+Connection Number: 2
+	Operating Mode: NORMAL
+	 android | WakeLockRefCount 0 | uid 1000 | cache size 0 | max cache size 0
+	 LSM6DSO Accelerometer 0x00000001 | status: active | pending flush events 0
+0 direct connections
+Previous Registrations:
+21:58:11 + 0x00000016 pid=2210 uid=10087 package=com.samsung.android.wear.shealth samplingPeriod=1000000us batchingPeriod=0us
+21:50:02 - 0x00000001 pid=2877 uid=10045 package=com.google.android.gms
+21:49:58 + 0x00000001 pid=2877 uid=10045 package=com.google.android.gms samplingPeriod=200000us batchingPeriod=1000000us
+13:49:40 + 0x00000001 pid=3456 uid=10123 package=com.example.drain samplingPeriod=20000us batchingPeriod=0us
+13:49:12 + 0x00000001 pid=2210 uid=10087 package=com.samsung.android.wear.shealth samplingPeriod=20000us batchingPeriod=0us
+13:49:05 + 0x00000001 pid=1021 uid=1000 package=android samplingPeriod=200000us batchingPeriod=1000000us
