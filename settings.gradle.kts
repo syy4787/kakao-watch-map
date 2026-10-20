@@ -36,3 +36,5 @@ dependencyResolutionManagement {
 
 rootProject.name = "KakaoWatchMap"
 include(":app")
+include(":battery-core")      // 배터리 닥터 공용 계산(순수 Kotlin) — 워치 앱과 PC 툴킷이 같이 씀
+include(":battery-doctor")    // PC 툴킷(Windows, ADB) — 수집·분석·차단 조치·증거 패키지

@@ -13,3 +13,6 @@
 /tools/tube-sim/node_modules/
 __pycache__/
 *.pyc
+
+# 모든 모듈의 빌드 산출물
+**/build/
