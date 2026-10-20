@@ -121,6 +121,7 @@ android {
 }
 
 dependencies {
+    implementation(project(":battery-core"))                                // 배터리 기록 계산(소모율·게이지 이상·판정) — PC 툴킷과 같은 코드
     implementation("com.kakao.maps.open:android:2.15.2")                    // 카카오맵 SDK v2
     implementation("androidx.wear:wear:1.4.0")                              // 둥근 화면 목록·스와이프 닫기
     implementation("androidx.wear:wear-input:1.2.0")                        // 음성·키보드 입력

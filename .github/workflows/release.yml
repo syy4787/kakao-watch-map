@@ -153,7 +153,8 @@ jobs:
         run: |
           RELEASE_KEY_PASSWORD=$(bash .github/scripts/signing-password.sh)
           export RELEASE_KEY_PASSWORD
-          ./gradlew --no-daemon testDebugUnitTest assembleRelease
+          # 워치 앱 시험·서명 APK + 배터리 닥터(공용 계산 모듈 시험, PC 툴킷 시험·zip)
+          ./gradlew --no-daemon :app:testDebugUnitTest :battery-core:test :battery-doctor:test :app:assembleRelease :battery-doctor:doctorZip
 
       # kakao-watch-map.apk = 모든 CPU 용 (처음 설치·예전 버전 앱의 업데이트용)
       # kakao-watch-map-<CPU>.apk = CPU 별 (새 버전 앱은 update.json 의 apks 에서 자기 것만 받는다 — 워치는 armeabi-v7a)
@@ -195,6 +196,9 @@ jobs:
             '{versionCode: $code, versionName: $name, apkUrl: $url, sha256: $sha, size: $size, notes: $notes, apks: $apks}' > update.json
           cat update.json
           ls -l kakao-watch-map*.apk
+          # PC 툴킷(Windows): BatteryDoctor.bat + battery-doctor.jar + README.txt
+          cp battery-doctor/build/dist/battery-doctor.zip battery-doctor.zip
+          ls -l battery-doctor.zip
 
       # 작은 업데이트: 최근 릴리스 3개의 CPU 별 APK 에서 새 APK 를 만드는 패치(.kwdelta)를 만들어 update.json 에 적는다.
       # 재생 엔진(약 100MB)은 그대로라 패치는 몇 MB — 워치가 깔린 APK 와 맞는 패치만 받아 새 APK 를 똑같이 다시 만든다.
@@ -240,9 +244,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           shopt -s nullglob
-          FILES=(kakao-watch-map.apk kakao-watch-map-armeabi-v7a.apk kakao-watch-map-arm64-v8a.apk update.json deltas/*.kwdelta)
+          FILES=(kakao-watch-map.apk kakao-watch-map-armeabi-v7a.apk kakao-watch-map-arm64-v8a.apk update.json deltas/*.kwdelta battery-doctor.zip)
           gh release create "v$VERSION_CODE" "${FILES[@]}" \
-            --target "$GITHUB_SHA" --title "v$VERSION_NAME" --notes "$NOTES" --latest
+            --target "$GITHUB_SHA" --title "v$VERSION_NAME" --latest \
+            --notes "$NOTES
+
+PC 툴킷(Windows): battery-doctor.zip — 압축을 풀고 BatteryDoctor.bat 실행 (Android Studio 의 Java·adb 를 자동으로 찾음). 사용법은 안의 README.txt"
 
       - name: Clean up secrets
         if: always()

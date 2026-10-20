@@ -43,6 +43,8 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- 안내 알림을 '실시간 업데이트'(Live Update)로 올리기 — Wear OS 7 에서 진행 중 활동 대신 쓰임 (설치 시 자동 허용) -->
     <uses-permission android:name="android.permission.POST_PROMOTED_NOTIFICATIONS" />
+    <!-- 배터리 기록: 부팅 순간을 한 줄 남기고 15분 기록을 다시 예약 (일반 권한, 묻지 않음) -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
     <application
         android:name=".MapApp"
@@ -134,6 +136,22 @@
             android:name=".update.UpdateActivity"
             android:exported="false"
             android:taskAffinity="com.mywatch.kakaomap.main" />
+        <!-- 배터리 기록·판정 화면 (첫 화면의 '배터리', 비정상 소모 알림) -->
+        <activity
+            android:name=".battery.BatteryActivity"
+            android:exported="false"
+            android:taskAffinity="com.mywatch.kakaomap.hub" />
+        <!-- 충전기 꽂음·뺌, 부팅, 배터리 부족 순간을 배터리 기록에 한 줄 (부팅 뒤 15분 기록도 다시 예약) -->
+        <receiver
+            android:name=".battery.BatteryEventsReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.ACTION_POWER_CONNECTED" />
+                <action android:name="android.intent.action.ACTION_POWER_DISCONNECTED" />
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.BATTERY_LOW" />
+            </intent-filter>
+        </receiver>
 
         <service
             android:name=".nav.NavigationService"

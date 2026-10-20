@@ -12,6 +12,7 @@ import android.os.SystemClock
 import android.util.Log
 import androidx.annotation.VisibleForTesting
 import com.kakao.vectormap.KakaoMapSdk
+import com.mywatch.kakaomap.battery.BatterySampleWorker
 import com.mywatch.kakaomap.data.ErrorLog
 import com.mywatch.kakaomap.data.RouteRepository
 import com.mywatch.kakaomap.nav.NavigationService
@@ -71,6 +72,8 @@ class MapApp : Application() {
         }
         // 업데이트 저장소가 정해져 있으면 주기적으로 새 버전 확인
         if (UpdateManager.repo(this) != null) UpdateWorker.schedule(this)
+        // 배터리 표본 15분마다 (배터리 화면·PC 툴킷의 재료) — 이미 예약돼 있으면 그대로
+        BatterySampleWorker.schedule(this)
         // 화면이 하나라도 떠 있는지 센다 — 쓰는 도중에 업데이트 설치로 앱이 꺼지지 않게,
         // 그리고 화면을 다 닫는 순간 미뤄 둔 업데이트를 바로 설치하려고
         registerActivityLifecycleCallbacks(object : ActivityLifecycleCallbacks {

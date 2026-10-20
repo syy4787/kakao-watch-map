@@ -20,6 +20,12 @@
     <!-- 안내 종료 버튼 -->
     <color name="end_red">#E2382F</color>
 
+    <!-- 배터리 화면 판정 색: 정상·주의·비정상·모름 -->
+    <color name="grade_normal">#5AD17A</color>
+    <color name="grade_caution">#FFC107</color>
+    <color name="grade_abnormal">#E2382F</color>
+    <color name="grade_unknown">#B0B3B8</color>
+
     <!-- 유튜브 음악 화면 (유튜브 뮤직처럼: 검은 바탕 · 어두운 회색 카드 · 흰 주 버튼 · 회색 둘째 줄) -->
     <color name="tube_surface">#1F1F1F</color>
     <color name="tube_art">#2E2E2E</color>

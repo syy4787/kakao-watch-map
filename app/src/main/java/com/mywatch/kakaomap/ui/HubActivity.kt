@@ -10,6 +10,7 @@ import androidx.activity.ComponentActivity
 import androidx.lifecycle.lifecycleScope
 import com.mywatch.kakaomap.MainActivity
 import com.mywatch.kakaomap.R
+import com.mywatch.kakaomap.battery.BatteryActivity
 import com.mywatch.kakaomap.tube.TubeAccount
 import com.mywatch.kakaomap.update.UpdateActivity
 import com.mywatch.kakaomap.update.UpdateManager
@@ -34,6 +35,8 @@ class HubActivity : ComponentActivity() {
         findViewById<View>(R.id.open_tube).setOnClickListener { open(TubeActivity::class.java) }
         // 누르면 확인하고 새 버전이면 곧바로 받아 설치 (버전·오류 기록 같은 앱 정보도 그 화면에)
         updateButton.setOnClickListener { startActivity(UpdateActivity.updateNowIntent(this)) }
+        // 배터리 기록·판정 화면 — 이 작업 위에 열려 뒤로 가면 첫 화면으로
+        findViewById<View>(R.id.open_battery).setOnClickListener { startActivity(Intent(this, BatteryActivity::class.java)) }
         // 유튜브 로그인 토큰은 키 저장소로 풀어 읽는다 (워치에선 수십 ms) — 유튜브를 누르기 전에 미리 읽어 둔다
         val app = applicationContext
         lifecycleScope.launch(Dispatchers.IO) { runCatching { TubeAccount.auth(app).signedIn } }

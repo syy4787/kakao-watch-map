@@ -12,6 +12,7 @@ import androidx.work.Configuration
 import androidx.work.WorkManager
 import androidx.work.testing.SynchronousExecutor
 import androidx.work.testing.WorkManagerTestInitHelper
+import com.mywatch.kakaomap.battery.BatteryActivity
 import com.mywatch.kakaomap.ui.HubActivity
 import com.mywatch.kakaomap.ui.SearchActivity
 import com.mywatch.kakaomap.ui.TubeActivity
@@ -103,6 +104,16 @@ class HubTest {
         shadowOf(am).setAppTasks(emptyList())
         val tubeHub = pick(R.id.open_tube)
         assertEquals(TubeActivity::class.java.name, shadowOf(tubeHub).nextStartedActivity?.component?.className)
+    }
+
+    @Test
+    fun theBatteryButtonOpensTheBatteryScreenOnTopOfThisOne() {
+        val hub = pick(R.id.open_battery)
+        val started = shadowOf(hub).nextStartedActivity
+        assertNotNull(started)
+        assertEquals(BatteryActivity::class.java.name, started.component?.className)
+        assertEquals("같은 작업 위에 (뒤로 가면 첫 화면)", 0, started.flags and Intent.FLAG_ACTIVITY_NEW_TASK)
+        assertFalse(hub.isFinishing)
     }
 
     // ───── 새 버전 알기 (집 밖에서도) ─────
