@@ -22,6 +22,14 @@ dependencies {
 
 tasks.test {
     useJUnit()
+    // 신고문 파일 이름이 한글이라 테스트 JVM 도 UTF-8 로케일이어야 한다 (POSIX 로케일 환경에서는 sun.jnu.encoding 이 ASCII 가 됨)
+    environment("LC_ALL", "C.UTF-8")
+    jvmArgs("-Dfile.encoding=UTF-8", "-Dsun.jnu.encoding=UTF-8", "-Djava.awt.headless=true")
+}
+
+// 기본 jar 도 battery-doctor.jar 라는 이름을 쓰므로 fatJar 와 출력이 겹친다 → 기본(얇은) jar 에 분류자를 붙여 비켜 준다
+tasks.jar {
+    archiveClassifier.set("thin")
 }
 
 /** 모든 의존성을 넣은 실행 JAR (battery-doctor.jar) */

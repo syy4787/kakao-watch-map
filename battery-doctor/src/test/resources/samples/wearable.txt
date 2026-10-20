@@ -1,0 +1,11 @@
+SERVICE com.google.android.gms/.wearable.service.WearableService 1a2b3c pid=2877 user=0
+  Client:
+    WearableService
+    ========= Connections =========
+    Node: watch-ABCD (local)
+    Peer: phone-ABCD connected=true transport=BLE
+    ========= DataService =========
+    DataItems: 142 total, 3 changed in last hour
+    ========= RpcService =========
+    Messages sent: 1203, received: 980 (since boot)
+    Top senders (last hour): com.example.drain 410, com.samsung.android.wear.shealth 52

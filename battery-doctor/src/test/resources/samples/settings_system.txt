@@ -1,0 +1,4 @@
+screen_brightness=102
+screen_brightness_mode=1
+screen_off_timeout=30000
+sound_effects_enabled=0

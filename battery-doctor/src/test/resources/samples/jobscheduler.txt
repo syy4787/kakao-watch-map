@@ -1,0 +1,30 @@
+Settings:
+  (생략)
+
+Registered 14 jobs:
+  JOB #u0a123/1: 1a2b3c com.example.drain/.SyncJob
+    u0a123 tag=*job*/com.example.drain/.SyncJob
+    Source: uid=u0a123 user=0 pkg=com.example.drain
+    JobInfo:
+      Service: com.example.drain/.SyncJob
+      PERIODIC: interval=+15m0s0ms flex=+5m0s0ms
+      Requires: charging=false batteryNotLow=false deviceIdle=false
+      Network type: NetworkRequest [ NONE id=0, [ Capabilities: INTERNET&NOT_RESTRICTED&TRUSTED&VALIDATED Uid: 10123 ] ]
+    Required constraints: TIMING_DELAY CONNECTIVITY [0x90000000]
+    Satisfied constraints: CONNECTIVITY DEVICE_NOT_DOZING BACKGROUND_NOT_RESTRICTED WITHIN_QUOTA [0x35000000]
+    Standby bucket: ACTIVE
+    Enqueue time: -14m0s0ms
+    Run time: earliest=+1m0s0ms, latest=+6m0s0ms, original latest=+6m0s0ms
+    Ready: false (job=false user=true !restricted=true !pending=true !active=true !backingup=true comp=true)
+  JOB #u0a45/42: 4d5e6f com.google.android.gms/.chimera.GmsTaskSchedulerService
+    u0a45 tag=*job*/com.google.android.gms/.chimera.GmsTaskSchedulerService
+    Source: uid=u0a45 user=0 pkg=com.google.android.gms
+    JobInfo:
+      Service: com.google.android.gms/.chimera.GmsTaskSchedulerService
+      PERIODIC: interval=+1h0m0s0ms flex=+15m0s0ms
+    Standby bucket: ACTIVE
+
+Job history:
+     -1m2s0ms   START: #u0a123/1 com.example.drain/.SyncJob
+     -2m0s0ms    STOP: #u0a123/1 com.example.drain/.SyncJob app called jobFinished
+    -16m0s0ms   START: #u0a123/1 com.example.drain/.SyncJob

@@ -1,0 +1,4 @@
+system-excidle,com.android.providers.calendar,10012
+system-excidle,com.google.android.gms,10045
+system,com.android.providers.downloads,10013
+user,com.example.drain,10123

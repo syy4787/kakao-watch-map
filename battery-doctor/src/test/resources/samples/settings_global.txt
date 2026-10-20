@@ -1,0 +1,15 @@
+adaptive_battery_management_enabled=0
+adb_enabled=1
+adb_wifi_enabled=1
+airplane_mode_on=0
+app_standby_enabled=1
+ble_scan_always_enabled=1
+bluetooth_on=1
+device_name=Galaxy Watch9 (ABCD)
+development_settings_enabled=1
+low_power=0
+mobile_data=1
+stay_on_while_plugged_in=0
+wifi_on=1
+wifi_scan_always_enabled=1
+wifi_sleep_policy=2

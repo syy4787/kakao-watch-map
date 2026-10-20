@@ -1,0 +1,23 @@
+Activity Resolver Table:
+  (생략)
+
+Packages:
+  Package [com.google.android.gms] (1a2b3c4):
+    userId=10045
+    pkg=Package{5d6e7f com.google.android.gms}
+    codePath=/data/app/~~abc==/com.google.android.gms-def==
+    versionCode=263935020 minSdk=36 targetSdk=37
+    minExtensionVersions=[]
+    versionName=26.39.35 (240400-123456789)
+    splits=[base]
+    apkSigningVersion=3
+    flags=[ SYSTEM HAS_CODE ALLOW_CLEAR_USER_DATA UPDATED_SYSTEM_APP ALLOW_BACKUP LARGE_HEAP ]
+    timeStamp=2026-10-10 03:12:00
+    lastUpdateTime=2026-10-10 03:12:00
+    installerPackageName=com.android.vending
+
+Hidden system packages:
+  Package [com.google.android.gms] (8f9a0b1):
+    userId=10045
+    versionCode=262012000 minSdk=36 targetSdk=37
+    versionName=26.20.12 (240400-000000000)

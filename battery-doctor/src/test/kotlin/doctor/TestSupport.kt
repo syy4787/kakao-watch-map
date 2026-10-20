@@ -61,3 +61,12 @@ fun sample(name: String): String {
 }
 
 fun sampleFile(name: String): File = File(Thread.currentThread().contextClassLoader.getResource("samples/$name")!!.toURI())
+
+/** 견본 전부를 복사한 스냅샷 폴더 `root/snapshots/20261019-220105/` */
+fun sampleSnapshot(root: File, except: Set<String> = emptySet()): Snapshot {
+    val dir = File(root, "snapshots/20261019-220105").apply { mkdirs() }
+    val src = sampleFile("battery.txt").parentFile
+    src.listFiles()!!.filter { it.isFile && it.nameWithoutExtension !in except && it.name !in except }.forEach { it.copyTo(File(dir, it.name), overwrite = true) }
+    File(dir, "meta.properties").writeText("time=1792414865000\nserial=192.168.0.23\\:5555\nmodel=SM-L350\n")
+    return Snapshot(dir)
+}

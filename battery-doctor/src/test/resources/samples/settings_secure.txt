@@ -1,0 +1,6 @@
+ambient_enabled=1
+android_id=0123456789abcdef
+bluetooth_name=Galaxy Watch9 (ABCD)
+location_mode=3
+screensaver_enabled=0
+wear_os_smart_reply=1
