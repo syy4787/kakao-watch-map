@@ -11,6 +11,7 @@ import androidx.lifecycle.lifecycleScope
 import com.mywatch.kakaomap.MainActivity
 import com.mywatch.kakaomap.R
 import com.mywatch.kakaomap.battery.BatteryActivity
+import com.mywatch.kakaomap.battery.Guardian
 import com.mywatch.kakaomap.tube.TubeAccount
 import com.mywatch.kakaomap.update.UpdateActivity
 import com.mywatch.kakaomap.update.UpdateManager
@@ -51,6 +52,8 @@ class HubActivity : ComponentActivity() {
         UpdateManager.prefsForListening(this).registerOnSharedPreferenceChangeListener(updateListener)
         // 마지막 확인이 5분 넘었으면 새 버전 확인 → 있으면 버튼이 파랗게 (집 밖에서도 — 6시간마다 하는 확인만으론 한참 모름)
         UpdateWorker.onAppOpened(this)
+        // 아침에 앱을 열었으면 배터리 지킴이의 밤 모드(절전·AOD 끔)를 바로 끝낸다
+        lifecycleScope.launch(Dispatchers.IO) { runCatching { Guardian.onUserOpenedApp(this@HubActivity) } }
     }
 
     override fun onPause() {

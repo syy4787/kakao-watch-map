@@ -26,7 +26,8 @@ class BatterySampleWorker(context: Context, params: WorkerParameters) : Worker(c
             BatteryProbe.read(applicationContext, event, note)?.let { log.append(it) }
             if (event == Event.PERIODIC) {
                 log.pruneIfDue()
-                BatteryAlerts.check(applicationContext, log)
+                // 지킴이: 밤·비정상 소모 대응과 알림 (권한이 없으면 알림만)
+                Guardian.tick(applicationContext, log)
             }
         } catch (e: Exception) {
             ErrorLog.record("배터리·기록", e)

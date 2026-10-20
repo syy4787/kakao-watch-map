@@ -11,6 +11,7 @@ import com.mywatch.kakaomap.battery.BatteryLog
 import com.mywatch.kakaomap.ui.Row
 import com.mywatch.kakaomap.ui.RowAdapter
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -111,5 +112,18 @@ class BatteryActivityTest {
         assertTrue(log.summaryFile.exists())
         assertTrue(log.summaryFile.readText().contains("[판정]"))
         assertTrue(rows(adapter).filterIsInstance<Row.Note>().any { it.text.contains("요약 저장됨") })
+    }
+
+    @Test
+    fun guardianTogglesFlipTheConfigAndNoPermissionIsExplained() {
+        val (a, adapter) = open()
+        assertTrue(rows(adapter).filterIsInstance<Row.Note>().any { it.text.contains("메뉴 7") })
+        val before = com.mywatch.kakaomap.battery.Guardian.config(context)
+        assertTrue(before.nightSaver)
+        click(a, adapter, BatteryActivity.A_TOGGLE + BatteryActivity.T_NIGHT_SAVER)
+        assertFalse(com.mywatch.kakaomap.battery.Guardian.config(context).nightSaver)
+        assertTrue(rows(adapter).filterIsInstance<Row.Action>().any { it.id == BatteryActivity.A_TOGGLE + BatteryActivity.T_NIGHT_SAVER && it.text.endsWith("꺼짐") })
+        click(a, adapter, BatteryActivity.A_TOGGLE + BatteryActivity.T_NIGHT_LOCATION)
+        assertTrue(com.mywatch.kakaomap.battery.Guardian.config(context).nightLocationOff)
     }
 }

@@ -45,6 +45,21 @@
     <uses-permission android:name="android.permission.POST_PROMOTED_NOTIFICATIONS" />
     <!-- 배터리 기록: 부팅 순간을 한 줄 남기고 15분 기록을 다시 예약 (일반 권한, 묻지 않음) -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- 배터리 지킴이 — 아래 넷은 '개발용(development)' 보호 권한이라 앱이 요청해도 저절로 받지 못하고,
+         PC 에서 `adb shell pm grant com.mywatch.kakaomap <권한>` 으로 한 번 줘야 켜진다 (PC 툴킷 메뉴 7). 없으면 그 기능만 쉰다 -->
+    <!-- 다른 앱의 웨이크락·CPU·센서 사용량(HealthStats) — '앱별 소모'와 비정상 알림의 범인 이름 -->
+    <uses-permission android:name="android.permission.BATTERY_STATS" tools:ignore="ProtectedPermissions" />
+    <!-- 절전 모드(low_power)·AOD·위치 설정을 밤과 비정상 소모 때 직접 켜고 끄기 -->
+    <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.DUMP" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.READ_LOGS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.WRITE_SETTINGS" tools:ignore="ProtectedPermissions" />
+    <!-- 밤에 계정 자동 동기화 끄기/복구 (일반 권한) -->
+    <uses-permission android:name="android.permission.READ_SYNC_SETTINGS" />
+    <uses-permission android:name="android.permission.WRITE_SYNC_SETTINGS" />
+    <!-- 설치된 모든 앱의 uid·이름 — 앱별 소모를 이름으로 보여 주려고 (스토어에 올리는 앱이 아님) -->
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" tools:ignore="QueryAllPackagesPermission" />
 
     <application
         android:name=".MapApp"
@@ -141,6 +156,10 @@
             android:name=".battery.BatteryActivity"
             android:exported="false"
             android:taskAffinity="com.mywatch.kakaomap.hub" />
+        <!-- 배터리 지킴이 알림의 '되돌리기' -->
+        <receiver
+            android:name=".battery.GuardianReceiver"
+            android:exported="false" />
         <!-- 충전기 꽂음·뺌, 부팅, 배터리 부족 순간을 배터리 기록에 한 줄 (부팅 뒤 15분 기록도 다시 예약) -->
         <receiver
             android:name=".battery.BatteryEventsReceiver"

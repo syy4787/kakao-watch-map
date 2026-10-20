@@ -98,6 +98,9 @@ class BatteryActivity : ComponentActivity() {
             v.headline, v.reasons.takeIf { it.isNotEmpty() }?.joinToString("\n"), key = "verdict",
         )
 
+        rows += guardianRows()
+        rows += appRows(now)
+
         rows += Row.Header("밤사이")
         rows += Row.Note(BatterySummary.overnightLine(a))
 
@@ -129,6 +132,58 @@ class BatteryActivity : ComponentActivity() {
         ui.rows = rows
     }
 
+    /** 지킴이: 권한 상태, 지금 해 둔 것, 켜고 끄기 */
+    private fun guardianRows(): List<Row> {
+        val rows = ArrayList<Row>()
+        rows += Row.Header("배터리 지킴이")
+        val levers = Levers(this)
+        val stats = HealthReader(this).available
+        val st = Guardian.state(this)
+        val cfg = Guardian.config(this)
+        if (!levers.canWriteSecure && !stats) {
+            rows += Row.Note("PC 툴킷에서 메뉴 7(권한 주기)을 한 번 실행하면 켜집니다 — 앱별 소모를 읽고, 밤과 비정상 소모 때 절전 모드·AOD 를 스스로 조절합니다")
+        } else {
+            val powers = listOfNotNull(if (stats) "앱별 통계" else null, if (levers.canWriteSecure) "설정 조절" else null)
+            rows += Row.Note("권한: ${powers.joinToString(" · ")}" + (if (!levers.canWriteSecure) " (설정 조절 권한 없음 — 알림만)" else ""))
+        }
+        val now = System.currentTimeMillis()
+        val status = when {
+            st.nightActive -> "지금: 밤 모드 적용 중(아침·충전 때 원래대로)"
+            st.abnormalActive -> "지금: 비정상 소모 대응 중(절전 모드 켬)"
+            now < st.userOverrideUntil -> "지금: 사용자가 꺼서 ${BatterySummary.time(st.userOverrideUntil)}까지 쉼"
+            else -> "지금: 대기 중"
+        }
+        rows += Row.Note(status + (Guardian.lastAction(this)?.let { "\n마지막: $it" } ?: ""))
+        if (st.nightActive || st.abnormalActive || levers.holdsAnything) rows += Row.Action(A_RESTORE, R.drawable.ic_refresh, "지금 되돌리기", accent = true)
+        fun toggle(id: String, on: Boolean, label: String) = Row.Action(id, if (on) R.drawable.ic_check else R.drawable.ic_close, "$label · ${if (on) "켜짐" else "꺼짐"}", accent = on)
+        rows += toggle("$A_TOGGLE${T_NIGHT_SAVER}", cfg.nightSaver, "밤(00~07시) 절전 모드")
+        rows += toggle("$A_TOGGLE${T_NIGHT_AOD}", cfg.nightAodOff, "밤에 AOD 끄기" + (if (levers.aodKey == null && levers.canWriteSecure) " (이 워치엔 키 없음)" else ""))
+        rows += toggle("$A_TOGGLE${T_NIGHT_LOCATION}", cfg.nightLocationOff, "밤에 위치 끄기")
+        rows += toggle("$A_TOGGLE${T_NIGHT_SYNC}", cfg.nightSyncOff, "밤에 계정 동기화 끄기")
+        rows += toggle("$A_TOGGLE${T_ABNORMAL}", cfg.abnormalSaver, "비정상 소모면 바로 절전")
+        rows += toggle("$A_TOGGLE${T_REMINDER}", cfg.chargeReminder, "잠자기 전 충전 알림")
+        rows += Row.Note("밤 모드는 화면이 30분 넘게 꺼져 있을 때만 시작하고, 절전을 손수 끄면 12시간 쉽니다")
+        return rows
+    }
+
+    /** 앱별 소모 (최근 2시간) — 권한이 있을 때만 */
+    private fun appRows(now: Long): List<Row> {
+        val rows = ArrayList<Row>()
+        rows += Row.Header("앱별 소모 (최근 2시간)")
+        if (!HealthReader(this).available) {
+            rows += Row.Note("PC 툴킷 메뉴 7(권한 주기) 뒤에 보입니다")
+            return rows
+        }
+        val ranked = Guardian.culprits(this, now)
+        if (ranked.isEmpty()) { rows += Row.Note("아직 두 번째 기록 전입니다 (15분 뒤부터)"); return rows }
+        ranked.take(8).forEach { r ->
+            val sub = (r.flags.filter { it != "이 앱" } + r.summary).joinToString(" · ")
+            val name = HealthStore.label(this, r.use.pkg) + (if ("이 앱" in r.flags) " (이 앱)" else "")
+            rows += Row.Step(color(r.grade), R.drawable.ic_battery, if (r.grade == Grade.NORMAL) null else r.grade.label, name, sub, key = "app:${r.use.pkg}")
+        }
+        return rows
+    }
+
     private fun renderLive() {
         if (picking || analysis == null || ui.rows.isEmpty()) return
         val first = ui.rows.firstOrNull() as? Row.Header ?: return
@@ -147,6 +202,23 @@ class BatteryActivity : ComponentActivity() {
     private fun onRow(row: Row) {
         if (row !is Row.Action) return
         when {
+            row.id == A_RESTORE -> {
+                lifecycleScope.launch { withContext(Dispatchers.IO) { runCatching { Guardian.restoreNow(this@BatteryActivity) } }; notice = "원래대로 되돌렸습니다 (12시간 쉼)"; render() }
+            }
+            row.id.startsWith(A_TOGGLE) -> {
+                val cfg = Guardian.config(this)
+                val next = when (row.id.removePrefix(A_TOGGLE)) {
+                    T_NIGHT_SAVER -> cfg.copy(nightSaver = !cfg.nightSaver)
+                    T_NIGHT_AOD -> cfg.copy(nightAodOff = !cfg.nightAodOff)
+                    T_NIGHT_LOCATION -> cfg.copy(nightLocationOff = !cfg.nightLocationOff)
+                    T_NIGHT_SYNC -> cfg.copy(nightSyncOff = !cfg.nightSyncOff)
+                    T_ABNORMAL -> cfg.copy(abnormalSaver = !cfg.abnormalSaver)
+                    T_REMINDER -> cfg.copy(chargeReminder = !cfg.chargeReminder)
+                    else -> cfg
+                }
+                Guardian.saveConfig(this, next)
+                render()
+            }
             row.id == A_EXP_START -> { picking = true; render() }
             row.id == A_CANCEL -> { picking = false; render() }
             row.id.startsWith(A_MODE) -> {
@@ -199,11 +271,19 @@ class BatteryActivity : ComponentActivity() {
         const val A_MODE = "mode:"
         const val A_CANCEL = "cancel"
         const val A_SUMMARY = "summary"
+        const val A_RESTORE = "g:restore"
+        const val A_TOGGLE = "g:toggle:"
+        const val T_NIGHT_SAVER = "nightSaver"
+        const val T_NIGHT_AOD = "nightAod"
+        const val T_NIGHT_LOCATION = "nightLocation"
+        const val T_NIGHT_SYNC = "nightSync"
+        const val T_ABNORMAL = "abnormal"
+        const val T_REMINDER = "reminder"
         val MODES = listOf("비행기 모드", "절전 모드", "시계만 사용", "평소대로")
         const val HELP = "• 강제 재시작: 홈 + 뒤로 버튼을 꺼질 때까지(7초 이상) 누르기. 효과 없으면 30초.\n" +
             "• 설정 > 배터리 > 헬스 기능 제한 / 대기 중인 앱\n" +
             "• 설정 > 버튼 및 제스처 > 손목 올려 말하기 끄기\n" +
             "• 설정 > 디스플레이 > Always On Display 끄기\n" +
-            "• 비정상이 계속되면 PC 툴킷(battery-doctor)으로 범인 앱을 찾고 증거 파일을 만드세요"
+            "• PC 툴킷(battery-doctor) 메뉴 8(자동 치료): 권한 주기 → 범인 앱 백그라운드 제한 → 통계 초기화를 한 번에"
     }
 }

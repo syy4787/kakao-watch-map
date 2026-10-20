@@ -271,6 +271,16 @@ Kotlin/JVM 17 CLI, 의존성은 kotlin-stdlib + battery-core만(JSON은 직접 �
 - 강함 등급 조치는 기본 꺼짐·재확인. 모든 조치는 기록·되돌리기.
 - `pm disable-user`는 핵심 시스템 패키지를 거부 목록으로 막는다(Play 서비스, Samsung Health, 시스템 UI, 설정, 전화, 연결 관리자 등).
 
+## 5-1. 배터리 지킴이 (2차, 2026-10-20) — 진단을 넘어 워치가 스스로 막기
+
+사용자 요구: "증거 말고 해결책을 만들어라". 루트 없이 가능한 최대치는 **PC 에서 한 번 `pm grant` 로 개발용 권한을 받은 뒤, 워치 앱이 스스로 레버를 당기는 것**이다.
+
+- 권한(PC 툴킷 메뉴 7 '권한 주기', `pm grant com.mywatch.kakaomap …`): `BATTERY_STATS`(다른 앱의 HealthStats — 웨이크락·CPU·센서·GPS·동기화), `WRITE_SECURE_SETTINGS`(절전 `low_power`, AOD `ambient_enabled`, 위치 `location_mode`), `DUMP`·`READ_LOGS`(예비), appops `GET_USAGE_STATS`·`WRITE_SETTINGS`. 동기화는 일반 권한(`WRITE_SYNC_SETTINGS`). 모두 개발용(development) 보호 수준이라 adb 로 줄 수 있고, 매니페스트에 선언해 두어야 한다.
+- `battery-core`: `AppDrain`(누적 → 구간 사용량 차, 순위·표시: 웨이크락 시간당 18.5초(vitals)·구간 절반 이상이면 stuck·GPS·화면 밖 센서), `GuardianRules`(밤 모드 시작/끝, 비정상 대응, 사용자 override 12시간, 잠자기 전 충전 알림 — 순수 함수, 시험 7개).
+- 워치 앱: `HealthReader`(SystemHealthManager.takeUidSnapshots, QUERY_ALL_PACKAGES 로 uid→패키지), `HealthStore`(15분 차를 24시간 보관), `Levers`(바꾸기 전 값 기억·복구), `Guardian`(틱·알림·되돌리기 수신기), 배터리 화면의 '배터리 지킴이'·'앱별 소모(최근 2시간)' 구역.
+- 규칙: 밤(00~07시) + 화면 30분 넘게 꺼짐 + 충전 중 아님 → 절전·AOD 끔(옵션: 위치·동기화) → 아침 7시/충전/기상(05시 이후 화면 켬) 때 복구. 화면 꺼진 채 2시간 ≥5%/h → 절전 + 알림(범인 앱 2개, '앱 정보'·'되돌리기' 버튼), 6시간 뒤 풀고 다시 잼. 22:30 이후 하루 한 번 아침 7시 예상 잔량 < 15% 면 "N분 충전" 알림(분당 1%p 기준, 목표 25%). 사용자가 절전을 손수 끄면 12시간 쉼.
+- 한계(솔직하게): 다른 앱을 강제 종료·제한하는 건 여전히 ADB(툴킷 메뉴 8 '자동 치료')로만 가능. 삼성 절전 모드가 `low_power` 설정을 따르는지는 첫 실기기에서 확인해야 한다(안 따르면 지킴이는 '사용자가 끔'으로 보고 물러나며, 알림은 그대로 동작).
+
 ## 6. 열린 가정 (첫 실제 수집으로 확정)
 
 - 워치가 `BATTERY_PROPERTY_CHARGE_COUNTER`를 앱에 주는지(없으면 mAh/h·용량 추정은 "측정 불가"로 표시).
