@@ -245,11 +245,10 @@ jobs:
         run: |
           shopt -s nullglob
           FILES=(kakao-watch-map.apk kakao-watch-map-armeabi-v7a.apk kakao-watch-map-arm64-v8a.apk update.json deltas/*.kwdelta battery-doctor.zip)
+          # 릴리스 설명: 커밋 제목 + PC 툴킷 안내 한 줄 (YAML 블록 안이라 줄바꿈은 printf 로)
+          BODY=$(printf '%s\n\nPC 툴킷(Windows): battery-doctor.zip — 압축을 풀고 BatteryDoctor.bat 실행 (Android Studio 의 Java·adb 를 자동으로 찾음). 사용법은 안의 README.txt' "$NOTES")
           gh release create "v$VERSION_CODE" "${FILES[@]}" \
-            --target "$GITHUB_SHA" --title "v$VERSION_NAME" --latest \
-            --notes "$NOTES
-
-PC 툴킷(Windows): battery-doctor.zip — 압축을 풀고 BatteryDoctor.bat 실행 (Android Studio 의 Java·adb 를 자동으로 찾음). 사용법은 안의 README.txt"
+            --target "$GITHUB_SHA" --title "v$VERSION_NAME" --notes "$BODY" --latest
 
       - name: Clean up secrets
         if: always()
