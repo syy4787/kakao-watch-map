@@ -304,7 +304,8 @@ object Evidence {
         return when (id.substring(0, colon)) {
             "disable" -> "앱 비활성화: $arg"; "bg-restrict" -> "백그라운드 실행 제한: $arg"; "bucket-restricted" -> "대기 버킷 restricted: $arg"
             "doze-unwhitelist" -> "Doze 예외 해제: $arg"; "force-stop" -> "강제 종료: $arg"; "clear" -> "앱 데이터 삭제: $arg"
-            "rollback" -> "시스템 앱 업데이트 제거: $arg"; "screen-timeout" -> "화면 자동 꺼짐 ${arg.toLongOrNull()?.let { it / 1000 } ?: arg}초"; else -> id
+            "rollback" -> "시스템 앱 업데이트 제거: $arg"; "screen-timeout" -> "화면 자동 꺼짐 ${arg.toLongOrNull()?.let { it / 1000 } ?: arg}초"
+            "grant" -> "워치 앱 권한 주기: ${arg.removePrefix("android.permission.")}"; else -> id
         }
     }
 

@@ -31,6 +31,30 @@ class MainTest {
         Main.parse(arrayOf("evidence", "--purchase", "2026-08-07")).let { assertEquals("2026-08-07", it.flag("purchase")) }
         Main.parse(arrayOf("analyze", "/tmp/x")).let { assertEquals(listOf("/tmp/x"), it.positional) }
         assertEquals("help", Main.parse(arrayOf("--help")).command)
+        Main.parse(arrayOf("treat", "--strong", "--yes", "--no-grant", "--bugreport")).let {
+            assertEquals("treat", it.command)
+            assertTrue(it.has("strong")); assertTrue(it.has("yes")); assertTrue(it.has("no-grant")); assertTrue(it.has("bugreport"))
+        }
+        Main.parse(arrayOf("treat")).let { assertFalse(it.has("strong")); assertFalse(it.has("no-grant")) }
+        assertEquals("grant", Main.parse(arrayOf("grant")).command)
+    }
+
+    @Test
+    fun helpListsGrantAndTreat() {
+        val (code, out) = run(fakeAdb(), tmp.newFolder("data"), "help")
+        assertEquals(0, code)
+        assertTrue(out.contains("grant"))
+        assertTrue(out.contains("treat [--strong] [--yes] [--no-grant] [--bugreport]"))
+        assertTrue(out.contains("undo --all"))
+    }
+
+    @Test
+    fun menuHasGrantAndTreatItems() {
+        val (code, out) = run(fakeAdb(), tmp.newFolder("data"), answers = listOf("9", "0"))
+        assertEquals(0, code)
+        assertTrue(out.contains(" 7  권한 주기"))
+        assertTrue(out.contains(" 8  자동 치료"))
+        assertTrue(out.contains("0~8 중에서 고르세요"))
     }
 
     private fun fakeAdb() = FakeAdb(addr).apply {

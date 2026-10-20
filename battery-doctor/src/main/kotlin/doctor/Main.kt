@@ -71,6 +71,10 @@ object Main {
         "  fix [--apply id,id] [--yes] 차단 조치 목록 → 적용 (journal.jsonl 에 기록)",
         "  undo [--all | 번호]          적용한 조치 되돌리기 (번호는 목록에 표시된 번호)",
         "  evidence [--purchase yyyy-MM-dd]  증거 패키지(보고서·원자료·신고문 3종·공유용 마스킹본·zip)",
+        "  grant                       워치 앱(배터리 지킴이)에 특수 권한 주기 — 기록되며 undo --all 로 회수",
+        "  treat [--strong] [--yes] [--no-grant] [--bugreport]",
+        "                              자동 치료: 권한 → 수집·분석 → 안전·추천 조치 자동 적용 → 측정 시작 (질문 없음)",
+        "                              --strong 은 강함 등급도 후보에 넣고 항목마다 yes 확인(--yes 로 생략), --no-grant 는 권한 주기 생략",
     )
 
     fun run(
@@ -90,7 +94,28 @@ object Main {
             "fix" -> ctx.fix(a.flag("apply"), a.has("yes"))
             "undo" -> ctx.undo(a.has("all"), a.positional.firstOrNull())
             "evidence" -> ctx.evidence(a.flag("purchase"))
+            "grant" -> ctx.grant()
+            "treat" -> ctx.treat(Treat.Options(strong = a.has("strong"), yes = a.has("yes"), grant = !a.has("no-grant"), bugreport = a.has("bugreport")))
             else -> { io.println("모르는 명령입니다: ${a.command}"); HELP.forEach { io.println(it) }; 2 }
+        }
+    }
+
+    /** 판정 요약을 콘솔에 — collect / analyze / treat 가 같이 쓴다. [opened] 가 null 이면 브라우저 안내를 생략 */
+    fun printVerdict(io: Console, findings: List<Finding>, v: DoctorVerdict, report: File, opened: Boolean?) {
+        io.println()
+        io.println("━━ 판정: ${v.cause.label} (신뢰도 ${v.confidence})")
+        io.println("   ${v.headline}")
+        if (v.why.isNotEmpty()) { io.println("   근거:"); v.why.take(8).forEach { io.println("    - $it") } }
+        io.println("   지금 할 일:")
+        v.todo.forEachIndexed { i, t -> io.println("    ${i + 1}. $t") }
+        val abnormal = findings.count { it.severity == Severity.ABNORMAL }
+        val caution = findings.count { it.severity == Severity.CAUTION }
+        io.println("   소견: 비정상 ${abnormal}개, 주의 ${caution}개, 참고 ${findings.size - abnormal - caution}개")
+        io.println("   보고서: ${report.absolutePath}")
+        when (opened) {
+            true -> io.println("   (브라우저로 열었습니다)")
+            false -> io.println("   (브라우저를 열 수 없어 경로만 표시합니다 — 파일을 더블클릭해 여세요)")
+            null -> {}
         }
     }
 
@@ -111,6 +136,8 @@ object Main {
                 io.println(" 4  차단 조치    추천 조치를 골라 적용 (모두 기록되고 되돌릴 수 있음)")
                 io.println(" 5  되돌리기     적용한 조치를 역순으로 복구")
                 io.println(" 6  증거 패키지  보고서·원자료·신고문 3종 + 공유용 마스킹본(share/) + zip")
+                io.println(" 7  권한 주기    워치 앱(배터리 지킴이)에 앱별 소모 보기·설정 자동 조절 권한을 줍니다 (기록되고 되돌릴 수 있음)")
+                io.println(" 8  자동 치료    권한 주기 → 수집·분석 → 안전·추천 조치 자동 적용 → 측정 시작까지 한 번에 (고를 것 없음)")
                 io.println(" 0  종료")
                 val pick = io.readLine("선택: ")?.trim() ?: return 0
                 when (pick) {
@@ -121,8 +148,10 @@ object Main {
                     "4" -> fix(null, false)
                     "5" -> undo(false, null)
                     "6" -> evidence(null)
+                    "7" -> grant()
+                    "8" -> treat(Treat.Options())
                     "" -> {}
-                    else -> io.println("0~6 중에서 고르세요.")
+                    else -> io.println("0~8 중에서 고르세요.")
                 }
             }
         }
@@ -174,18 +203,20 @@ object Main {
             val findings = Analyzer.findings(f)
             val v = Analyzer.verdict(f, findings)
             val report = HtmlReport.write(snap, f, findings, v, zone)
-            io.println()
-            io.println("━━ 판정: ${v.cause.label} (신뢰도 ${v.confidence})")
-            io.println("   ${v.headline}")
-            if (v.why.isNotEmpty()) { io.println("   근거:"); v.why.take(8).forEach { io.println("    - $it") } }
-            io.println("   지금 할 일:")
-            v.todo.forEachIndexed { i, t -> io.println("    ${i + 1}. $t") }
-            val abnormal = findings.count { it.severity == Severity.ABNORMAL }
-            val caution = findings.count { it.severity == Severity.CAUTION }
-            io.println("   소견: 비정상 ${abnormal}개, 주의 ${caution}개, 참고 ${findings.size - abnormal - caution}개")
-            io.println("   보고서: ${report.absolutePath}")
-            io.println(if (open(report)) "   (브라우저로 열었습니다)" else "   (브라우저를 열 수 없어 경로만 표시합니다 — 파일을 더블클릭해 여세요)")
+            printVerdict(io, findings, v, report, open(report))
             return 0
+        }
+
+        /** 메뉴 7: 워치 앱(배터리 지킴이)에 특수 권한 주기 */
+        fun grant(): Int {
+            val adb = device() ?: return 1
+            return Grant.run(adb, io, journal, clock())
+        }
+
+        /** 메뉴 8: 자동 치료 — 권한 → 수집·분석 → 조치 → 측정 시작 */
+        fun treat(opts: Treat.Options): Int {
+            val adb = device() ?: return 1
+            return Treat.run(adb, io, dataDir, journal, opts, zone, clock, open)
         }
 
         fun reset(): Int {
