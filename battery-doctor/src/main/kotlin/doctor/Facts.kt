@@ -118,6 +118,8 @@ object Rules {
     const val GAUGE_HIGH_RATIO = 1.40
     const val SOURCE_GAUGE = "경험칙 — 전하량 계수기(Charge counter µAh) ÷ 표시 잔량으로 역산한 100% 용량이 공칭의 60% 미만 또는 140% 초과면 잔량 표시 불일치"
 
+    const val SOURCE_DRIFT = "battery-core GaugeDriftRule — 화면 꺼짐·충전 안 함·전류 60mA 이하인 쉬는 표본의 전압을 리튬폴리머 OCV 근사표(4.2V/4.35V 셀, 완충 전압으로 고름)로 잔량으로 바꿔 표시 잔량과 비교. 전하량 계수기(mAh/h)와 표시(%/h)의 차이는 가짜 소모"
+
     const val CAPACITY_LOW_PERCENT = 80.0
     const val SOURCE_CAPACITY = "삼성케어플러스 스마트폰 배터리 교체 기준 '효율 80% 미만'을 준용 (워치의 공식 기준은 미공개)"
 

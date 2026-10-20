@@ -79,6 +79,9 @@ object BatterySummary {
         appendLine("[밤사이] ${overnightLine(a)}")
         appendLine("[잔량 표시 이상] " + if (a.anomalies.isEmpty()) "없음" else a.anomalies.size.toString() + "회")
         a.anomalies.takeLast(10).forEach { appendLine(" · ${time(it.t)} ${it.label}: ${it.detail}") }
+        appendLine("[잔량 표시 점검] " + (a.drift?.let { "${it.headline} (신뢰도 ${it.confidence}, 쉬는 표본 ${it.restSamples}개, ${String.format(Locale.US, "%.2f", it.restMv / 1000.0)}V)" } ?: "쉬는 표본이 모자라 아직 모름"))
+        a.drift?.advice?.let { appendLine(" · $it") }
+        a.recoveries.take(5).forEach { appendLine(" · 재시작 ${time(it.t)}: ${it.before}% → ${it.after}% (${if (it.gained >= 0) "+" else ""}${it.gained})" + (if (it.userMarked) " (직접 표시)" else "")) }
         appendLine("[용량 추정] ${capacityLine(a, live?.chargeUah != null)}")
         val ex = experimentLines(a, now)
         appendLine("[실험] " + if (ex.isEmpty()) "없음" else "")

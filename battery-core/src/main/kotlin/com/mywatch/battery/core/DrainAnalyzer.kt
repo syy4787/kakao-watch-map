@@ -10,7 +10,8 @@ import java.util.Locale
 data class Experiment(val name: String, val start: Long, val end: Long?, val rate: Rate, val grade: Grade)
 
 /**
- * 한 줄 결론 + 근거. [tags]: "gauge"(잔량 표시 오류 의심) · "capacity"(용량 저하 의심) · "insufficient"(표본 부족)
+ * 한 줄 결론 + 근거. [tags]: "gauge"(잔량 표시 오류 의심) · "capacity"(용량 저하 의심) · "insufficient"(표본 부족) ·
+ * "drift"(전압으로 본 게이지 드리프트) · "phantom"(계수기보다 표시가 더 빨리 줄어듦 = 가짜 소모) · "hot"(화면 꺼진 채 과열)
  */
 data class Verdict(val grade: Grade, val headline: String, val reasons: List<String>, val tags: Set<String>)
 
@@ -29,6 +30,12 @@ data class Analysis(
     val capacity: CapacityEstimate?,
     val experiments: List<Experiment>,
     val verdict: Verdict,
+    /** 전압으로 본 잔량 게이지 드리프트 (쉬는 표본이 모자라면 null) */
+    val drift: GaugeDrift? = null,
+    /** 재부팅·강제 재시작 전후 잔량 회복 (최근 것부터) */
+    val recoveries: List<RestartRecovery> = emptyList(),
+    /** 최근 24시간, 충전 안 하고 화면 꺼진 채 40℃ 이상이던 표본 수 (15분마다 하나) */
+    val hotIdleCount: Int = 0,
 )
 
 /** 표본 묶음 → 소모율·이상·판정. 워치 화면과 PC 보고서가 같은 계산을 쓴다 */
@@ -45,8 +52,11 @@ class DrainAnalyzer(private val nominalMah: Int?, private val zone: ZoneId = Zon
         val anomalies = Gauge.anomalies(sorted, nominalMah)
         val capacity = Gauge.capacity(sorted, nominalMah)
         val experiments = experiments(sorted, now)
-        val verdict = verdict(span, w24, idle24, overnight, overnightLabel, anomalies, capacity, experiments)
-        return Analysis(sorted.size, span, w1, w8, w24, idle24, overnight, overnightLabel, anomalies, capacity, experiments, verdict)
+        val drift = GaugeDriftRule.estimate(sorted, now, anomalies)
+        val recoveries = GaugeDriftRule.recoveries(sorted, anomalies)
+        val hot = sorted.count { it.t >= now - 24 * 3_600_000L && it.t <= now && !it.plugged && !it.interactive && (it.tempDeciC ?: 0) >= HOT_DECI_C }
+        val verdict = verdict(span, w24, idle24, overnight, overnightLabel, anomalies, capacity, experiments, drift, recoveries, hot)
+        return Analysis(sorted.size, span, w1, w8, w24, idle24, overnight, overnightLabel, anomalies, capacity, experiments, verdict, drift, recoveries, hot)
     }
 
     /** 가장 최근에 끝난 00:00~07:00 창(기기 시간대). 그 창에 표본이 2개 미만이면 null */
@@ -95,6 +105,7 @@ class DrainAnalyzer(private val nominalMah: Int?, private val zone: ZoneId = Zon
     private fun verdict(
         span: Double, w24: Rate, idle24: Rate, overnight: Rate?, overnightLabel: String?,
         anomalies: List<GaugeAnomaly>, capacity: CapacityEstimate?, experiments: List<Experiment>,
+        drift: GaugeDrift? = null, recoveries: List<RestartRecovery> = emptyList(), hotIdleCount: Int = 0,
     ): Verdict {
         val reasons = ArrayList<String>()
         val tags = HashSet<String>()
@@ -135,6 +146,25 @@ class DrainAnalyzer(private val nominalMah: Int?, private val zone: ZoneId = Zon
             reasons += "충전 곡선으로 추정한 용량 ${fmt(capacity.estimatedMah)} mAh (공칭의 ${fmt(pct)}%)"
             if (pct < 80.0) tags += "capacity"
         }
+        // 가짜 소모: 전하량 계수기로 잰 실제 소모가 표시 소모보다 눈에 띄게 적으면 게이지 오차 (100% 의 기준은 충전 곡선으로 안 실제 용량, 모르면 공칭)
+        val fullMah = capacity?.estimatedMah ?: nominalMah?.toDouble()
+        val realPph = w24.mahPerHour?.let { mah -> fullMah?.let { mah / it * 100.0 } }
+        val shownPph = w24.percentPerHour
+        if (realPph != null && shownPph != null && shownPph - realPph >= 1.5) {
+            reasons += "표시 소모 시간당 ${fmt(shownPph)}%지만 전하량 계수기로는 ${fmt(realPph)}% — 차이만큼은 게이지 오차(가짜 소모)"
+            tags += "phantom"
+        }
+        if (drift != null && drift.suspicious) {
+            reasons += drift.headline + " (신뢰도 ${drift.confidence})"
+            tags += "drift"
+        }
+        recoveries.firstOrNull()?.let { r ->
+            if (r.gained >= Gauge.REBOOT_JUMP_MIN) reasons += "마지막 재시작 때 잔량 ${r.before}% → ${r.after}% (+${r.gained}) — 게이지 드리프트가 있었다는 증거"
+        }
+        if (hotIdleCount >= HOT_MIN_SAMPLES) {
+            reasons += "최근 24시간 충전 안 하고 화면 꺼진 채 ${HOT_DECI_C / 10}℃ 이상이 ${hotIdleCount}회(15분 표본) — 백그라운드 CPU·무선 과열, 진짜 소모 의심"
+            tags += "hot"
+        }
 
         var grade = Grade.worst(candidates.map { it.grade })
         var headline = candidates.filter { it.grade == grade }.minByOrNull { it.order }?.headline
@@ -145,14 +175,24 @@ class DrainAnalyzer(private val nominalMah: Int?, private val zone: ZoneId = Zon
         if ("gauge" in tags && grade != Grade.ABNORMAL) {
             grade = Grade.CAUTION
             headline = "잔량 표시 오류 의심 — $headline"
+        } else if (("drift" in tags || "phantom" in tags) && grade == Grade.NORMAL) {
+            grade = Grade.CAUTION
+            headline = "잔량 표시 오차 의심 — $headline"
         } else if ("capacity" in tags && grade == Grade.NORMAL) {
             grade = Grade.CAUTION
             headline = "배터리 용량 저하 의심 — $headline"
+        } else if ("hot" in tags && grade == Grade.NORMAL) {
+            grade = Grade.CAUTION
+            headline = "화면 꺼진 채 과열 — $headline"
         }
         return Verdict(grade, headline, reasons, tags)
     }
 
     companion object {
+        /** 화면 꺼진 채 이 온도(0.1℃) 이상이면 뜨거운 것으로 */
+        const val HOT_DECI_C = 400
+        /** 뜨거운 표본이 이만큼(1시간어치) 넘어야 말한다 */
+        const val HOT_MIN_SAMPLES = 4
         fun fmt(x: Double): String = String.format(Locale.US, "%.1f", x)
         fun overnightDate(now: Long, zone: ZoneId): LocalDate = Instant.ofEpochMilli(now).atZone(zone).toLocalDate()
     }

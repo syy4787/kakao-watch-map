@@ -114,6 +114,38 @@ class BatteryActivityTest {
         assertTrue(rows(adapter).filterIsInstance<Row.Note>().any { it.text.contains("요약 저장됨") })
     }
 
+    /** 잔량 표시 점검: 쉬는 전압과 표시 잔량이 크게 어긋나면 드리프트를 보여 주고, '강제 재시작' 표시 줄을 남길 수 있다 */
+    @Test
+    fun restingVoltageFarAboveTheShownLevelIsFlaggedAndTheRestartMarkerIsWritten() {
+        val now = System.currentTimeMillis()
+        // 3.95V(고전압 셀 기준 약 44%)에서 쉬는데 표시는 20% 안팎 (2시간 넘게 — 판정이 나오도록)
+        for (i in 0..11) log.append(BatterySample(t = now - (11 - i) * q, level = 22 - i / 4, voltageMv = 3950, currentUa = -20_000, interactive = false))
+        val (a, adapter) = open()
+        val drift = rows(adapter).filterIsInstance<Row.Step>().first { it.key == "drift" }
+        assertTrue(drift.title, drift.title.contains("낮게 세는 중"))
+        assertTrue(drift.sub ?: "", (drift.sub ?: "").contains("강제 재시작"))
+        val verdict = rows(adapter).filterIsInstance<Row.Step>().first { it.key == "verdict" }
+        assertTrue(verdict.title, verdict.title.contains("잔량 표시 오차 의심"))
+        click(a, adapter, BatteryActivity.A_FORCED_RESTART)
+        val until = System.currentTimeMillis() + 5_000
+        while (System.currentTimeMillis() < until && log.readAll().none { it.event == Event.USER_NOTE }) { shadowOf(Looper.getMainLooper()).idle(); Thread.sleep(20) }
+        val note = log.readAll().last { it.event == Event.USER_NOTE }
+        assertEquals("강제 재시작", note.note)
+        assertTrue(rows(adapter).filterIsInstance<Row.Note>().any { it.text.contains("표시를 남겼습니다") })
+    }
+
+    @Test
+    fun calibrationCanBeStartedAndStopped() {
+        val (a, adapter) = open()
+        assertEquals(0, com.mywatch.kakaomap.battery.Calibration.state(context).step)
+        click(a, adapter, BatteryActivity.A_CAL_START)
+        assertEquals(1, com.mywatch.kakaomap.battery.Calibration.state(context).step)
+        assertTrue(rows(adapter).filterIsInstance<Row.Note>().any { it.text.contains("1단계") })
+        click(a, adapter, BatteryActivity.A_CAL_STOP)
+        assertEquals(0, com.mywatch.kakaomap.battery.Calibration.state(context).step)
+        assertTrue(rows(adapter).filterIsInstance<Row.Action>().any { it.id == BatteryActivity.A_CAL_START })
+    }
+
     @Test
     fun guardianTogglesFlipTheConfigAndNoPermissionIsExplained() {
         val (a, adapter) = open()

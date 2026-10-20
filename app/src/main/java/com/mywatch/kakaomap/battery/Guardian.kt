@@ -14,6 +14,7 @@ import com.mywatch.battery.core.Analysis
 import com.mywatch.battery.core.AppDrain
 import com.mywatch.battery.core.AppDrainRank
 import com.mywatch.battery.core.DrainAnalyzer
+import com.mywatch.battery.core.GaugeDriftRule
 import com.mywatch.battery.core.GuardianAction
 import com.mywatch.battery.core.GuardianConfig
 import com.mywatch.battery.core.GuardianRules
@@ -35,6 +36,10 @@ object Guardian {
     const val N_ABNORMAL = 7302
     const val N_CHARGE = 7303
     const val N_NIGHT = 7304
+    /** 잔량 게이지가 실제보다 낮게 세는 중(가짜 소모) */
+    const val N_DRIFT = 7305
+    /** 게이지 보정 루틴 단계 */
+    const val N_CAL = 7306
     const val ACTION_RESTORE = "com.mywatch.kakaomap.battery.RESTORE"
 
     private const val K_NIGHT_SAVER = "g_night_saver"
@@ -52,6 +57,7 @@ object Guardian {
     private const val K_S_NIGHT_SINCE = "gs_night_since"
     private const val K_S_SAVER_SEEN = "gs_saver_seen"
     private const val K_S_SAVER_BROKEN = "gs_saver_broken"
+    private const val K_S_DRIFT_NOTIFY_AT = "gs_drift_notify_at"
     private const val K_LAST_ACTION = "gs_last_action"
 
     private fun prefs(c: Context) = c.getSharedPreferences(BatteryLog.PREFS, Context.MODE_PRIVATE)
@@ -102,6 +108,10 @@ object Guardian {
         val source = stats ?: HealthReader(c).takeIf { it.available }
         if (source != null) runCatching { HealthStore(c).record(now, source.take()) }.onFailure { ErrorLog.record("배터리·앱별 통계", it) }
 
+        // 권한이 필요 없는 것들: 게이지 보정 루틴 단계, 잔량 표시 오차 알림
+        runCatching { Calibration.tick(c, samples, now) }.onFailure { ErrorLog.record("배터리·보정", it) }
+        runCatching { checkDrift(c, analysis, now) }.onFailure { ErrorLog.record("배터리·게이지", it) }
+
         val levers = Levers(c)
         if (!levers.canWriteSecure) {
             // 설정을 못 바꾸는 동안은 알림만
@@ -113,8 +123,30 @@ object Guardian {
         val (actions, next) = GuardianRules.decide(now, zone, cfg, st, samples, analysis, levers.saverOn())
         // 설정으로 절전이 안 켜지는 워치면 절전 레버는 빼고 나머지만
         val effective = if (st.saverBroken || next.saverBroken) cfg.copy(nightSaver = false) else cfg
-        for (a in actions) runCatching { act(c, levers, effective, a, now, next.saverBroken) }.onFailure { ErrorLog.record("배터리·지킴이", it) }
+        val phantom = analysis?.verdict?.tags?.let { "phantom" in it || "drift" in it } ?: false
+        for (a in actions) runCatching { act(c, levers, effective, a, now, next.saverBroken, phantom) }.onFailure { ErrorLog.record("배터리·지킴이", it) }
         saveState(c, next)
+    }
+
+    /** 게이지가 20포인트 넘게 낮게 세는 것이 확실하고 표시 잔량이 35% 아래면 알린다 (12시간에 한 번) — 표시보다 실제가 많으니 당황할 일이 아니다 */
+    private fun checkDrift(c: Context, analysis: Analysis?, now: Long) {
+        val d = analysis?.drift ?: return
+        val p = prefs(c)
+        val last = p.getLong(K_S_DRIFT_NOTIFY_AT, 0L).takeIf { it > 0 }
+        if (!GaugeDriftRule.shouldNotify(d, now, last)) return
+        val nm = channel(c) ?: return
+        val text = "${d.headline}. ${d.advice ?: ""}".trim()
+        val n = NotificationCompat.Builder(c, CHANNEL)
+            .setSmallIcon(R.drawable.ic_warning)
+            .setContentTitle("잔량 표시가 ${-d.driftPoints}포인트 낮습니다")
+            .setContentText(text)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(text))
+            .setContentIntent(openScreen(c))
+            .setAutoCancel(true)
+            .build()
+        nm.notify(N_DRIFT, n)
+        p.edit().putLong(K_S_DRIFT_NOTIFY_AT, now).apply()
+        noteAction(c, "잔량 표시 오차 알림 (${d.driftPoints}포인트, 신뢰도 ${d.confidence})")
     }
 
     /**
@@ -134,7 +166,7 @@ object Guardian {
         noteAction(c, "앱을 열어 밤 모드 끝")
     }
 
-    private fun act(c: Context, levers: Levers, cfg: GuardianConfig, a: GuardianAction, now: Long, saverBroken: Boolean) {
+    private fun act(c: Context, levers: Levers, cfg: GuardianConfig, a: GuardianAction, now: Long, saverBroken: Boolean, phantom: Boolean = false) {
         when (a) {
             GuardianAction.SaverNotWorking -> noteAction(c, "이 워치는 설정으로 절전 모드가 켜지지 않아 절전 레버는 건너뜁니다 (AOD 등은 계속)")
             GuardianAction.NightOn -> {
@@ -150,7 +182,7 @@ object Guardian {
                 val culprits = culprits(c, now)
                 noteAction(c, "비정상 소모(시간당 ${DrainAnalyzer.fmt(a.pph)}%) — 절전 모드 ${if (ok) "켬" else "못 켬"}" +
                     culprits.take(2).joinToString(prefix = " · 의심: ") { HealthStore.label(c, it.use.pkg) })
-                if (a.notify) notifyAbnormal(c, a.pph, ok, culprits)
+                if (a.notify) notifyAbnormal(c, a.pph, ok, culprits, phantom)
             }
             GuardianAction.AbnormalOff -> { levers.restoreAbnormal(); noteAction(c, "비정상 대응 끝 — 절전 복구") }
             GuardianAction.UserOverride -> { levers.restoreAll(keepSaver = true); noteAction(c, "사용자가 절전을 꺼서 12시간 쉼") }
@@ -165,7 +197,7 @@ object Guardian {
         return AppDrain.rank(uses, covered.coerceAtLeast(15 * 60_000L), ownPkg = c.packageName)
     }
 
-    private fun channel(c: Context): NotificationManager? {
+    internal fun channel(c: Context): NotificationManager? {
         val nm = c.getSystemService(NotificationManager::class.java) ?: return null
         if (nm.getNotificationChannel(CHANNEL) == null) {
             nm.createNotificationChannel(NotificationChannel(CHANNEL, c.getString(R.string.battery_channel), NotificationManager.IMPORTANCE_DEFAULT))
@@ -173,18 +205,19 @@ object Guardian {
         return nm
     }
 
-    private fun openScreen(c: Context) = PendingIntent.getActivity(
+    internal fun openScreen(c: Context) = PendingIntent.getActivity(
         c, 0, Intent(c, BatteryActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
         PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
     )
 
-    private fun notifyAbnormal(c: Context, pph: Double, saverOn: Boolean, culprits: List<AppDrainRank>) {
+    private fun notifyAbnormal(c: Context, pph: Double, saverOn: Boolean, culprits: List<AppDrainRank>, phantom: Boolean = false) {
         val nm = channel(c) ?: return
         val names = culprits.take(2).map { HealthStore.label(c, it.use.pkg) }
         val text = buildString {
             append("화면을 거의 안 켰는데 2시간 동안 시간당 ${DrainAnalyzer.fmt(pph)}% 닳았습니다. ")
             append(if (saverOn) "절전 모드를 켰습니다(충전하면 풀림). " else "절전 모드를 켜지 못했습니다 — 직접 켜 주세요. ")
             if (names.isNotEmpty()) append("의심 앱: ${names.joinToString(", ")}. ")
+            if (phantom) append("표시 소모의 일부는 잔량 게이지 오차(가짜 소모)로 보입니다 — 배터리 화면 '잔량 표시 점검'을 보세요. ")
             append("계속되면 홈+뒤로 버튼을 꺼질 때까지 눌러 강제 재시작하세요.")
         }
         val b = NotificationCompat.Builder(c, CHANNEL)

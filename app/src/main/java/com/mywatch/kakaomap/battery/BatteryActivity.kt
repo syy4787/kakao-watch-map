@@ -9,8 +9,10 @@ import androidx.activity.ComponentActivity
 import androidx.lifecycle.lifecycleScope
 import com.mywatch.battery.core.Analysis
 import com.mywatch.battery.core.BatterySample
+import com.mywatch.battery.core.CalibrationRule
 import com.mywatch.battery.core.DrainAnalyzer
 import com.mywatch.battery.core.Event
+import com.mywatch.battery.core.GaugeDriftRule
 import com.mywatch.battery.core.Grade
 import com.mywatch.battery.core.Rate
 import com.mywatch.battery.core.Thresholds
@@ -109,6 +111,8 @@ class BatteryActivity : ComponentActivity() {
             rows += Row.Step(color(Grade.CAUTION), R.drawable.ic_warning, null, it.label, "${BatterySummary.time(it.t)} · ${it.detail}", key = "anom:${it.t}:${it.kind}")
         }
 
+        rows += driftRows(a)
+
         rows += Row.Header("용량 추정")
         rows += Row.Note(BatterySummary.capacityLine(a, live?.chargeUah != null))
 
@@ -166,6 +170,47 @@ class BatteryActivity : ComponentActivity() {
         return rows
     }
 
+    /**
+     * 잔량 표시 점검: 쉬는 전압으로 어림잡은 잔량과 표시 잔량의 차이(게이지 드리프트), 마지막 재시작 전후 잔량,
+     * '강제 재시작' 표시 남기기, 게이지 보정 루틴
+     */
+    private fun driftRows(a: Analysis): List<Row> {
+        val rows = ArrayList<Row>()
+        rows += Row.Header("잔량 표시 점검")
+        val d = a.drift
+        if (d != null) {
+            val g = when {
+                d.certain && d.driftPoints > 0 -> Grade.ABNORMAL      // 높게 세는 중 — 갑자기 꺼질 수 있다
+                d.suspicious -> Grade.CAUTION
+                else -> Grade.NORMAL
+            }
+            val sub = listOfNotNull(d.advice, "신뢰도 ${d.confidence} · 쉬는 표본 ${d.restSamples}개 · ${String.format(java.util.Locale.US, "%.2f", d.restMv / 1000.0)}V").joinToString("\n")
+            rows += Row.Step(color(g), if (g == Grade.NORMAL) R.drawable.ic_battery else R.drawable.ic_warning, if (g == Grade.NORMAL) null else g.label, d.headline, sub, key = "drift")
+        } else {
+            rows += Row.Note("화면 꺼진 채 쉬는 기록이 3개(45분) 넘게 쌓이면 쉬는 전압으로 잔량 표시가 맞는지 점검합니다")
+        }
+        a.recoveries.firstOrNull()?.let { r ->
+            val sign = if (r.gained >= 0) "+" else ""
+            rows += Row.Note("마지막 재시작 ${BatterySummary.time(r.t)}: ${r.before}% → ${r.after}% ($sign${r.gained})" + (if (r.userMarked) " · 직접 표시" else ""))
+        }
+        rows += Row.Action(A_FORCED_RESTART, R.drawable.ic_refresh, "강제 재시작 표시 남기기")
+        val cs = Calibration.state(this)
+        if (cs.active) {
+            val hold = cs.fullSince.takeIf { it > 0 }?.let { "\n완충 유지 ${((System.currentTimeMillis() - it) / 60_000L).coerceAtLeast(0)}분째 (60분이면 다음 단계)" } ?: ""
+            rows += Row.Note("게이지 보정 ${CalibrationRule.stepLabel(cs.step)}$hold")
+            rows += Row.Action(A_CAL_STOP, R.drawable.ic_close, "보정 그만두기")
+        } else {
+            if (cs.step == CalibrationRule.STEP_DONE) {
+                val before = cs.driftBefore?.let { " · 시작 때 오차 ${it}포인트" } ?: ""
+                val nowDrift = d?.let { " → 지금 ${it.driftPoints}포인트" } ?: ""
+                rows += Row.Note("보정 끝 ${BatterySummary.time(cs.finishedAt)}$before$nowDrift")
+            }
+            rows += Row.Note("보정 루틴: 완충 + 1시간 → ${CalibrationRule.DRAIN_TO}% 아래까지 사용 → 다시 완충 + 1시간. 단계마다 알려 드립니다 (설정 > 배터리 > 배터리 보호(85% 제한)는 보정 동안 꺼 두세요 — 100%에 닿아야 합니다)")
+            rows += Row.Action(A_CAL_START, R.drawable.ic_play, if (cs.step == CalibrationRule.STEP_DONE) "게이지 보정 다시" else "게이지 보정 시작")
+        }
+        return rows
+    }
+
     /** 앱별 소모 (최근 2시간) — 권한이 있을 때만 */
     private fun appRows(now: Long): List<Row> {
         val rows = ArrayList<Row>()
@@ -219,6 +264,17 @@ class BatteryActivity : ComponentActivity() {
                 Guardian.saveConfig(this, next)
                 render()
             }
+            row.id == A_FORCED_RESTART -> {
+                notice = "표시를 남겼습니다 — 이제 홈 + 뒤로 버튼을 꺼질 때까지(7초 이상) 누르세요. 다시 켜지면 전후 잔량을 비교합니다 (이미 재시작했다면 그대로 두세요)"
+                render()
+                mark(Event.USER_NOTE, GaugeDriftRule.NOTE_FORCED_RESTART)
+            }
+            row.id == A_CAL_START -> {
+                Calibration.start(this, driftPoints = analysis?.drift?.driftPoints)
+                notice = "게이지 보정 시작 — 충전기에 올려 100%가 되면 1시간 더 두세요. 단계마다 알림으로 알려 드립니다"
+                render()
+            }
+            row.id == A_CAL_STOP -> { Calibration.stop(this); notice = "게이지 보정을 그만뒀습니다"; render() }
             row.id == A_EXP_START -> { picking = true; render() }
             row.id == A_CANCEL -> { picking = false; render() }
             row.id.startsWith(A_MODE) -> {
@@ -273,6 +329,9 @@ class BatteryActivity : ComponentActivity() {
         const val A_SUMMARY = "summary"
         const val A_RESTORE = "g:restore"
         const val A_TOGGLE = "g:toggle:"
+        const val A_FORCED_RESTART = "drift:restart"
+        const val A_CAL_START = "cal:start"
+        const val A_CAL_STOP = "cal:stop"
         const val T_NIGHT_SAVER = "nightSaver"
         const val T_NIGHT_AOD = "nightAod"
         const val T_NIGHT_LOCATION = "nightLocation"
@@ -280,7 +339,8 @@ class BatteryActivity : ComponentActivity() {
         const val T_ABNORMAL = "abnormal"
         const val T_REMINDER = "reminder"
         val MODES = listOf("비행기 모드", "절전 모드", "시계만 사용", "평소대로")
-        const val HELP = "• 강제 재시작: 홈 + 뒤로 버튼을 꺼질 때까지(7초 이상) 누르기. 효과 없으면 30초.\n" +
+        const val HELP = "• 잔량 표시 점검: '17%에서 꺼졌는데 켜니 47%'는 배터리가 아니라 잔량 게이지가 낮게 센 것. 쉬는 전압으로 그 오차를 잡아 알려 주고, 강제 재시작·보정 루틴으로 다시 맞춥니다.\n" +
+            "• 강제 재시작: 홈 + 뒤로 버튼을 꺼질 때까지(7초 이상) 누르기. 효과 없으면 30초.\n" +
             "• 설정 > 배터리 > 헬스 기능 제한 / 대기 중인 앱\n" +
             "• 설정 > 버튼 및 제스처 > 손목 올려 말하기 끄기\n" +
             "• 설정 > 디스플레이 > Always On Display 끄기\n" +

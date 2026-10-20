@@ -77,6 +77,20 @@ class HtmlReportTest {
     }
 
     @Test
+    fun gaugeDriftShowsUpInTheWatchTable() {
+        val (f, _, _) = sampleReport()
+        val now = f.collectedAt!!
+        val q = 15 * 60_000L
+        val s = (0..24).map { i -> com.mywatch.battery.core.BatterySample(t = now - (24 - i) * q, level = 25 - i / 4, voltageMv = 3950, currentUa = -15_000, interactive = false) }
+        val f2 = f.copy(watchSamples = s, watch = com.mywatch.battery.core.DrainAnalyzer(445, zone).analyze(s, now))
+        val fs = Analyzer.findings(f2)
+        val html = HtmlReport.render(f2, fs, Analyzer.verdict(f2, fs), emptyMap(), zone)
+        assertTrue(html.contains("잔량 표시 점검"))
+        assertTrue(html.contains("낮게 세는 중"))
+        assertTrue(html.contains("강제 재시작"))
+    }
+
+    @Test
     fun escapesHtmlAndShowsSources() {
         val f = Facts(model = "SM-L350 <test> & co")
         val fs = listOf(Finding("x", Severity.ABNORMAL, "태그 <script>alert(1)</script> & 끝", listOf("근거 <b>"), listOf("com.example.<evil>"), source = Thresholds.SOURCE_IDLE, category = "drain"))

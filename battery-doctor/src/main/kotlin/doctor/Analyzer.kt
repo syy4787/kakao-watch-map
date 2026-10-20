@@ -2,6 +2,8 @@ package doctor
 
 import com.mywatch.battery.core.AnomalyKind
 import com.mywatch.battery.core.DrainAnalyzer
+import com.mywatch.battery.core.Gauge
+import com.mywatch.battery.core.GaugeDriftRule
 import com.mywatch.battery.core.Grade
 import com.mywatch.battery.core.Rate
 import com.mywatch.battery.core.SampleCsv
@@ -211,6 +213,32 @@ object Analyzer {
                 source = "battery-core Gauge 규칙 — 잔량 점프·급락은 셀이 아니라 게이지(잔량 추정 펌웨어)의 문제일 때가 많음(2026년 워치8 '재부팅 한 번에 30% 손실' 사례)", category = "gauge")
         }
 
+        // 7-1. 잔량 게이지 드리프트 — 쉬는 전압으로 어림잡은 잔량과 표시 잔량의 차이 (워치9 '17%에서 꺼졌다 켜니 47%' 의 정체)
+        f.watch?.drift?.takeIf { it.suspicious }?.let { d ->
+            val sev = if (d.certain) Severity.ABNORMAL else Severity.CAUTION
+            out += Finding("gauge-drift", sev, "워치 기록: ${d.headline} (신뢰도 ${d.confidence})",
+                listOfNotNull(
+                    "최근 3시간 쉬는 표본 ${d.restSamples}개, 쉬는 전압 중앙값 ${String.format(Locale.US, "%.2f", d.restMv / 1000.0)}V → 전압-잔량 표로 약 ${d.voltageSoc}%, 표시 ${d.reported}%",
+                    d.advice,
+                    "기준: ${GaugeDriftRule.SUSPECT_POINTS}포인트 이상 의심, ${GaugeDriftRule.CERTAIN_POINTS}포인트 이상 확실 (전압 기반 잔량은 ±10% 쯤 틀릴 수 있어 큰 차이만 봄)",
+                ),
+                source = Rules.SOURCE_DRIFT, category = "gauge")
+        }
+        f.watch?.recoveries?.firstOrNull { it.userMarked }?.let { r ->
+            out += Finding("gauge-restart-mark", if (r.gained >= Gauge.REBOOT_JUMP_MIN) Severity.CAUTION else Severity.INFO,
+                "사용자가 표시한 강제 재시작: 잔량 ${r.before}% → ${r.after}% (${if (r.gained >= 0) "+" else ""}${r.gained})",
+                listOf("${time(r.t)} 워치 배터리 화면 '강제 재시작 표시 남기기'", "재시작으로 잔량이 뛰면 그만큼은 게이지 드리프트였다는 뜻"), source = Rules.SOURCE_DRIFT, category = "gauge")
+        }
+        f.watch?.takeIf { it.hotIdleCount >= DrainAnalyzer.HOT_MIN_SAMPLES }?.let { w ->
+            out += Finding("watch-hot", Severity.CAUTION, "워치 기록: 충전 안 하고 화면 꺼진 채 ${DrainAnalyzer.HOT_DECI_C / 10}℃ 이상이 ${w.hotIdleCount}회(15분 표본, 최근 24시간) — 백그라운드 과열",
+                listOf("뜨거운 워치는 CPU·무선이 쉬지 않는다는 뜻 — 웨이크락·알람·센서 소견과 같이 보세요", "기준: 1시간어치(4개) 이상 (경험칙)"), source = Rules.SOURCE_AWAKE, category = "awake")
+        }
+        f.watch?.takeIf { "phantom" in it.verdict.tags }?.let { w ->
+            out += Finding("gauge-phantom", Severity.CAUTION, "워치 기록: 표시 소모가 전하량 계수기 소모보다 큼 — 가짜 소모(게이지 오차)",
+                w.verdict.reasons.filter { it.contains("가짜 소모") } + listOf("기준: 24시간 평균 표시 소모(%/h)가 계수기 소모(mAh/h ÷ 공칭 용량)보다 1.5포인트 이상 크면"),
+                source = Rules.SOURCE_DRIFT, category = "gauge")
+        }
+
         // 8. 용량
         f.watch?.capacity?.let { c ->
             val p = c.percentOfNominal
@@ -321,6 +349,7 @@ object Analyzer {
             return DoctorVerdict(Cause.GAUGE, confidence(gauge.size, hasWatch), "잔량 표시(게이지)·펌웨어 문제 의심 — ${gauge.first().title}",
                 gauge.map { it.title } + rates,
                 listOf(Rules.FORCED_RESTART + " — 잔량 점프는 재시작 뒤 사라지는 경우가 많습니다",
+                    "워치 배터리 화면 '잔량 표시 점검' → '게이지 보정 시작'(완충 + 1시간 → 10% 아래까지 사용 → 다시 완충 + 1시간)으로 게이지가 용량을 다시 배우게 하세요. 끝나면 같은 화면에서 오차가 줄었는지 보입니다",
                     "메뉴 6(증거 패키지)으로 지금 상태를 보관하세요 — 잔량 점프·급락 기록(워치 CSV)이 핵심 증거입니다",
                     "서비스센터(1588-3366)에 '잔량 표시 오류·과소모'로 접수하고 배터리 효율 측정값을 서면으로 요구하세요 (02_서비스센터_접수메모.txt 참고). 삼성멤버스 '오류 보내기'는 증상 직후 5분 안에"),
                 gauge.flatMap { it.packages }.distinct())

@@ -8,9 +8,11 @@ import android.os.PowerManager
 import android.provider.Settings
 import com.mywatch.battery.core.BatterySample
 import com.mywatch.battery.core.GuardianConfig
+import com.mywatch.battery.core.Status
 import com.mywatch.battery.core.UidUse
 import com.mywatch.kakaomap.battery.BatteryAlerts
 import com.mywatch.kakaomap.battery.BatteryLog
+import com.mywatch.kakaomap.battery.Calibration
 import com.mywatch.kakaomap.battery.Guardian
 import com.mywatch.kakaomap.battery.HealthStore
 import com.mywatch.kakaomap.battery.Levers
@@ -163,6 +165,49 @@ class GuardianTest {
         val title = n.extras.getCharSequence(Notification.EXTRA_TITLE).toString()
         assertTrue(title, title.contains("분 충전"))
         assertNull(shadowOf(nm).getNotification(Guardian.N_ABNORMAL))
+    }
+
+    /** 게이지가 20포인트 넘게 낮게 세는 것이 확실하고 표시 잔량이 낮으면 권한 없이도 알린다 — 12시간에 한 번 */
+    @Test
+    fun certainLowCountingDriftAtALowLevelNotifiesOnceInTwelveHours() {
+        val t = at(14, 0)
+        log.file.delete()
+        for (i in 0..7) log.append(BatterySample(t = t - (7 - i) * q, level = 22 - i / 3, voltageMv = 3950, currentUa = -20_000, interactive = false))
+        Guardian.tick(context, log, t, stats = UidStatsSource { emptyMap() }, zone = zone)
+        val n = shadowOf(nm).getNotification(Guardian.N_DRIFT)
+        assertNotNull(n)
+        val text = n.extras.getCharSequence(Notification.EXTRA_BIG_TEXT).toString()
+        assertTrue(text, text.contains("낮게 세는 중"))
+        assertTrue(text, text.contains("강제 재시작"))
+        nm.cancel(Guardian.N_DRIFT)
+        log.append(BatterySample(t = t + 4 * q, level = 19, voltageMv = 3950, currentUa = -20_000))
+        Guardian.tick(context, log, t + 4 * q, stats = UidStatsSource { emptyMap() }, zone = zone)
+        assertNull(shadowOf(nm).getNotification(Guardian.N_DRIFT))
+    }
+
+    /** 게이지 보정 루틴: 완충 1시간 → 빼서 쓰기 → 10% 아래 → 다시 완충 1시간, 단계마다 알림 */
+    @Test
+    fun calibrationStepsNotifyAsTheWatchChargesAndDrains() {
+        fun title() = shadowOf(nm).getNotification(Guardian.N_CAL)?.extras?.getCharSequence(Notification.EXTRA_TITLE)?.toString() ?: ""
+        fun step(t: Long, s: BatterySample) { log.append(s); Guardian.tick(context, log, t, stats = UidStatsSource { emptyMap() }, zone = zone) }
+        val t0 = at(9, 0)
+        log.file.delete()
+        log.append(BatterySample(t0 - q, 70))
+        Calibration.start(context, t0, driftPoints = -24)
+        assertEquals(1, Calibration.state(context).step)
+        step(t0, BatterySample(t0, 100, status = Status.FULL, plugged = true))
+        assertTrue(title(), title().contains("1시간"))
+        step(t0 + 4 * q, BatterySample(t0 + 4 * q, 100, status = Status.FULL, plugged = true))
+        assertTrue(title(), title().contains("1단계 끝"))
+        assertEquals(2, Calibration.state(context).step)
+        step(t0 + 20 * q, BatterySample(t0 + 20 * q, 9, status = Status.DISCHARGING))
+        assertTrue(title(), title().contains("2단계 끝"))
+        step(t0 + 24 * q, BatterySample(t0 + 24 * q, 100, status = Status.FULL, plugged = true))
+        step(t0 + 28 * q, BatterySample(t0 + 28 * q, 100, status = Status.FULL, plugged = true))
+        assertTrue(title(), title().contains("보정 끝"))
+        val st = Calibration.state(context)
+        assertEquals(com.mywatch.battery.core.CalibrationRule.STEP_DONE, st.step)
+        assertEquals(-24, st.driftBefore)
     }
 
     @Test

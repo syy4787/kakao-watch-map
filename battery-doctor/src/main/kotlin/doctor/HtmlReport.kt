@@ -132,6 +132,8 @@ object HtmlReport {
             rows += "워치 대기(화면 꺼짐) 24h" to rate(w.idle24)
             w.overnight?.let { rows += (w.overnightLabel ?: "밤사이") to rate(it) }
             w.capacity?.let { rows += "충전 곡선 추정 용량" to "${fmt1(it.estimatedMah)} mAh${it.percentOfNominal?.let { p -> " (공칭의 ${pct(p)}%)" } ?: ""}, 세션 ${it.sessions}개" }
+            rows += "잔량 표시 점검(쉬는 전압 기준)" to (w.drift?.let { d -> "${d.headline} (신뢰도 ${d.confidence}, 쉬는 표본 ${d.restSamples}개, ${String.format(Locale.US, "%.2f", d.restMv / 1000.0)}V)" } ?: "쉬는 표본(화면 꺼짐·충전 안 함)이 3개 미만이라 아직 모름")
+            w.recoveries.firstOrNull()?.let { r -> rows += "마지막 재시작 전후 잔량" to "${stamp(r.t, zone)} ${r.before}% → ${r.after}% (${if (r.gained >= 0) "+" else ""}${r.gained})${if (r.userMarked) " · 사용자가 표시" else ""}" }
             rows += "워치 판정(battery-core)" to "${w.verdict.grade.label} — ${w.verdict.headline}"
         }
         f.idle?.let { rows += "Doze 상태" to "${it.state ?: "?"}${it.lightState?.let { l -> " / light $l" } ?: ""}, 예외 ${it.whitelist.size}개(사용자 ${it.userWhitelist.size})" }
@@ -205,6 +207,11 @@ object HtmlReport {
     private fun watchSummary(sb: StringBuilder, f: Facts, zone: ZoneId) {
         val w = f.watch ?: return
         sb.append("<p>표본 ${w.samples}개 (${fmt1(w.spanHours)}시간) · ${esc(w.verdict.headline)}</p>")
+        w.drift?.takeIf { it.suspicious }?.let { d ->
+            sb.append("<p class=\"${if (d.certain) "bad" else ""}\"><b>잔량 표시 점검:</b> ${esc(d.headline)} (신뢰도 ${esc(d.confidence)})")
+            d.advice?.let { sb.append(" — ${esc(it)}") }
+            sb.append("</p>")
+        }
         if (w.experiments.isNotEmpty()) {
             sb.append("<ul>")
             for (e in w.experiments) sb.append("<li>실험 '${esc(e.name)}' ${stamp(e.start, zone)} ~ ${e.end?.let { stamp(it, zone) } ?: "진행 중"}: ${rate(e.rate)} — ${e.grade.label}</li>")

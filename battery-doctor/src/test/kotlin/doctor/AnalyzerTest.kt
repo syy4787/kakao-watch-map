@@ -139,6 +139,44 @@ class AnalyzerTest {
         assertTrue(v.why.joinToString().contains("비행기 모드"))
     }
 
+    /** 쉬는 전압이 3.95V(고전압 셀 약 44%)인데 표시 잔량이 20% 안팎이면 게이지 드리프트 — 잔량 표시 문제로 판정하고 강제 재시작·보정 루틴을 권한다 */
+    @Test
+    fun gaugeDriftFromRestingVoltageIsAGaugeVerdict() {
+        val s = (0..24).map { i -> BatterySample(t = now - (24 - i) * q, level = 25 - i / 4, voltageMv = 3950, currentUa = -15_000, interactive = false) }
+        val f = facts(watchSamples = s)
+        val fs = Analyzer.findings(f)
+        val d = fs.first { it.id == "gauge-drift" }
+        assertEquals(Severity.ABNORMAL, d.severity)
+        assertTrue(d.title, d.title.contains("낮게 세는 중"))
+        assertTrue(d.evidence.joinToString(), d.evidence.joinToString().contains("3.95V"))
+        val v = Analyzer.verdict(f, fs)
+        assertEquals(Cause.GAUGE, v.cause)
+        assertTrue(v.todo.joinToString(), v.todo.joinToString().contains("게이지 보정"))
+        // 표시와 전압이 맞으면 소견 없음
+        val ok = s.map { it.copy(level = it.level + 22) }
+        assertFalse(Analyzer.findings(facts(watchSamples = ok)).any { it.id == "gauge-drift" })
+    }
+
+    @Test
+    fun aHotIdleWatchIsASoftwareCaution() {
+        val s = watch(2.5).mapIndexed { i, x -> if (i >= 130) x.copy(tempDeciC = 430) else x.copy(tempDeciC = 290) }
+        val fs = Analyzer.findings(facts(watchSamples = s))
+        val h = fs.first { it.id == "watch-hot" }
+        assertEquals(Severity.CAUTION, h.severity)
+        assertEquals("awake", h.category)
+        assertFalse(Analyzer.findings(facts(watchSamples = watch(2.5))).any { it.id == "watch-hot" })
+    }
+
+    @Test
+    fun phantomDrainFromTheChargeCounterIsAGaugeFinding() {
+        // 표시는 시간당 6% 씩 떨어지는데 전하량은 시간당 13 mAh(≈2.9%) 만 줄어든다 → 가짜 소모
+        val s = (0..16).map { i -> BatterySample(t = now - (16 - i) * q, level = (90 - 6.0 * i / 4).toInt(), chargeUah = 400_000 - i * 3_250, voltageMv = 4000, currentUa = -15_000) }
+        val fs = Analyzer.findings(facts(watchSamples = s))
+        val p = fs.first { it.id == "gauge-phantom" }
+        assertEquals(Severity.CAUTION, p.severity)
+        assertTrue(p.title, p.title.contains("가짜 소모"))
+    }
+
     @Test
     fun normalWhenNothingStandsOut() {
         val v = verdict(facts())

@@ -18,6 +18,8 @@ enum class Event {
     /** 사용자가 '실험 시작'(note = 비행기 모드 등) */
     EXPERIMENT_START,
     EXPERIMENT_END,
+    /** 사용자가 남긴 표시 (note = "강제 재시작" 등) */
+    USER_NOTE,
 }
 
 /**
