@@ -90,14 +90,6 @@ object Guardian {
     /** 화면 기록이 최근 6시간에 없을 때 '켜진 적 없음'인지 보려고 더 길게 보는 창 (밤새 안 켠 아침) */
     const val SCREEN_FALLBACK_MS = 24L * 3_600_000L
 
-    /** 마지막으로 켜진(부팅한) 때 — 시험에서 바꿔 끼운다 */
-    val DEFAULT_BOOT_CLOCK: () -> Long = { System.currentTimeMillis() - android.os.SystemClock.elapsedRealtime() }
-
-    @Volatile
-    var bootClock: () -> Long = DEFAULT_BOOT_CLOCK
-
-    /** 부팅한 때 ([now] 보다 뒤면 — 시험의 지난 시각 등 — 모르는 것으로 0) */
-    fun bootAt(now: Long): Long = runCatching { bootClock() }.getOrDefault(0L).takeIf { it in 1..now } ?: 0L
     /** 마지막으로 알린 드리프트(포인트) — 알림에서 보정을 시작할 때 '시작 때 오차'로 */
     internal const val K_S_LAST_DRIFT = "gs_last_drift"
     private const val K_LAST_ACTION = "gs_last_action"
@@ -163,7 +155,8 @@ object Guardian {
             .onFailure { ErrorLog.record("배터리·지킴이", it) }.getOrNull()
         // 화면 켜짐을 사용 통계로 정확히 (권한이 있을 때) — 15분 표본 사이에 켰다 끈 것도 안다.
         // 창 안에 화면 기록이 하나도 없으면 이 기기가 기록을 안 남기는 것으로 보고 표본으로 어림한다
-        val usage = runCatching { ScreenUsage(c).readAll(now - SCREEN_LOOKBACK_MS, now) }.getOrNull()?.takeIf { it.screen.isNotEmpty() }
+        val raw = runCatching { ScreenUsage(c).readAll(now - SCREEN_LOOKBACK_MS, now) }.getOrNull()
+        val usage = raw?.takeIf { it.screen.isNotEmpty() }
         val screen = usage?.screen
         // '사람이 봤다'(아침 기상)는 알림이 잠깐 켠 화면을 빼고 본다 — 새벽 알림 한 번에 밤 모드가 끝나지 않게
         val looked = usage?.let { u -> Wakes.withoutNotificationFlashes(u.screen, u.notifications.map { it.second }) }
@@ -172,10 +165,11 @@ object Guardian {
         // 최근 2시간 대기 소모가 높을 때만 15분마다(범인을 바로 알아야 하므로)
         val source = stats ?: HealthReader(c).takeIf { it.available }
         if (source != null && snapshotDue(c, now, samples)) {
-            runCatching { HealthStore(c).record(now, source.take()) }.onFailure { ErrorLog.record("배터리·앱별 통계", it) }
-            // 화면 켜짐(홈 과소모 판단용): 최근 6시간에 화면 기록이 없으면(밤새 안 켬) 하루치로 '켜진 적 없음'인지 본다
+            runCatching { HealthStore(c).record(now, source.take(), HealthStore.Boot.now(c)) }.onFailure { ErrorLog.record("배터리·앱별 통계", it) }
+            // 화면 켜짐(홈 과소모 판단용): 최근 6시간에 화면 기록이 없으면(밤새 안 켬) 하루치로 '켜진 적 없음'인지 본다.
+            // 받은 알림은 화면 기록과 따로 — 밤새 화면은 안 켰어도 알림은 받았고, 그걸 보여 준 몫은 홈 탓이 아니다
             val issueScreen = screen ?: runCatching { ScreenUsage(c).readScreen(now - SCREEN_FALLBACK_MS, now)?.spans }.getOrNull()
-            val notes = usage?.notifications?.map { it.second }
+            val notes = raw?.notifications?.map { it.second }
             runCatching { checkKnownIssues(c, now, zone, issueScreen, notes) }.onFailure { ErrorLog.record("배터리·알려진 문제", it) }
         }
 
@@ -281,11 +275,11 @@ object Guardian {
         val reader = source ?: HealthReader(c).takeIf { it.available } ?: return
         val store = HealthStore(c)
         if (now - store.lastAt() < maxAgeMs && now >= store.lastAt()) return
-        runCatching { store.record(now, reader.take()) }.onFailure { ErrorLog.record("배터리·앱별 통계", it) }
-        // 화면 켜짐·알림(One UI Watch 홈 과소모 판단용) — 15분 기록과 같은 읽기로 (없으면 하루치로 '켜진 적 없음'인지)
-        val usage = runCatching { ScreenUsage(c).readAll(now - SCREEN_LOOKBACK_MS, now) }.getOrNull()?.takeIf { it.screen.isNotEmpty() }
-        val screen = usage?.screen ?: runCatching { ScreenUsage(c).readScreen(now - SCREEN_FALLBACK_MS, now)?.spans }.getOrNull()
-        runCatching { knownIssues(c, now, screen, usage?.notifications?.map { it.second }) }.onFailure { ErrorLog.record("배터리·알려진 문제", it) }
+        runCatching { store.record(now, reader.take(), HealthStore.Boot.now(c)) }.onFailure { ErrorLog.record("배터리·앱별 통계", it) }
+        // 화면 켜짐·알림(One UI Watch 홈 과소모 판단용) — 15분 기록과 같은 읽기로 (화면 기록이 없으면 하루치로 '켜진 적 없음'인지)
+        val raw = runCatching { ScreenUsage(c).readAll(now - SCREEN_LOOKBACK_MS, now) }.getOrNull()
+        val screen = raw?.screen?.takeIf { it.isNotEmpty() } ?: runCatching { ScreenUsage(c).readScreen(now - SCREEN_FALLBACK_MS, now)?.spans }.getOrNull()
+        runCatching { knownIssues(c, now, screen, raw?.notifications?.map { it.second }) }.onFailure { ErrorLog.record("배터리·알려진 문제", it) }
     }
 
     /** 타일에 보일 알려진 문제 (한 줄, 등급) — 15분 기록·배터리 화면이 찾아 적어 둔 것 (3시간 넘게 다시 확인 못 했으면 null) */
@@ -295,8 +289,9 @@ object Guardian {
         val p = prefs(c)
         val at = p.getLong(K_TILE_ISSUE_AT, 0L)
         if (at <= 0L || now - at > TILE_ISSUE_MAX_AGE_MS || now < at) return null
-        // 그 뒤에 재시작했으면(할 일대로 강제 재시작) 앞의 판단은 내린다 — 새 기록이 쌓이면 다시 본다
-        if (at < bootAt(now)) return null
+        // 그 뒤에 재시작했으면(할 일대로 강제 재시작) 앞의 판단은 바로 내린다 — 재시작 뒤 기록이 1시간 쌓이면 다시 본다
+        val seen = p.getLong(K_TILE_ISSUE_ELAPSED, -1L).takeIf { it >= 0 }?.let { HealthStore.Boot(p.getInt(K_TILE_ISSUE_BOOT, -1).takeIf { n -> n >= 0 }, it) }
+        if (seen != null && HealthStore.Boot.now(c).rebootedSince(seen)) return null
         val line = p.getString(K_TILE_ISSUE, null) ?: return null
         val grade = runCatching { Grade.valueOf(p.getString(K_TILE_ISSUE_GRADE, null) ?: "CAUTION") }.getOrDefault(Grade.CAUTION)
         return line to grade
@@ -307,24 +302,37 @@ object Guardian {
      * [screen] = 최근 화면 켜짐 구간(사용 통계 — 모르면 null): 그 창 안에서 화면이 켜져 있던 시간으로 One UI Watch 홈 과소모를 가린다
      */
     private fun knownIssues(c: Context, now: Long, screen: List<Span>?, notifications: List<Long>? = null): List<com.mywatch.battery.core.KnownIssue> {
-        val w = culpritWindow(c, now)
-        val window = w.windowMs
+        val boot = HealthStore.Boot.now(c)
+        val w = culpritWindow(c, now, boot)
         val face = runCatching { BatteryInsights.watchFace(c) }.getOrNull()
-        // 화면 켜짐·알림은 앱별 통계 창과 같은 때로 (창 끝 = 마지막 스냅샷). 창이 화면 기록보다 길면 모른다
-        val start = w.endAt - window
-        val screenOn = screen?.takeIf { window in 1..SCREEN_LOOKBACK_MS }?.sumOf { it.overlap(start, w.endAt) }
-        val notes = notifications?.count { it in start until w.endAt } ?: 0
-        val found = KnownIssues.detect(w.ranks, face, window.takeIf { it > 0 }, screenOn, notes) { pkg -> HealthStore.label(c, pkg).takeIf { it != pkg } }
-        // 타일은 이 결과를 읽는다 (타일이 통계 파일을 읽고 분석하지 않게) — 문제마다 그 할 일로, 비정상 먼저
+        // 화면 켜짐·알림은 6시간치만 읽었다 — 창이 그보다 앞서면 화면 켜짐을 모른다
+        val found = issuesIn(w, face, screen, notifications, now - SCREEN_LOOKBACK_MS, BatteryInsights.appName(c))
+        // 타일은 이 결과를 읽는다 (타일이 통계 파일을 읽고 분석하지 않게) — 문제마다 그 할 일로, 비정상 먼저. 어느 부팅에서 본 것인지도
         val top = found.firstOrNull { it.grade == Grade.ABNORMAL } ?: found.firstOrNull()
         prefs(c).edit().putString(K_TILE_ISSUE, top?.let { it.tile ?: it.title }).putString(K_TILE_ISSUE_GRADE, top?.grade?.name)
-            .putLong(K_TILE_ISSUE_AT, now).apply()
+            .putLong(K_TILE_ISSUE_AT, now).putInt(K_TILE_ISSUE_BOOT, boot.count ?: -1).putLong(K_TILE_ISSUE_ELAPSED, boot.elapsedMs).apply()
         return found
+    }
+
+    /**
+     * [w] 의 순위로 알려진 문제를 찾는다 — 화면 켜짐·받은 알림은 그 창의 스냅샷 구간들과 겹친 만큼만 센다 (재시작으로 빠진 때는 빼고).
+     * 구간이 [recordedFrom](화면·알림 기록을 읽기 시작한 때)보다 앞서면 화면 켜짐을 모르는 것으로 — One UI Watch 홈은 그땐 짚지 않는다.
+     * 15분 기록과 배터리 화면이 같은 판단을 쓴다
+     */
+    internal fun issuesIn(
+        w: CulpritWindow, face: String?, screen: List<Span>?, notifications: List<Long>?, recordedFrom: Long, label: (String) -> String?,
+    ): List<com.mywatch.battery.core.KnownIssue> {
+        val known = w.spans.isNotEmpty() && w.spans.all { it.first >= recordedFrom }
+        val screenOn = screen?.takeIf { known }?.sumOf { s -> w.spans.sumOf { (a, b) -> s.overlap(a, b) } }
+        val notes = notifications?.count { t -> w.spans.any { (a, b) -> t >= a && t < b } } ?: 0
+        return KnownIssues.detect(w.ranks, face, w.windowMs.takeIf { it > 0 }, screenOn, notes, label)
     }
 
     private const val K_TILE_ISSUE = "gs_tile_issue"
     private const val K_TILE_ISSUE_GRADE = "gs_tile_issue_grade"
     private const val K_TILE_ISSUE_AT = "gs_tile_issue_at"
+    private const val K_TILE_ISSUE_BOOT = "gs_tile_issue_boot"
+    private const val K_TILE_ISSUE_ELAPSED = "gs_tile_issue_elapsed"
     private const val TILE_ISSUE_MAX_AGE_MS = 3L * 3_600_000L
 
     /** 화면 켜짐 구간으로 본 '지금까지 꺼져 있던 시간' — 지금 켜져 있으면 0, 창 안에 켜진 적이 없으면 창 길이 */
@@ -340,12 +348,10 @@ object Guardian {
      */
     private fun checkKnownIssues(c: Context, now: Long, zone: ZoneId, screen: List<Span>?, notifications: List<Long>?) {
         val p = prefs(c)
-        // 예전(문제 구분 없는) 시각은 업데이트 뒤 12시간까지만 같이 본다
+        // 예전(문제 구분 없는) 시각은 업데이트 뒤 12시간까지만 같이 본다 — 따로 따져서, 시계가 바뀌어 미래가 된 예전 시각이 문제별 쉼을 가리지 않게
         val legacy = p.getLong(K_S_ISSUE_AT, 0L)
-        fun resting(id: String): Boolean {
-            val last = maxOf(p.getLong("${K_S_ISSUE_AT}_$id", 0L), legacy)
-            return last > 0 && now - last in 0 until ISSUE_COOLDOWN_MS
-        }
+        fun cooling(at: Long) = at > 0 && now - at in 0 until ISSUE_COOLDOWN_MS
+        fun resting(id: String): Boolean = cooling(p.getLong("${K_S_ISSUE_AT}_$id", 0L)) || cooling(legacy)
         val issue = knownIssues(c, now, screen, notifications).firstOrNull { it.grade == Grade.ABNORMAL && !resting(it.id) } ?: return
         val (nm, channel) = BatteryAlerts.manager(c, BatteryAlerts.quiet(now, zone)) ?: return
         val text = "${issue.why}. 해결: " + issue.steps.mapIndexed { i, s -> "${i + 1}) $s" }.joinToString(" ")
@@ -443,15 +449,15 @@ object Guardian {
     /** [culprits] 와 그 순위를 모은 시간(ms) */
     fun culpritsInWindow(c: Context, now: Long): Pair<List<AppDrainRank>, Long> = culpritWindow(c, now).let { it.ranks to it.windowMs }
 
-    /** 최근 2시간 앱별 순위 · 그 창의 길이 · 창 끝(마지막 스냅샷 때) */
-    data class CulpritWindow(val ranks: List<AppDrainRank>, val windowMs: Long, val endAt: Long)
+    /** 최근 2시간 앱별 순위 · 그 창의 길이 · 창 끝(마지막 스냅샷 때) · 기록 구간들(스냅샷 사이) */
+    data class CulpritWindow(val ranks: List<AppDrainRank>, val windowMs: Long, val endAt: Long, val spans: List<Pair<Long, Long>> = emptyList())
 
-    /** 최근 2시간 앱별 순위 — 마지막 부팅 뒤의 기록만 (재시작 앞의 사용량이 재시작 뒤 판단에 섞이지 않게) */
-    fun culpritWindow(c: Context, now: Long): CulpritWindow {
-        val r = runCatching { HealthStore(c).recentWindow(2, now, after = bootAt(now)) }.getOrNull()
+    /** 최근 2시간 앱별 순위 — 이번 부팅의 기록만 (재시작 앞의 사용량이 재시작 뒤 판단에 섞이지 않게) */
+    fun culpritWindow(c: Context, now: Long, boot: HealthStore.Boot = HealthStore.Boot.now(c)): CulpritWindow {
+        val r = runCatching { HealthStore(c).recentWindow(2, now, boot) }.getOrNull()
         if (r == null || r.uses.isEmpty()) return CulpritWindow(emptyList(), 0L, now)
         val window = r.coveredMs.coerceAtLeast(15 * 60_000L)
-        return CulpritWindow(AppDrain.rank(r.uses, window, ownPkg = c.packageName), window, r.endAt.takeIf { it > 0 } ?: now)
+        return CulpritWindow(AppDrain.rank(r.uses, window, ownPkg = c.packageName), window, r.endAt.takeIf { it > 0 } ?: now, r.spans)
     }
 
     internal fun openScreen(c: Context) = PendingIntent.getActivity(

@@ -3,6 +3,8 @@ package com.mywatch.kakaomap.battery
 import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
+import android.provider.Settings
+import android.os.SystemClock
 import android.os.health.HealthStats
 import android.os.health.SystemHealthManager
 import android.os.health.UidHealthStats
@@ -89,16 +91,39 @@ class HealthStore(context: Context) {
     private val last = File(dir, "health_last.json")
     private val deltas = File(dir, "health_deltas.jsonl")
 
-    /** 지금 스냅샷을 기록하고 직전과의 차를 돌려준다 (첫 기록이면 빈 목록 — 누적값은 구간 사용량이 아니다) */
-    fun record(now: Long, snapshot: Map<String, UidUse>): List<UidUse> = synchronized(LOCK) {
+    /**
+     * 부팅 하나 — [count] = 부팅 번호(Settings.Global.BOOT_COUNT, 부팅마다 1씩 — 모르면 null), [elapsedMs] = 켜진 뒤 흐른 시간.
+     * 배터리 통계는 부팅 때 0 이 되지 않고 충전 뒤부터 이어지므로(안드로이드 10+) 재시작은 통계가 아니라 이것으로 알아챈다
+     */
+    data class Boot(val count: Int?, val elapsedMs: Long) {
+        /** [before] 를 남긴 뒤 다시 켜졌다 — 부팅 번호가 바뀌었거나, 켜진 뒤 흐른 시간이 줄었다 (번호를 모르는 기기는 시간만으로) */
+        fun rebootedSince(before: Boot): Boolean =
+            (count != null && before.count != null && count != before.count) || elapsedMs < before.elapsedMs
+
+        companion object {
+            fun now(c: Context): Boot = Boot(
+                runCatching { Settings.Global.getInt(c.contentResolver, Settings.Global.BOOT_COUNT, -1) }.getOrDefault(-1).takeIf { it >= 0 },
+                SystemClock.elapsedRealtime(),
+            )
+        }
+    }
+
+    /**
+     * 지금 스냅샷을 기록하고 직전과의 차를 돌려준다. 빈 목록(기준값만)인 때: 첫 기록 · [boot] 로 본 재시작 뒤 첫 스냅샷 · 시계가 뒤로 감.
+     * 재시작을 걸친 구간은 재시작 앞뒤 사용이 섞이고, 강제 재시작은 저장 못 한 통계를 잃어 누적값이 줄기도 한다 — 그 줄어듦을
+     * '충전 뒤 통계가 비워짐'으로 보면 충전 뒤 전부가 한 구간 사용으로 잡혀 엉뚱한 과소모로 짚었다 (리뷰에서 찾음)
+     */
+    fun record(now: Long, snapshot: Map<String, UidUse>, boot: Boot? = null): List<UidUse> = synchronized(LOCK) {
         dir.mkdirs()
         val prev = readLast()
-        val d = if (prev == null) emptyList() else AppDrain.delta(prev.second, snapshot)
-        writeLast(now, snapshot)
+        val rebooted = boot != null && prev?.boot != null && boot.rebootedSince(prev.boot)
+        val seq = (prev?.seq ?: 0) + if (rebooted) 1 else 0
+        val d = if (prev == null || rebooted || now <= prev.t) emptyList() else AppDrain.delta(prev.uses, snapshot)
+        writeLast(now, snapshot, boot, seq)
         prefs.edit().putLong(K_LAST_AT, now).apply()
         if (prev != null && d.isNotEmpty()) {
             val top = d.sortedByDescending { it.wakelockMs + it.cpuMs * 2 + it.sensorMs / 2 + it.gpsMs * 3 }.take(MAX_PER_ROW)
-            val row = JSONObject().put("t", now).put("ms", now - prev.first).put("d", JSONArray(top.map { toJson(it) }))
+            val row = JSONObject().put("t", now).put("ms", now - prev.t).put("b", seq).put("d", JSONArray(top.map { toJson(it) }))
             deltas.appendText(row.toString() + "\n")
             pruneIfBig(now)
         }
@@ -111,32 +136,41 @@ class HealthStore(context: Context) {
     /** 최근 [hours]시간의 차를 앱별로 합친 것과 실제로 덮인 시간(ms) */
     fun recent(hours: Int, now: Long): Pair<List<UidUse>, Long> = recentWindow(hours, now).let { it.uses to it.coveredMs }
 
-    /** 최근 차의 합 · 덮인 시간 · 마지막 줄의 때 */
-    data class Recent(val uses: List<UidUse>, val coveredMs: Long, val endAt: Long)
+    /** 최근 차의 합 · 덮인 시간 · 마지막 줄의 때 · 줄마다 덮은 때(스냅샷 사이 — 화면 켜짐·알림을 같은 때로 세려고) */
+    data class Recent(val uses: List<UidUse>, val coveredMs: Long, val endAt: Long, val spans: List<Pair<Long, Long>> = emptyList())
 
     /**
-     * 최근 [hours]시간의 차 — [after](부팅한 때) 뒤의 줄만: 재시작 앞의 사용량이 재시작 뒤 판단에 섞이지 않게. 부팅을 걸친 줄은 통계가
-     * 부팅 때 0 부터라 덮인 시간도 부팅 뒤만 센다
+     * 최근 [hours]시간의 차. [boot](지금 부팅)를 주면 이번 부팅의 줄만 — 재시작 앞의 사용량이 재시작 뒤 판단에 섞이지 않게
+     * (마지막 스냅샷 뒤에 또 재시작했으면 아직 이번 부팅의 줄이 없다). 주지 않으면 부팅을 따지지 않는다
      */
-    fun recentWindow(hours: Int, now: Long, after: Long = 0L): Recent = synchronized(LOCK) {
-        if (!deltas.exists()) return Recent(emptyList(), 0L, 0L)
+    fun recentWindow(hours: Int, now: Long, boot: Boot? = null): Recent = synchronized(LOCK) {
+        if (!deltas.exists()) return EMPTY
+        val seq: Int? = if (boot == null) null else {
+            val last = readLast() ?: return EMPTY
+            if (last.boot != null && boot.rebootedSince(last.boot)) return EMPTY
+            last.seq
+        }
         val from = now - hours * 3_600_000L
         val windows = ArrayList<List<UidUse>>()
+        val spans = ArrayList<Pair<Long, Long>>()
         var covered = 0L
         var end = 0L
         deltas.forEachLine { line ->
             // 창 밖 줄은 앞의 날짜만 보고 건너뛴다 (24시간치를 15분마다 다 풀지 않게)
-            fastT(line)?.let { if (it < from || it > now || it <= after) return@forEachLine }
+            fastT(line)?.let { if (it < from || it > now) return@forEachLine }
             val o = runCatching { JSONObject(line) }.getOrNull() ?: return@forEachLine
             val t = o.optLong("t")
-            if (t < from || t > now || t <= after) return@forEachLine
+            if (t < from || t > now) return@forEachLine
+            // 부팅 번호가 없는 줄(이전 버전이 쓴 것)은 어느 부팅인지 모른다 — 빼고 본다
+            if (seq != null && o.optInt("b", -1) != seq) return@forEachLine
             val ms = o.optLong("ms")
-            covered += if (after > 0) minOf(ms, t - after) else ms
+            covered += ms
+            spans += (t - ms) to t
             end = maxOf(end, t)
             val arr = o.optJSONArray("d") ?: return@forEachLine
             windows += (0 until arr.length()).mapNotNull { i -> arr.optJSONObject(i)?.let(::fromJson) }
         }
-        return Recent(AppDrain.sum(windows), covered, end)
+        return Recent(AppDrain.sum(windows), covered, end, spans)
     }
 
     /** 최근 [hours]시간의 15분 차를 그대로 (시간대별 범인을 찾을 때) */
@@ -155,19 +189,24 @@ class HealthStore(context: Context) {
         return out
     }
 
-    private fun readLast(): Pair<Long, Map<String, UidUse>>? {
+    /** 마지막 스냅샷 — 때 · 앱별 누적값 · 그때의 부팅(모르면 null) · 우리가 센 부팅 차례(줄의 "b") */
+    private class Last(val t: Long, val uses: Map<String, UidUse>, val boot: Boot?, val seq: Int)
+
+    private fun readLast(): Last? {
         if (!last.exists()) return null
         return runCatching {
             val o = JSONObject(last.readText())
-            val t = o.getLong("t")
             val arr = o.getJSONArray("u")
-            t to (0 until arr.length()).mapNotNull { i -> arr.optJSONObject(i)?.let(::fromJson) }.associateBy { it.pkg }
+            val boot = if (o.has("el")) Boot(if (o.has("bc")) o.getInt("bc") else null, o.getLong("el")) else null
+            Last(o.getLong("t"), (0 until arr.length()).mapNotNull { i -> arr.optJSONObject(i)?.let(::fromJson) }.associateBy { it.pkg }, boot, o.optInt("bs", 0))
         }.getOrNull()
     }
 
-    private fun writeLast(now: Long, snapshot: Map<String, UidUse>) {
+    private fun writeLast(now: Long, snapshot: Map<String, UidUse>, boot: Boot?, seq: Int) {
         val tmp = File(dir, "health_last.json.tmp")
-        tmp.writeText(JSONObject().put("t", now).put("u", JSONArray(snapshot.values.map { toJson(it) })).toString())
+        val o = JSONObject().put("t", now).put("bs", seq)
+        if (boot != null) { o.put("el", boot.elapsedMs); boot.count?.let { o.put("bc", it) } }
+        tmp.writeText(o.put("u", JSONArray(snapshot.values.map { toJson(it) })).toString())
         if (!tmp.renameTo(last)) { last.writeText(tmp.readText()); tmp.delete() }
     }
 
@@ -192,6 +231,7 @@ class HealthStore(context: Context) {
 
     companion object {
         const val MAX_PER_ROW = 25
+        private val EMPTY = Recent(emptyList(), 0L, 0L)
         /** 배터리 화면(IO 스레드)과 15분 기록이 같이 쓰므로 인스턴스가 아니라 파일에 하나 */
         private val LOCK = Any()
         private const val K_LAST_AT = "health_last_at"

@@ -72,7 +72,7 @@ data class BatteryStats(
      */
     fun packageOf(uid: Int?): String? = uid?.let { u ->
         val names = uidPackages[u] ?: return@let null
-        if ("android" in names) names.firstOrNull() else NAMED.firstOrNull { it in names } ?: names.firstOrNull()
+        if ("android" in names) "android" else NAMED.firstOrNull { it in names } ?: names.firstOrNull()
     }
 
     private companion object {

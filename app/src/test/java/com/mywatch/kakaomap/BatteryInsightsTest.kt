@@ -61,13 +61,6 @@ class BatteryInsightsTest {
         log.dir.deleteRecursively()
         context.getSharedPreferences(BatteryLog.PREFS, Context.MODE_PRIVATE).edit().clear().commit()
         Settings.Global.putInt(context.contentResolver, "low_power", 0)
-        // 시험 기기는 방금 켜진 것(SystemClock 이 0 근처)이라 실제 시각으로 남긴 통계가 '부팅 전'이 된다 — 부팅 시각은 모르는 것으로
-        Guardian.bootClock = { 0L }
-    }
-
-    @org.junit.After
-    fun restoreBootClock() {
-        Guardian.bootClock = Guardian.DEFAULT_BOOT_CLOCK
     }
 
     private fun allowUsage() = shadowOf(context.getSystemService(AppOpsManager::class.java))
@@ -180,26 +173,30 @@ class BatteryInsightsTest {
         assertEquals(listOf(Span(at(0, 30), at(7, 5))), GuardianJournal(context).nightSessions(at(8)))
     }
 
-    /** 2시간째 화면 꺼진 채 Play 서비스가 15분마다 CPU 4분(시간당 16분)을 쓰는 워치 */
-    private fun playServicesLoop(start: Long, ticks: Int) {
-        val stats = object : UidStatsSource {
-            var cpu = 0L
-            override fun take() = mapOf(
-                "com.google.android.gms+2" to UidUse("com.google.android.gms+2", cpuMs = cpu, wakelockMs = cpu),
-                "com.samsung.android.wear.shealth" to UidUse("com.samsung.android.wear.shealth", sensorMs = cpu / 4),
-            )
-        }
-        for (k in 0 until ticks) {
+    /** 화면 꺼진 채 Play 서비스가 15분마다 CPU 4분(시간당 16분)을 쓰는 워치 */
+    private class GmsLoop : UidStatsSource {
+        var cpu = 0L
+        override fun take() = mapOf(
+            "com.google.android.gms+2" to UidUse("com.google.android.gms+2", cpuMs = cpu, wakelockMs = cpu),
+            "com.samsung.android.wear.shealth" to UidUse("com.samsung.android.wear.shealth", sensorMs = cpu / 4),
+        )
+    }
+
+    /** [start] 부터 15분마다 [from]..[ticks] 번째 기록 (이어서 돌리려면 같은 [stats] 를) */
+    private fun playServicesLoop(start: Long, ticks: Int, from: Int = 0, stats: GmsLoop = GmsLoop()): GmsLoop {
+        for (k in from until ticks) {
             val t = start + k * q
             log.append(BatterySample(t, 80 - k))
             Guardian.tick(context, log, t, stats = stats, zone = zone)
             stats.cpu += 4 * 60_000L
         }
+        return stats
     }
 
     @Test
     fun aPlayServicesLoopIsNotifiedWithTheFixAndTheAppInfoButton() {
-        playServicesLoop(at(14), 3)
+        // 알려진 문제는 1시간치가 쌓여야 판단한다 (짧으면 재시작 직후의 일이 시간당으로 부풀려짐)
+        val loop = playServicesLoop(at(14), 5)
         val n = shadowOf(nm).getNotification(Guardian.N_ISSUE)
         assertNotNull(n)
         val title = n.extras.getCharSequence(Notification.EXTRA_TITLE).toString()
@@ -209,8 +206,9 @@ class BatteryInsightsTest {
         assertTrue(n.actions.map { it.title.toString() }.toString(), n.actions.any { it.title.toString() == "Play 서비스 앱 정보" })
         // 12시간에 한 번
         nm.cancel(Guardian.N_ISSUE)
-        playServicesLoop(at(14, 45), 2)
-        assertNull(shadowOf(nm).getNotification(Guardian.N_ISSUE))
+        playServicesLoop(at(14), 7, from = 5, stats = loop)
+        assertEquals("문제는 그대로 보이고(타일)", "Play 서비스 과소모 — 캐시 지우기", Guardian.tileIssue(context, at(15, 30)))
+        assertNull("알림만 쉰다", shadowOf(nm).getNotification(Guardian.N_ISSUE))
     }
 
     private fun open(): Pair<BatteryActivity, RowAdapter> {

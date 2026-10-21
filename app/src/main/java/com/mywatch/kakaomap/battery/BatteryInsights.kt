@@ -11,7 +11,6 @@ import com.mywatch.battery.core.DrainAnalyzer
 import com.mywatch.battery.core.DrainChart
 import com.mywatch.battery.core.DrainChartModel
 import com.mywatch.battery.core.KnownIssue
-import com.mywatch.battery.core.KnownIssues
 import com.mywatch.battery.core.LeverEffect
 import com.mywatch.battery.core.LeverEffects
 import com.mywatch.battery.core.NightCulprits
@@ -71,6 +70,8 @@ object BatteryInsights {
     /** 무거운 계산은 부르는 쪽이 IO 스레드에서 */
     fun compute(context: Context, samples: List<BatterySample>, now: Long = System.currentTimeMillis(), zone: ZoneId = ZoneId.systemDefault()): Insights {
         val c = context.applicationContext
+        // 화면이 보일 앱 이름을 여기(IO 스레드)서 미리 찾아 둔다 — 그리는 동안 패키지 관리자를 부르지 않게
+        val label = appName(c)
         val analysis = runCatching { DrainAnalyzer(WatchModels.nominalMah(Build.MODEL), zone).analyze(samples, now) }
             .onFailure { ErrorLog.record("배터리·분석", it) }.getOrNull()
         // 하루 동안 화면 기록이 하나도 없으면 기록을 안 남기는 기기로 보고 표본으로 어림
@@ -81,15 +82,11 @@ object BatteryInsights {
         val wakes = usage?.let { u -> runCatching { Wakes.analyze(u.screen, u.notifications, now - 24 * 3_600_000L, now, breakdown?.screenPph, zone) }.getOrNull() }
         val cw = runCatching { Guardian.culpritWindow(c, now) }.getOrDefault(Guardian.CulpritWindow(emptyList(), 0L, now))
         val culprits = cw.ranks
-        val window = cw.windowMs
         val night = runCatching { NightCulprits.lastNight(HealthStore(c).windows(24, now), now, zone, c.packageName) }.getOrNull()
         val face = runCatching { watchFace(c) }.getOrNull()
-        // 화면이 켜져 있던 시간·받은 알림(사용 통계)을 같이 — One UI Watch 홈은 화면을 그리고 알림을 보여 주는 몫을 빼고 본다.
-        // 앱별 통계 창과 같은 때로 (창 끝 = 마지막 스냅샷)
-        val start = cw.endAt - window
-        val screenOn = usage?.screen?.takeIf { window > 0 }?.sumOf { it.overlap(start, cw.endAt) }
-        val notes = usage?.notifications?.count { it.second in start until cw.endAt } ?: 0
-        val issues = KnownIssues.detect(culprits, face, window.takeIf { it > 0 }, screenOn, notes) { pkg -> appName(c)(pkg) }
+        // 화면이 켜져 있던 시간·받은 알림(사용 통계, 하루치)을 같이 — One UI Watch 홈은 화면을 그리고 알림을 보여 주는 몫을 빼고 본다
+        // (15분 기록과 같은 판단: 앱별 통계의 기록 구간들과 겹친 만큼)
+        val issues = Guardian.issuesIn(cw, face, usage?.screen, usage?.notifications?.map { it.second }, now - 24 * 3_600_000L, label)
         val effect = runCatching { LeverEffects.nightMode(samples, GuardianJournal(c).nightSessions(now), now, zone) }
             .getOrDefault(LeverEffect(emptyList(), emptyList()))
         val levers = runCatching { Levers(c).checkLine(Guardian.state(c).saverBroken) }.getOrNull()
@@ -101,8 +98,6 @@ object BatteryInsights {
         val cover = runCatching { ScreenUsage(c).readScreen(now - DayTrend.DAYS * 24 * 3_600_000L, now) }.getOrNull()
         val trend = runCatching { TrendReport.of(samples, now, zone, cover) }.onFailure { ErrorLog.record("배터리·추세", it) }.getOrNull()
         val bootAt = (System.currentTimeMillis() - android.os.SystemClock.elapsedRealtime()).takeIf { it > 0 }
-        // 화면이 보일 앱 이름을 여기(IO 스레드)서 미리 찾아 둔다 — 그리는 동안 패키지 관리자를 부르지 않게
-        val label = appName(c)
         val changed = trend?.let { t ->
             (t.suspects + t.recent).flatMap { ch ->
                 when (ch.kind) {

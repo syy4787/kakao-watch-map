@@ -51,6 +51,9 @@ object KnownIssues {
         notifications: Int = 0, label: (String) -> String? = { null },
     ): List<KnownIssue> {
         if (ranks.isEmpty()) return emptyList()
+        // 창이 1시간은 넘어야 — 짧으면(첫 스냅샷·재시작 직후·폰에서 알림 다시 받기) 잠깐의 일이 시간당으로 부풀려진다. 창을 모르면
+        // (PC 툴킷이 읽은 충전 뒤 통계처럼 길다) 그대로 본다
+        if (windowMs != null && windowMs < MIN_WINDOW_MS) return emptyList()
         val total = ranks.sumOf { it.score }
         val out = ArrayList<KnownIssue>()
         ranks.withIndex().firstOrNull { (_, r) -> r.use.pkg.substringBefore('+') == GMS }?.let { (i, r) ->
@@ -96,9 +99,8 @@ object KnownIssues {
         }
         // One UI Watch 홈(시스템 UI): 화면을 그리는 프로세스라 '화면에 떠 있던 시간'이 화면 켜짐과 맞지 않아 앱별 등급([AppDrain])으로는
         // 매기지 않는다 → 화면이 켜져 있던 동안 홈 화면·알림·타일을 그렸을 몫과 받은 알림을 보여 준 몫을 빼고 남은 CPU 를 시간당으로 본다.
-        // 화면 켜진 시간을 모르거나 오래 켜고 썼으면 짚지 않는다
-        // 창이 1시간은 넘어야 — 짧으면(첫 스냅샷·재시작 직후·폰에서 알림 다시 받기) 잠깐의 일이 시간당으로 부풀려진다
-        if (windowMs != null && windowMs >= HOME_MIN_WINDOW_MS && screenOnMs != null && screenOnMs <= windowMs * HOME_MAX_SCREEN_SHARE) {
+        // 화면 켜진 시간·창 길이를 모르거나 오래 켜고 썼으면 짚지 않는다
+        if (windowMs != null && screenOnMs != null && screenOnMs <= windowMs * HOME_MAX_SCREEN_SHARE) {
             ranks.withIndex().firstOrNull { (_, r) -> r.use.pkg.substringBefore('+') == HOME }?.let { (i, r) ->
                 val hours = windowMs / 3_600_000.0
                 // 다른 앱의 알림을 받아 보여 주는 일도 홈이 한다 — 알림 하나에 [HOME_CPU_PER_NOTIFICATION_MS] 씩은 빼고 본다
@@ -149,8 +151,8 @@ object KnownIssues {
      */
     const val HOME_CAUTION_MS_PER_H = 5L * 60_000L
 
-    /** 홈을 판단하려면 창이 이만큼은 돼야 한다 */
-    const val HOME_MIN_WINDOW_MS = 3_600_000L
+    /** 알려진 문제를 판단하려면 앱별 통계 창이 이만큼은 돼야 한다 */
+    const val MIN_WINDOW_MS = 3_600_000L
 
     /** 알림 하나를 받아 보여 주는 데 홈이 쓸 만한 CPU (어림 — 진동·화면 표시·묶음 정리) */
     const val HOME_CPU_PER_NOTIFICATION_MS = 2_000L

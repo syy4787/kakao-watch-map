@@ -468,8 +468,10 @@ class AnalyzerTest {
     @Test
     fun aSharedUidIsNamedAfterTheKnownPackage() {
         val home = "com.samsung.android.wearable.sysui"
-        val s = BatteryStats(uidPackages = mapOf(10020 to listOf("com.android.systemui", home), 1000 to listOf("android", home)))
+        val s = BatteryStats(uidPackages = mapOf(10020 to listOf("com.android.systemui", home), 1000 to listOf("android", home), 1001 to listOf(home, "android")))
         assertEquals(home, s.packageOf(10020))
         assertEquals("android", s.packageOf(1000))
+        // 목록 순서와 상관없이 (덤프마다 순서가 다를 수 있다)
+        assertEquals("android", s.packageOf(1001))
     }
 }

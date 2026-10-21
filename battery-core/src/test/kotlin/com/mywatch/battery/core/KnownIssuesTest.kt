@@ -62,6 +62,23 @@ class KnownIssuesTest {
         assertTrue(KnownIssues.detect(ranks).isEmpty())
     }
     /**
+     * 창이 1시간이 안 되면 어떤 문제도 짚지 않는다 — 재시작 직후·첫 스냅샷처럼 짧은 창에선 잠깐의 일(재시작 뒤 Play 서비스 동기화 등)이
+     * 시간당으로 부풀려진다 (홈에만 있던 기준을 모든 문제에 — 리뷰에서 찾음). 창을 모르면(PC 툴킷의 충전 뒤 통계) 그대로 본다
+     */
+    @Test
+    fun noIssueIsJudgedOnLessThanAnHour() {
+        val face = "com.jeremysteckling.facerrel"
+        val uses = listOf(UidUse("com.google.android.gms", cpuMs = 8 * 60_000L, wakelockMs = 10 * 60_000L), UidUse(face, cpuMs = 4 * 60_000L, wakelockMs = 3 * 60_000L))
+        val short = 30 * 60_000L
+        assertTrue(KnownIssues.detect(AppDrain.rank(uses, short), face, short).isEmpty())
+        assertEquals(
+            setOf(KnownIssues.PLAY_SERVICES_LOOP, KnownIssues.WATCH_FACE_HEAVY),
+            KnownIssues.detect(AppDrain.rank(uses.map { it + it }, h), face, h).map { it.id }.toSet(),
+        )
+        assertEquals(KnownIssues.PLAY_SERVICES_LOOP, KnownIssues.detect(AppDrain.rank(uses, short)).first().id)
+    }
+
+    /**
      * 타사 시계 화면이 뒤에서(화면이 꺼진 동안에도) CPU·웨이크락을 많이 쓰면 짚는다 — 기본 삼성 시계 화면으로 바꿔 비교하라고.
      * 삼성·구글 기본 시계 화면(Watch Face Format 렌더러 포함)은 짚지 않는다
      */
