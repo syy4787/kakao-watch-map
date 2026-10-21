@@ -197,6 +197,8 @@ class BatteryActivityTest {
     fun guardianTogglesFlipTheConfigAndNoPermissionIsExplained() {
         val (a, adapter) = open()
         assertTrue(rows(adapter).filterIsInstance<Row.Note>().any { it.text.contains("메뉴 7") })
+        // PC 가 없을 때의 길: 폰 ADB 앱으로 같은 권한
+        assertTrue(rows(adapter).filterIsInstance<Row.Note>().any { it.text.contains("pm grant com.mywatch.kakaomap android.permission.WRITE_SECURE_SETTINGS") })
         val before = com.mywatch.kakaomap.battery.Guardian.config(context)
         assertTrue(before.nightSaver)
         click(a, adapter, BatteryActivity.A_TOGGLE + BatteryActivity.T_NIGHT_SAVER)

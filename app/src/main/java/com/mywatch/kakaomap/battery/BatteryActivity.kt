@@ -185,6 +185,7 @@ class BatteryActivity : ComponentActivity() {
         }
         if (!levers.canWriteSecure && !stats) {
             rows += Row.Note("PC 툴킷에서 메뉴 7(권한 주기)을 한 번 실행하면 켜집니다 — 앱별 소모를 읽고, 밤과 비정상 소모 때 절전 모드·AOD 를 스스로 조절합니다")
+            rows += Row.Note(NO_PC_GRANT)
         } else {
             val powers = listOfNotNull(if (stats) "앱별 통계" else null, if (levers.canWriteSecure) "설정 조절" else null)
             rows += Row.Note("권한: ${powers.joinToString(" · ")}" + (if (!levers.canWriteSecure) " (설정 조절 권한 없음 — 알림만)" else ""))
@@ -467,6 +468,11 @@ class BatteryActivity : ComponentActivity() {
         const val T_ABNORMAL = "abnormal"
         const val T_REMINDER = "reminder"
         val MODES = listOf("비행기 모드", "절전 모드", "시계만 사용", "평소대로")
+        /** PC 가 없을 때: 폰의 ADB 앱으로 워치 무선 디버깅에 붙어 같은 권한을 준다 (PC 툴킷 메뉴 7 이 하는 것 중 지킴이에 꼭 필요한 셋) */
+        const val NO_PC_GRANT = "PC 가 없으면: 폰의 ADB 앱(예: Bugjaeger)으로 워치 무선 디버깅에 연결해 셸에 세 줄 —\n" +
+            "pm grant com.mywatch.kakaomap android.permission.BATTERY_STATS\n" +
+            "pm grant com.mywatch.kakaomap android.permission.WRITE_SECURE_SETTINGS\n" +
+            "appops set com.mywatch.kakaomap GET_USAGE_STATS allow"
         const val HELP = "• 잔량 표시 점검: '17%에서 꺼졌는데 켜니 47%'는 배터리가 아니라 잔량 게이지가 낮게 센 것. 쉬는 전압으로 그 오차를 잡아 알려 주고, 강제 재시작·보정 루틴으로 다시 맞춥니다.\n" +
             "• 강제 재시작: 홈 + 뒤로 버튼을 꺼질 때까지(7초 이상) 누르기. 효과 없으면 30초.\n" +
             "• Play 서비스가 1위면: 설정 > 애플리케이션 > Google Play 서비스 > 저장공간 > 캐시 지우기 → 재시작 (2026년에 되풀이된 문제의 알려진 해결)\n" +
