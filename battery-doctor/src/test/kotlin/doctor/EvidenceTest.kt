@@ -204,6 +204,32 @@ class EvidenceTest {
         assertTrue(l0, l0.lines().none { it.startsWith("- 워치 켜짐(부팅) 기록") })
     }
 
+    /** 느린 충전은 신고문 세 가지에 사실 한 줄로 (서비스센터가 공식 시간과 견주게) — 주요 소견에선 그 소견을 뺀다 */
+    @Test
+    fun lettersCarryTheSlowChargeFacts() {
+        val q = 15 * 60_000L
+        val now = java.time.LocalDateTime.of(2026, 10, 20, 22, 0).atZone(zone).toInstant().toEpochMilli()
+        val samples = ArrayList<com.mywatch.battery.core.BatterySample>()
+        var t = now - 3 * 24 * 3_600_000L
+        repeat(3) {
+            val dayStart = t
+            while (t < dayStart + 12 * 3_600_000L) { samples += com.mywatch.battery.core.BatterySample(t, 95 - ((t - dayStart) / q).toInt() * 80 / 48); t += q }
+            var lv = 15.0
+            while (lv < 100.0) { samples += com.mywatch.battery.core.BatterySample(t, lv.toInt(), plugged = true, tempDeciC = 440); t += q; lv += 0.6 * 15 }
+            samples += com.mywatch.battery.core.BatterySample(t, 100, plugged = true, tempDeciC = 400)
+            t = dayStart + 24 * 3_600_000L
+        }
+        val f = Facts(model = "SM-L350", collectedAt = now, watchSamples = samples, zone = zone)
+        val fs = Analyzer.findings(f)
+        assertTrue(fs.any { it.id == "watch-charge-slow" })
+        val letters = Evidence.letters(f, fs, Analyzer.verdict(f, fs), emptyList(), null, LocalDate.of(2026, 10, 20), zone)
+        for (l in letters.values) {
+            val line = l.lines().single { it.startsWith("- 충전 속도(워치 15분 기록)") }
+            assertEquals("- 충전 속도(워치 15분 기록): 완충 어림 2시간 47분 넘게 — 삼성 공식 44mm 90분, 최근 7일 충전 3번, 충전 중 최고 44℃", line)
+        }
+        assertTrue(letters.getValue(Evidence.LETTER_MEMBERS).lines().none { it.contains("충전이 공식보다 느림") })
+    }
+
     /**
      * 켜지며 잔량이 뛴 것은 본 그대로 — '17%에서 꺼졌다 켜니 47%'(게이지가 낮게 세다 다시 맞춰짐)와 '하루를 못 버티고 꺼졌다가 충전기에서
      * 켜니 48%'(Samsung Community 10/4, 워치9) — 충전으로 그만큼 오를 수 없었으면 앞뒤 잔량을, 방전 뒤 충전기에서 켜졌으면 마지막 기록이

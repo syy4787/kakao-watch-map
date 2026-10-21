@@ -2,6 +2,8 @@ package doctor
 
 import com.mywatch.battery.core.AnomalyKind
 import com.mywatch.battery.core.ChangeFinder
+import com.mywatch.battery.core.ChargeHabits
+import com.mywatch.battery.core.ChargeSpeed
 import com.mywatch.battery.core.DayTrend
 import com.mywatch.battery.core.DrainAnalyzer
 import com.mywatch.battery.core.Gauge
@@ -379,6 +381,20 @@ object Analyzer {
                 category = "info")
         }
 
+        // 7-3. 충전 속도 — 워치9 충전이 공식(40mm 80분·44mm 90분)보다 한참 느림(충전 중 뜨거워지며 느려진다는 보고가 많다 — 삼성은 아직
+        // 고침을 알리지 않음). 범인 앱은 짚지 않는다
+        chargeSpeed(f)?.let { (ch, sp) ->
+            out += Finding("watch-charge-slow", Severity.CAUTION, "워치 기록: 충전이 공식보다 느림 — 완충 어림 ${ChargeHabits.duration(sp.minutesPerFull)} 넘게 (삼성 공식 ${sp.specMinutes}분)",
+                listOfNotNull(
+                    "최근 7일 충전 ${sp.sessions}번의 ${ChargeSpeed.FROM}~${ChargeSpeed.TO}% 구간 빠르기로 어림한 0→100% 시간의 가운데 값 (그 뒤는 원래 느려 실제 완충은 더 걸림)",
+                    sp.maxTempC?.let { "그 구간 최고 ${fmt1(it).removeSuffix(".0")}℃" + if (sp.hot) " — 충전 중 뜨거워지면 느려진다는 워치9 사용자 보고와 같은 모습" else "" },
+                    ch.advice.firstOrNull { it.startsWith("충전이 공식보다 느립니다") },
+                    "기준: 공식 0→100% 시간의 ${ChargeSpeed.SLOW_RATIO}배 넘게, 그런 충전이 ${ChargeSpeed.MIN_SESSIONS}번 이상",
+                ),
+                source = "삼성 발표 충전 시간(40mm 80분·44mm 90분 — Android Authority 2026-08-12) · 워치9 느린 충전 보고(Notebookcheck 2026-08-12, Sammy Fans 2026-10-13)",
+                category = "charge")
+        }
+
         // 8. 용량
         f.watch?.capacity?.let { c ->
             val p = c.percentOfNominal
@@ -599,6 +615,15 @@ object Analyzer {
     private fun stepDown(c: String) = when (c) { "높음" -> "중간"; else -> "낮음" }
 
     fun fmt1(x: Double): String = String.format(Locale.US, "%.1f", x)
+
+    /** 워치 기록의 충전 속도가 공식보다 한참 느리면 그 충전 습관과 속도 (신고문도 같은 값을 쓴다) */
+    fun chargeSpeed(f: Facts): Pair<ChargeHabits, ChargeSpeed>? {
+        val now = f.collectedAt ?: f.watchSamples.maxOfOrNull { it.t } ?: return null
+        val ch = ChargeHabits.analyze(f.watchSamples, now, model = f.model) ?: return null
+        val sp = ch.speed?.takeIf { it.slow } ?: return null
+        return ch to sp
+    }
+
     /** 지난 시간을 사람 말로 — 1시간 안(또는 [minutes] 면 N분 전) · N시간 전(이틀까지) · N일 전 */
     fun ago(ms: Long, minutes: Boolean = false): String {
         val h = ms / 3_600_000L

@@ -107,7 +107,7 @@ object BatteryInsights {
         val chart = runCatching {
             DrainChart.buildOrNull(samples, now, zone, screen = usage?.screen, hot = breakdown?.steepest.orEmpty().map { it.start to it.end })
         }.onFailure { ErrorLog.record("배터리·그래프", it) }.getOrNull()
-        val charging = runCatching { ChargeHabits.analyze(samples, now) }.getOrNull()
+        val charging = runCatching { ChargeHabits.analyze(samples, now, model = android.os.Build.MODEL) }.getOrNull()
         // 며칠 단위 추세: 사용 통계가 있으면 화면이 한 번도 안 켜진 구간만 대기로 (없으면 15분 표본의 화면 상태로)
         val cover = runCatching { ScreenUsage(c).readScreen(now - DayTrend.DAYS * 24 * 3_600_000L, now) }.getOrNull()
         val trend = runCatching { TrendReport.of(samples, now, zone, cover) }.onFailure { ErrorLog.record("배터리·추세", it) }.getOrNull()
