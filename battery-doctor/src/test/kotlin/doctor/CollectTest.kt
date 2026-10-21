@@ -123,6 +123,31 @@ class CollectTest {
         assertEquals(t0 + 3 * 60_000L, a.time)
     }
 
+    /**
+     * '조치 전'을 고를 때 아무것도 바꾸지 않은 기록(이미 있던 권한 — 되돌릴 것 없음)은 조치로 치지 않는다. 되돌릴 수 없는 일회성 조치(캐시
+     * 정리·Play 서비스 다시 시작)는 같은 때 한 조치를 되돌렸으면(undo --all) 함께 끝난 것으로 — 되돌린 뒤 일주일 내내 치료 전과 견주지 않게 (리뷰)
+     */
+    @Test
+    fun noOpGrantsAndUndoneRunsDoNotMoveTheBaseline() {
+        val h = 3_600_000L
+        val t0 = 1_792_000_000_000L
+        val a = snapAt("20261014-100000", t0)
+        val b = snapAt("20261014-120000", t0 + 2 * h)
+        val c = snapAt("20261015-120000", t0 + 26 * h)
+        fun e(at: Long, id: String, undo: List<List<String>>?, undone: Boolean = false) = doctor.fix.JournalEntry(at, id, null, emptyList(), undo, undone)
+        val revoke = listOf(listOf("shell", "pm", "revoke", "com.mywatch.kakaomap", "android.permission.BATTERY_STATS"))
+        // b 바로 전에 자동 치료를 다시 했는데 권한은 이미 있었다(되돌릴 것 없음) — 조치가 아니니 바로 앞 수집(b)과
+        assertEquals(b.dir, Collect.baseline(tmp.root, c, listOf(e(t0 + 2 * h - 60_000L, "grant:android.permission.BATTERY_STATS", emptyList())))!!.dir)
+        // 실제로 준 권한(되돌릴 것 있음)은 조치
+        assertEquals(a.dir, Collect.baseline(tmp.root, c, listOf(e(t0 + 2 * h - 60_000L, "grant:android.permission.BATTERY_STATS", revoke)))!!.dir)
+        // a 뒤 자동 치료(되돌릴 수 있는 조치 + 일회성 조치)를 undo --all 로 되돌렸으면 일회성도 끝난 것
+        val run = listOf(e(t0 + 60_000L, "wifi-scan-off", revoke, undone = true), e(t0 + 90_000L, "trim-caches", null))
+        assertEquals(b.dir, Collect.baseline(tmp.root, c, run)!!.dir)
+        assertEquals(a.dir, Collect.baseline(tmp.root, c, run.map { it.copy(undone = false) })!!.dir)
+        // 일회성 조치만 한 치료는 되돌릴 것이 없어 그대로 치료 전(a)과
+        assertEquals(a.dir, Collect.baseline(tmp.root, c, listOf(e(t0 + 90_000L, "trim-caches", null)))!!.dir)
+    }
+
     @Test
     fun runsEveryCommandAndWritesAFilePerName() {
         val adb = happyAdb()

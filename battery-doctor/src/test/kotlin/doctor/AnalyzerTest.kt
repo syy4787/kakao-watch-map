@@ -551,9 +551,14 @@ class AnalyzerTest {
         val gms = fs.single { it.id == "watch-gms" }
         assertTrue(gms.title, gms.title.endsWith("다음 단계 뒤에도 계속"))
         assertTrue(gms.evidence.toString(), gms.evidence.any { it.contains("모두 업데이트") })
+        // 워치는 재시작만 안다 — 홈 캐시를 지웠다고 단정하지 않는다 (리뷰)
+        assertTrue(home.evidence.toString(), home.evidence.none { it.contains("홈 캐시 삭제 뒤에도 계속됩니다") })
         val vf = facts().copy(watchMetrics = f.watchMetrics)
         val v = Analyzer.verdict(vf, Analyzer.findings(vf) + Finding("rate-24h", Severity.ABNORMAL, "24시간 시간당 6.0%", emptyList(), category = "drain"))
         assertTrue(v.todo.first(), v.todo.first().contains("다음 단계 뒤에도 계속") && v.todo.first().contains("Samsung Members"))
+        // Play 서비스도 처음 순서(캐시 삭제 → 강제 재시작)를 되풀이하지 않고 업데이트·오류 보내기로 (리뷰)
+        val gmsStep = v.todo.first { it.contains("Play 서비스는") }
+        assertTrue(gmsStep, gmsStep.contains("모두 업데이트") && !gmsStep.contains("캐시 삭제 → 강제 재시작"))
     }
 
     /**
@@ -567,11 +572,16 @@ class AnalyzerTest {
         val fs = Analyzer.findings(vf)
         val e = fs.single { it.id == "watch-home-earlier" }
         assertEquals(Severity.CAUTION, e.severity)
-        assertTrue(e.title, e.title.contains("2.5시간 전") && e.title.contains("One UI Watch 홈 과소모"))
+        // 'N시간 전'은 수집 때부터 (요약은 5분 전에 씀 — 리뷰)
+        assertTrue(e.title, e.title.contains("2.6시간 전") && e.title.contains("One UI Watch 홈 과소모"))
+        // 재시작·치료를 했다고 단정하지 않는다 (워치는 모른다 — 리뷰)
+        assertTrue(e.evidence.toString(), e.evidence.none { it.contains("재시작·치료 뒤라") || it.contains("재시작·치료 뒤 1시간") })
         assertTrue(e.evidence.toString(), e.evidence.any { it.contains("다시 보는 중") } && e.evidence.any { it.contains("하드웨어로 단정하기 전에") })
         assertFalse("범인으로 짚지 않는다", e.blames && e.packages.isNotEmpty())
         val v = Analyzer.verdict(vf, fs + Finding("rate-24h", Severity.ABNORMAL, "24시간 시간당 6.0%", emptyList(), category = "drain"))
         assertEquals(Cause.SOFTWARE, v.cause)
+        // 할 일 맨 앞은 다시 재서 견주기 — 일반적인 '추천 조치 적용'이 아니라 (리뷰)
+        assertTrue(v.todo.first(), v.todo.first().contains("워치가") && v.todo.first().contains("다시 수집"))
         // 그 전엔(이 소견 없이) 하드웨어 의심이었다
         val bare = facts().copy(watchMetrics = wm - "seen_home_h")
         assertEquals(Cause.HARDWARE, Analyzer.verdict(bare, Analyzer.findings(bare) + Finding("rate-24h", Severity.ABNORMAL, "24시간 시간당 6.0%", emptyList(), category = "drain")).cause)
@@ -580,6 +590,22 @@ class AnalyzerTest {
         assertTrue(quiet.evidence.toString(), quiet.evidence.any { it.contains("지금은 조용") })
         // 묵은 요약(3시간 넘음)은 쓰지 않는다
         assertTrue(Analyzer.findings(facts().copy(watchMetrics = wm + ("at" to (this.now - 4 * 3_600_000L).toDouble()))).none { it.id == "watch-home-earlier" })
+    }
+
+    /**
+     * 워치가 본 때가 이 보고서의 측정 창보다 앞이면(그 뒤 충전해 dumpsys 가 비워졌고 워치 기록 24시간보다도 앞) 지금 소모율과 상관없다 —
+     * 참고로만 두고 판정은 그대로 (리뷰)
+     */
+    @Test
+    fun anEarlierSightingOutsideTheMeasuredWindowIsOnlyANote() {
+        val wm = mapOf("at" to (this.now - 60 * 60_000L).toDouble(), "app_window_min" to 120.0, "issue_home" to 0.0, "seen_home_h" to 25.0)
+        val vf = facts().copy(watchMetrics = wm)                       // dumpsys 8시간 · 워치 기록 24시간
+        val e = Analyzer.findings(vf).single { it.id == "watch-home-earlier" }
+        assertEquals(Severity.INFO, e.severity)
+        assertTrue(e.title, e.title.contains("26시간 전"))
+        assertTrue(e.evidence.toString(), e.evidence.none { it.contains("하드웨어로 단정하기 전에") })
+        val v = Analyzer.verdict(vf, Analyzer.findings(vf) + Finding("rate-24h", Severity.ABNORMAL, "24시간 시간당 6.0%", emptyList(), category = "drain"))
+        assertEquals(Cause.HARDWARE, v.cause)
     }
 
     /**
@@ -593,6 +619,8 @@ class AnalyzerTest {
         val step = v.todo.first { it.contains("Play 서비스는") }
         assertTrue(step, step.contains("캐시 삭제 → 강제 재시작") && !step.contains("재시작 → 캐시"))
         assertTrue(step, step.contains("2023년") && !step.contains("2026년 사례"))
+        // 그 사례의 원인을 단정하지 않는다 — 보고된 것과 풀린 방법만 (리뷰)
+        assertTrue(step, !step.contains("어시스턴트였음"))
     }
 
     /**

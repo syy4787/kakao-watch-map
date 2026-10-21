@@ -162,15 +162,26 @@ object Collect {
     /**
      * 치료 전후 비교의 '전' — [snap] 전에 한 조치(성공하고 되돌리지 않은 것) 가운데 가장 늦은 것보다 앞선 마지막 수집. 자동 치료 10분
      * 뒤에 확인하려고 한 번 더 수집했어도(초기화 직후라 비교할 값이 없음) 하루 뒤 수집이 그것이 아니라 치료 전 수집과 견주게 (시나리오
-     * 점검). 조치와 수집은 PC 시계([Snapshot.pcTime])로 견준다. 조치가 없거나 일주일이 넘었으면 바로 앞 수집, 처음 수집이면 null
+     * 점검). 조치와 수집은 PC 시계([Snapshot.pcTime])로 견준다. 조치가 없거나 일주일이 넘었으면 바로 앞 수집, 처음 수집이면 null.
+     * 아무것도 바꾸지 않은 기록(이미 있던 권한 — 되돌릴 것 없음)은 조치로 치지 않고, 되돌릴 수 없는 일회성 조치(캐시 정리·Play 서비스 다시
+     * 시작)는 같은 때([RUN_MS] 안) 한 조치를 되돌렸으면(undo --all) 함께 끝난 것으로 본다 (리뷰)
      */
     fun baseline(root: File, snap: Snapshot, journal: List<doctor.fix.JournalEntry>): Snapshot? {
         val earlier = File(root, "snapshots").listFiles()?.filter { it.isDirectory && it.name < snap.dir.name }?.sortedBy { it.name }?.map { Snapshot(it) }
         if (earlier.isNullOrEmpty()) return null
         val at = snap.pcTime
-        val last = journal.filter { it.ok && !it.undone && it.time < at && at - it.time <= BASELINE_ACTION_MS }.maxOfOrNull { it.time }
+        val undone = journal.filter { it.undone }
+        val active = journal.filter { e ->
+            e.ok && !e.undone && e.time < at && at - e.time <= BASELINE_ACTION_MS &&
+                !(e.undo != null && e.undo.isEmpty()) &&                                         // 바꾼 것이 없다
+                !(e.undo == null && undone.any { kotlin.math.abs(it.time - e.time) <= RUN_MS })   // 함께 한 조치를 되돌렸다
+        }
+        val last = active.maxOfOrNull { it.time }
         return last?.let { t -> earlier.lastOrNull { it.pcTime < t } } ?: earlier.last()
     }
+
+    /** 한 번의 치료(자동 치료·차단 조치)로 보는 시간 폭 */
+    const val RUN_MS = 10L * 60_000L
 
     /** [snap] 바로 앞의 수집 (치료 전후 비교용) — 없으면 null */
     fun before(root: File, snap: Snapshot): Snapshot? =

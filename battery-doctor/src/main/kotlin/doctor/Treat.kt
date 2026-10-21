@@ -156,9 +156,11 @@ object Treat {
         val reset = try { adb.run(listOf("shell", "dumpsys", "batterystats", "--reset"), 60) } catch (e: Exception) { Result(-3, "", e.toString()) }
         // 캐시 정리·Play 서비스 다시 시작을 했으면 워치 앱에 알린다 — 워치가 앱별 기록을 거기서 새로 재, 치료 전 기록으로 또 짚거나
         // (10분 뒤 수집에서) 또 치료를 권하지 않게. 그 뒤에도 또 나타나면 워치가 다음 단계로 넘어간다
+        // 실제로 한 치료를 붙여 보낸다 — 워치가 문제마다 단계를 넘기게(Play 서비스를 다시 시작했으면 Play 서비스만 다음 단계로)
         val cureIds = setOf("trim-caches", "gms-restart")
-        val told: Boolean? = if (applied.none { it.ok && it.lever.id in cureIds }) null else {
-            val r = try { adb.run(TREATED_BROADCAST, 90) } catch (e: Exception) { Result(-3, "", e.toString()) }
+        val cured = applied.filter { it.ok && it.lever.id in cureIds }.map { it.lever.id }
+        val told: Boolean? = if (cured.isEmpty()) null else {
+            val r = try { adb.run(TREATED_BROADCAST + listOf("--es", "did", cured.joinToString(",")), 90) } catch (e: Exception) { Result(-3, "", e.toString()) }
             r.ok && r.out.contains("treated:ok")
         }
 
@@ -187,8 +189,9 @@ object Treat {
             false -> io.println(" 워치 앱에 치료를 알리지 못했습니다(예전 버전이거나 앱별 통계 권한 없음) — 워치의 알려진 문제는 1~2시간 동안 치료 전 기록으로 보일 수 있습니다")
             null -> {}
         }
-        // 워치가 One UI Watch 홈 과소모를 짚었는데 캐시 정리를 했으면 강제 재시작까지 — 캐시만 지우면 돌고 있는 홈은 그대로다 (워치 할 일과 같은 순서)
-        val homeTrimmed = findings.any { it.id == "watch-home" } && applied.any { it.ok && it.lever.id == "trim-caches" }
+        // 워치가 One UI Watch 홈 과소모를 재시작 뒤에도 또(1단계) 짚었는데 캐시 정리를 했으면 강제 재시작까지 — 캐시만 지우면 돌고 있는 홈은
+        // 그대로다 (워치 할 일과 같은 순서). 그다음 단계면 이미 해 본 것이라 되풀이하지 않는다
+        val homeTrimmed = findings.any { it.id == "watch-home" } && (f.watchMetrics["back_home"] ?: 0.0) < 2.0 && applied.any { it.ok && it.lever.id == "trim-caches" }
         if (homeTrimmed) io.println(" 다음: 워치를 한 번 강제 재시작(홈 + 뒤로 7초 이상)하세요 — 캐시만 지우면 돌고 있는 One UI Watch 홈은 그대로입니다. " +
             "그다음 워치 개발자 옵션의 '자동 Wi-Fi 끄기'를 다시 끄고, 충전기에서 내려 평소처럼 쓰세요. 24시간 뒤 메뉴 2(수집·분석)로 비교하세요.")
         else io.println(" 다음: 워치 개발자 옵션의 '자동 Wi-Fi 끄기'를 다시 끄고, 충전기에서 내려 평소처럼 쓰세요. 24시간 뒤 메뉴 2(수집·분석)로 비교하세요.")

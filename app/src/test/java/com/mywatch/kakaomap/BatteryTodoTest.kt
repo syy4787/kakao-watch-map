@@ -34,7 +34,6 @@ class BatteryTodoTest {
         assertTrue(t[2].title, t[2].title.contains("밤에 저절로 켜진 화면"))
     }
 
-    /** 할 일로 오를 수 있는 글은 모두 워치 줄(제목 두 줄·설명 세 줄)에 들어간다 — 잘려 다른 뜻으로 읽히지 않게 (점검에서 찾음: '(데이터 지…') */
     /**
      * 할 일은 PC 툴킷을 처음 쓰는 사람에게 메뉴 8(자동 치료 — 권한 주기에 진단·조치까지)을 권한다. 화면의 다른 안내('메뉴 7(권한 주기)
      * 뒤에 보입니다')와 엇갈려 보이지 않게 메뉴 7 이 그 안에 든다는 것도 (시나리오 점검)
@@ -46,6 +45,7 @@ class BatteryTodoTest {
         assertTrue(t.detail ?: "", com.mywatch.battery.core.TodoText.fitsDetail(t.detail ?: ""))
     }
 
+    /** 할 일로 오를 수 있는 글은 모두 워치 줄(제목 두 줄·설명 세 줄)에 들어간다 — 잘려 다른 뜻으로 읽히지 않게 (점검에서 찾음: '(데이터 지…') */
     @Test
     fun everyCandidateFitsTheWatchLine() {
         val now = 1_792_500_000_000L

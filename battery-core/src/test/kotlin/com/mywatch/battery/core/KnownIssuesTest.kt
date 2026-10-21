@@ -1,6 +1,7 @@
 package com.mywatch.battery.core
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -233,16 +234,25 @@ class KnownIssuesTest {
         assertTrue(third.title, third.title.endsWith("다음 단계 뒤에도 계속"))
         assertTrue(third.steps.first(), third.steps.first().startsWith("아직 안 했으면 ") && third.steps.first().contains("캐시 삭제"))
         assertTrue(third.steps.toString(), third.steps.any { it.contains("Samsung Members") })
+        // 오류 보내기는 삼성 안내의 길 그대로, 과소모가 이어지는 동안 (시스템 로그가 남게 — 삼성 안내: 증상 5분 안에)
+        assertTrue(third.steps.toString(), third.steps.any { it.contains("Galaxy Wearable 앱 › 문의하기 › 오류 보내기") && it.contains("5분") })
+        assertTrue("아직이면 홈 캐시 삭제 — 앱 정보 바로 가기가 쓸모 있다", third.appInfo)
         // 워치 소프트웨어 업데이트는 폰의 Galaxy Wearable 앱에서 (삼성 안내의 메뉴 이름 그대로)
         assertTrue(third.steps.toString(), third.steps.any { it.contains("Galaxy Wearable 앱 › 워치 설정 › 워치 소프트웨어 업데이트") })
         assertEquals("One UI Watch 홈 과소모 계속 — 오류 보고", third.tile)
-        assertTrue(third.todo!!.second, third.todo!!.second.contains("오류 보고"))
+        assertTrue(third.todo!!.second, third.todo!!.second.contains("오류 보내기"))
 
         val gms = AppDrain.rank(listOf(UidUse(KnownIssues.GMS, cpuMs = 30 * 60_000L, wakelockMs = 40 * 60_000L)), 2 * h)
         val gmsThird = KnownIssues.detect(gms, windowMs = 2 * h, cameBack = ids, again = ids).single()
         assertEquals(2, gmsThird.stage)
         assertTrue(gmsThird.title, gmsThird.title.endsWith("다음 단계 뒤에도 계속"))
-        assertTrue(gmsThird.steps.first(), gmsThird.steps.first().startsWith("아직 안 했으면 PC 툴킷 메뉴 8"))
+        // PC 치료로 왔든 재시작 두 번으로 왔든 남은 것만 — 강제 재시작·PC 툴킷 중 아직 안 한 것 (리뷰)
+        assertTrue(gmsThird.steps.first(), gmsThird.steps.first().startsWith("아직 안 했으면 ") && gmsThird.steps.first().contains("강제 재시작") &&
+            gmsThird.steps.first().contains("PC 툴킷 메뉴 8"))
+        assertEquals("Play 스토어 업데이트는 한 번만", 1, gmsThird.steps.count { it.contains("Play 스토어") })
+        // 출처(Gadget Hacks)는 앞선 때가 잦아들었다고만 — 기간은 말하지 않는다 (리뷰)
+        assertTrue(gmsThird.steps.toString(), gmsThird.steps.none { it.contains("며칠") })
+        assertFalse("Play 서비스 앱 정보로 할 일이 없다", gmsThird.appInfo)
         // 충전 중 앱 모두 업데이트(일부 사용자에게 도움), 초기화는 마지막 수단으로만 (Gadget Hacks 2026 정리)
         assertTrue(gmsThird.steps.toString(), gmsThird.steps.any { it.contains("Play 스토어 › 내 앱 › 모두 업데이트") })
         assertTrue(gmsThird.steps.toString(), gmsThird.steps.any { it.contains("초기화") && it.contains("마지막 수단") })

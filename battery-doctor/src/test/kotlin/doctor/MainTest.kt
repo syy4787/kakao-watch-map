@@ -110,7 +110,9 @@ class MainTest {
         File(third, "date.txt").writeText(((t1 + 35 * 3_600_000L + 10 * 60_000L) / 1000).toString())
         File(third, "meta.properties").writeText("time=${t1 + 35 * 3_600_000L + 10 * 60_000L}\n")
         val (_, thirdOut) = run(fakeAdb(), data, "analyze")
-        assertTrue(thirdOut, thirdOut.contains("치료 전 수집과 비교") && thirdOut.contains("trim-caches"))
+        assertTrue(thirdOut, thirdOut.contains("조치 전 수집과 비교") && thirdOut.contains("trim-caches"))
+        // 보고서도 같은 말로 (리뷰)
+        assertTrue(File(third, "report.html").readText().contains("조치 전 수집"))
     }
 
     @Test

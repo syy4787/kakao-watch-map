@@ -215,7 +215,7 @@ class TreatTest {
         on(treated, "Broadcasting: Intent { flg=0x400000 }\nBroadcast completed: result=0, data=\"treated:ok\"\n")
     }
 
-    /** 자동 치료를 마치고 워치 앱에 보내는 '치료함' (셸만 보낼 수 있는 받는 곳) */
+    /** 자동 치료를 마치고 워치 앱에 보내는 '치료함' (셸만 보낼 수 있는 받는 곳) — 실제로 한 치료를 붙여서 */
     private val treated = "shell am broadcast --include-stopped-packages -n ${Collect.SHELL_RECEIVER} -a ${Collect.TREATED_ACTION}"
 
     private var lastIo = FakeConsole()
@@ -246,7 +246,10 @@ class TreatTest {
         val iReset = calls.lastIndexOf("shell dumpsys batterystats --reset")
         assertTrue(calls.toString(), iGrant in 0 until iCollect && iCollect < iApply && iApply < iReset)
         // 캐시 정리·Play 서비스 다시 시작을 했으면 측정 시작 뒤 워치 앱에 알린다 — 워치가 치료 전 기록으로 또 짚지 않게 거기서 새로 잰다
-        assertTrue(calls.toString(), calls.indexOf(treated) > iReset)
+        val iTold = calls.indexOfFirst { it.startsWith(treated) }
+        assertTrue(calls.toString(), iTold > iReset)
+        // 워치가 문제마다 단계를 넘기도록 무엇을 했는지도 (Play 서비스를 다시 시작했으면 Play 서비스만 다음 단계로 — 리뷰)
+        assertTrue(calls[iTold], calls[iTold].endsWith("--es did trim-caches,gms-restart"))
         assertTrue(calls.contains("shell cmd appops set $drain RUN_ANY_IN_BACKGROUND ignore"))
         assertTrue(calls.contains("shell am set-standby-bucket $drain restricted"))
         assertTrue(calls.contains("shell cmd deviceidle whitelist -$drain"))
@@ -323,6 +326,16 @@ class TreatTest {
         assertTrue(adb.joined().contains("shell pm trim-caches 999999999999"))
         val next = out.lines().dropWhile { !it.contains(" 다음:") }.take(3).joinToString("\n")
         assertTrue(next, next.contains("강제 재시작(홈 + 뒤로 7초 이상)") && next.contains("One UI Watch 홈"))
+        // 그다음 단계(재시작 뒤에도 계속)면 이미 해 본 캐시 정리·재시작을 되풀이하지 않는다 (리뷰)
+        val data2 = tmp.newFolder("data2")
+        val adb2 = treatAdb().apply {
+            on("shell am broadcast --include-stopped-packages -n ${Collect.SHELL_RECEIVER} -a ${Collect.SUMMARY_ACTION}", "Broadcast completed: result=0, data=\"summary:ok\"\n")
+            on("shell ls " + Collect.WATCH_SUMMARY, Collect.WATCH_SUMMARY + "\n")
+            pullable[Collect.WATCH_SUMMARY] = "[지표] at=$at idle_pph=3.4 app_window_min=120 issue_gms=0 issue_home=2 issue_face=0 back_gms=0 back_home=2\n"
+        }
+        val (_, out2) = run(adb2, data2, "treat")
+        val next2 = out2.lines().dropWhile { !it.contains(" 다음:") }.take(3).joinToString("\n")
+        assertFalse(next2, next2.contains("워치를 한 번 강제 재시작"))
     }
 
     @Test

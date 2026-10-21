@@ -90,9 +90,9 @@ object Catalog {
         }
         // 2026년 Play 서비스 과소모의 알려진 해결: 캐시 정리 → Play 서비스 다시 시작 (데이터·로그인은 그대로)
         val gmsFlagged = findings.any { it.blames && GMS in it.packages }
-        // 워치 앱이 One UI Watch 홈 과소모를 짚었고 재시작 뒤에도 또 나타났으면 홈 캐시 지우기(다음 단계)를 이 캐시 정리가 대신 한다 —
-        // 처음 짚었을 땐 강제 재시작이 먼저(워치와 같은 순서). 홈 자체는 제한하지 않는다
-        val homeFlagged = findings.any { it.id == "watch-home" } && (f.watchMetrics["back_home"] ?: 0.0) >= 1.0
+        // 워치 앱이 One UI Watch 홈 과소모를 짚었고 재시작 뒤에도 또 나타났으면(1단계) 홈 캐시 지우기(다음 단계)를 이 캐시 정리가 대신 한다 —
+        // 처음 짚었을 땐 강제 재시작이 먼저(워치와 같은 순서), 그다음 단계(2)면 이미 해 본 것. 홈 자체는 제한하지 않는다
+        val homeFlagged = findings.any { it.id == "watch-home" } && (f.watchMetrics["back_home"] ?: 0.0).let { it >= 1.0 && it < 2.0 }
         out += Lever("trim-caches", "모든 앱 캐시 정리 (Play 서비스·One UI Watch 홈 포함)", "pm trim-caches — 로그인·데이터는 그대로 두고 임시 파일만 지웁니다. 2026년 Play 서비스 과소모의 첫 번째 해결책이고, 워치9 홈 과소모의 '홈 캐시 지우기'도 됩니다(그 뒤 강제 재시작). 되돌릴 것 없음(필요한 캐시는 앱이 다시 만듦)", Tier.SAFE,
             if (gmsFlagged) listOf(GMS) else emptyList(),
             readState = { null }, apply = listOf(listOf("shell", "pm", "trim-caches", "999999999999")), undo = { null }, recommended = gmsFlagged || homeFlagged)

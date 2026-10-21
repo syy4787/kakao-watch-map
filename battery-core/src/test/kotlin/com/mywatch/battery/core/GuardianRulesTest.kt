@@ -177,6 +177,25 @@ class GuardianRulesTest {
         assertFalse(s2.abnormalActive)
     }
 
+    /**
+     * 부팅 기록이 늦게 남아도 지킴이가 본 재시작([freshFrom]), 그리고 PC 자동 치료 뒤에도 같게 — 켜 둔 비정상 모드를 풀고 그 뒤로 다시 잰다.
+     * 치료 직후 치료 전 소모로 다시 켜지 않게 (리뷰)
+     */
+    @Test
+    fun aRestartSeenOnlyByTheGuardianOrATreatmentAlsoStartsOver() {
+        val since = at(14, 0)
+        val st = GuardianState(abnormalActive = true, abnormalSince = since, saverSeenOn = true)
+        val samples = drain(at(14, 30), 11, 90.0, 8.0)                                     // 부팅 표본 없음
+        val (a, s) = GuardianRules.decide(at(14, 30), zone, cfg, st, samples, null, saverOnNow = true, freshFrom = at(14, 15))
+        assertEquals(listOf<GuardianAction>(GuardianAction.AbnormalOff), a)
+        // 그 뒤 1시간 45분이 쌓이기 전엔 앞의 시간당 8%로 다시 켜지 않는다
+        val (a2, _) = GuardianRules.decide(at(14, 45), zone, cfg, s, samples + BatterySample(t = at(14, 45), level = 62), null, saverOnNow = false, freshFrom = at(14, 15))
+        assertTrue(a2.toString(), a2.isEmpty())
+        // 재시작·치료가 켠 뒤가 아니면 그대로
+        val (a3, _) = GuardianRules.decide(at(14, 30), zone, cfg, st, samples, null, saverOnNow = true, freshFrom = at(13, 0))
+        assertTrue(a3.toString(), a3.isEmpty())
+    }
+
     /** 시계가 뒤로 갔다 — 미래가 된 '켠 때'·'알린 때'가 비정상 모드를 충전 때까지 끌거나 알림을 막지 않게 (시나리오 점검) */
     @Test
     fun timestampsFromTheFutureDoNotStickAfterTheClockGoesBack() {

@@ -46,7 +46,8 @@ object BatteryTodo {
         fun todo(p: Pair<String, String>, g: Grade, action: Action? = null) = Todo(p.first, p.second, g, action)
         // 버튼 글은 두 줄 안에 — Play 서비스는 짧은 이름으로
         fun appInfo(pkg: String) = Action.AppInfo(pkg, if (pkg == ChangeFinder.GMS) "Play 서비스" else label(pkg).takeIf { it != pkg } ?: ChangeFinder.KNOWN[pkg] ?: pkg)
-        fun issue(i: com.mywatch.battery.core.KnownIssue) = Todo(i.todo?.first ?: i.title, i.todo?.second ?: i.steps.firstOrNull(), i.grade, appInfo(i.pkg))
+        // 앱 정보로 할 일(캐시 삭제)이 남았을 때만 그 바로 가기 — 오류 보고·업데이트만 남았으면 빼고 (리뷰)
+        fun issue(i: com.mywatch.battery.core.KnownIssue) = Todo(i.todo?.first ?: i.title, i.todo?.second ?: i.steps.firstOrNull(), i.grade, appInfo(i.pkg).takeIf { i.appInfo })
         ins.issues.filter { it.grade == Grade.ABNORMAL }.forEach { out += issue(it) }
         // 최근 7일 안에 대기 소모가 늘어 꺾였으면 그 무렵 가장 그럴듯한 변화에 맞는 할 일
         ins.trend?.takeIf { it.fresh }?.let { t ->

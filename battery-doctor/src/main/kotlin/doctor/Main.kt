@@ -110,14 +110,14 @@ object Main {
         val between = (prev.pcTime + 1)..snap.pcTime
         val c = runCatching { Compare.of(Analyzer.facts(prev, zone), after, entries, zone, actionsBetween = between) }.getOrNull() ?: return null
         val fmt = DateTimeFormatter.ofPattern("M/d HH:mm")
-        // 바로 앞 수집을 건너뛰고 치료 전 수집과 견주면 그렇다고
-        val title = if (prev.dir == Collect.before(dataDir, snap)?.dir) "지난 수집과 비교" else "치료 전 수집과 비교"
+        // 바로 앞 수집을 건너뛰고 조치 전 수집과 견주면 그렇다고 (보고서도 같은 말로)
+        val since = prev.dir != Collect.before(dataDir, snap)?.dir
         io.println()
-        io.println("━━ $title (${Instant.ofEpochMilli(c.beforeAt).atZone(zone).format(fmt)} → ${Instant.ofEpochMilli(c.afterAt).atZone(zone).format(fmt)})" +
+        io.println("━━ ${if (since) "조치 전 수집과 비교" else "지난 수집과 비교"} (${Instant.ofEpochMilli(c.beforeAt).atZone(zone).format(fmt)} → ${Instant.ofEpochMilli(c.afterAt).atZone(zone).format(fmt)})" +
             (if (c.actions.isNotEmpty()) " — 사이에 한 조치: ${c.actions.joinToString(", ")}" else ""))
         io.println("   ${c.headline}")
         c.rows.forEach { r -> io.println(String.format("    - %s: %s → %s (%s)", r.label, r.before, r.after, r.change.label)) }
-        return c
+        return c.copy(sinceAction = since)
     }
 
     /** 판정 요약을 콘솔에 — collect / analyze / treat 가 같이 쓴다. [opened] 가 null 이면 브라우저 안내를 생략 */

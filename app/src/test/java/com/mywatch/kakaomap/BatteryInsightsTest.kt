@@ -299,6 +299,9 @@ class BatteryInsightsTest {
         // 재시작 뒤 아직 기록 전
         Settings.Global.putInt(context.contentResolver, Settings.Global.BOOT_COUNT, 2)
         assertTrue(notes().toString(), notes().any { it.startsWith("재시작 뒤 — 켜진 지 10분이 지나면") })
+        // PC 자동 치료 뒤 기준값 전 (리뷰)
+        assertTrue(Guardian.onTreated(context, now, setOf("trim-caches"), source = UidStatsSource { emptyMap() }))
+        assertTrue(notes().toString(), notes().any { it.startsWith("PC 치료 뒤 — 10분이 지나면 앱별 기록을 다시 시작합니다") })
     }
 
     @Test

@@ -17,9 +17,10 @@ data class CompareRow(val label: String, val before: String, val after: String, 
 
 /**
  * 지난 수집(조치 전)과 이번 수집(조치 후)의 비교. [actions] = 두 수집 사이에 적용해 아직 되돌리지 않은 조치 id.
- * [Compare.of] 의 actionsBetween = 그 '사이'를 PC 시계로 (조치 기록과 같은 시계 — 모르면 수집 시각으로)
+ * [Compare.of] 의 actionsBetween = 그 '사이'를 PC 시계로 (조치 기록과 같은 시계 — 모르면 수집 시각으로).
+ * [sinceAction] = 바로 앞 수집이 아니라 조치 전 수집과 견줌 ([Collect.baseline])
  */
-data class Comparison(val beforeAt: Long, val afterAt: Long, val actions: List<String>, val rows: List<CompareRow>, val headline: String)
+data class Comparison(val beforeAt: Long, val afterAt: Long, val actions: List<String>, val rows: List<CompareRow>, val headline: String, val sinceAction: Boolean = false)
 
 /**
  * 치료 전후 비교 — 자동 치료(메뉴 8)·차단 조치(메뉴 4) 뒤에 하루쯤 쓰고 다시 수집하면 지난 수집과 나란히 놓고 정말 나아졌는지 본다.

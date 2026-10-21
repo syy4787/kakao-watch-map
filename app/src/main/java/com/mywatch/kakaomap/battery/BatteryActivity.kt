@@ -345,15 +345,21 @@ class BatteryActivity : ComponentActivity() {
         insights?.issues?.forEach { i ->
             rows += Row.Step(color(i.grade), R.drawable.ic_warning, i.grade.label, i.title,
                 (listOf(i.why) + i.steps.mapIndexed { n, st -> "${n + 1}) $st" }).joinToString("\n"), key = "issue:${i.id}")
-            val name = if (i.pkg == KnownIssues.GMS) "Play 서비스" else appLabel(i.pkg)
-            rows += Row.Action("$A_APP_INFO${i.pkg}", R.drawable.ic_edit, "$name 앱 정보 열기", accent = true)
+            // 앱 정보로 할 일(캐시 삭제)이 남았을 때만 그 바로 가기
+            if (i.appInfo) {
+                val name = if (i.pkg == KnownIssues.GMS) "Play 서비스" else appLabel(i.pkg)
+                rows += Row.Action("$A_APP_INFO${i.pkg}", R.drawable.ic_edit, "$name 앱 정보 열기", accent = true)
+            }
         }
         val ranked = insights?.culprits.orEmpty()
         if (ranked.isEmpty()) {
             // 재시작한 사람이 '문제가 사라졌나?' 헷갈리지 않게 — 왜 비었는지와 언제부터 보이는지
             rows += Row.Note(
-                if (insights?.rebootPending == true) "재시작 뒤 — 켜진 지 10분이 지나면 앱별 기록을 다시 시작합니다 (알려진 문제는 그 뒤 1시간쯤)"
-                else "앱별 기록을 모으는 중 — 다음 기록(1시간 안)부터 보입니다"
+                when {
+                    insights?.treatPending == true -> "PC 치료 뒤 — 10분이 지나면 앱별 기록을 다시 시작합니다 (알려진 문제는 그 뒤 1시간쯤)"
+                    insights?.rebootPending == true -> "재시작 뒤 — 켜진 지 10분이 지나면 앱별 기록을 다시 시작합니다 (알려진 문제는 그 뒤 1시간쯤)"
+                    else -> "앱별 기록을 모으는 중 — 다음 기록(1시간 안)부터 보입니다"
+                }
             )
             return rows
         }

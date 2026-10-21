@@ -99,6 +99,11 @@ object GuardianRules {
          * (안내의 GPS·LTE 소모를 '비정상'으로 읽어 절전을 켜거나, 밤 안내 중 손목 올려 켜기를 끄지 않게)
          */
         navigating: Boolean = false,
+        /**
+         * 기록을 새로 재기 시작한 때 — 지킴이가 본 마지막 재시작(부팅 표본이 늦게 남아도)이나 PC 자동 치료 (모르면 null). 그 뒤에 켠 비정상
+         * 모드가 아니면 풀고 다시 재고, 비정상 판단은 그 뒤 표본으로만
+         */
+        freshFrom: Long? = null,
     ): Pair<List<GuardianAction>, GuardianState> {
         val actions = ArrayList<GuardianAction>()
         var s = st
@@ -146,13 +151,14 @@ object GuardianRules {
         // 3. 비정상 소모 — 밤 모드가 아닐 때만 (밤엔 이미 절전). 켠 뒤에 재시작했으면(알림대로 강제 재시작) 풀고 재시작 뒤로 다시 잰다.
         // 켠 때가 미래면(시계가 뒤로 감) 얼마나 됐는지 모르니 푼다
         if (s.abnormalActive) {
-            val restarted = samples.any { it.event == Event.BOOT && it.t > s.abnormalSince && it.t <= now }
+            val restarted = samples.any { it.event == Event.BOOT && it.t > s.abnormalSince && it.t <= now } ||
+                (freshFrom != null && freshFrom >= s.abnormalSince && freshFrom <= now)
             if (charging || navigating || restarted || now - s.abnormalSince !in 0 until ABNORMAL_MAX_MS) {
                 actions += GuardianAction.AbnormalOff
                 s = s.copy(abnormalActive = false, saverSeenOn = false)
             }
         } else if (cfg.abnormalSaver && !s.nightActive && !charging && !overridden && !navigating) {
-            val a = AlertRule.check(samples, now, lastAlertAt = null, screenOnMs = screenOnMs2h)
+            val a = AlertRule.check(samples, now, lastAlertAt = null, screenOnMs = screenOnMs2h, freshFrom = freshFrom)
             if (a != null) {
                 val notify = now - s.lastAbnormalNotifyAt !in 0 until ABNORMAL_NOTIFY_COOLDOWN_MS
                 actions += GuardianAction.AbnormalOn(a.pph, notify)
