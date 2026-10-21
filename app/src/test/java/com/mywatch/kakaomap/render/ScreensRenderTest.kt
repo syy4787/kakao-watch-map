@@ -8,6 +8,7 @@ import android.graphics.Paint
 import android.graphics.Path
 import androidx.activity.ComponentActivity
 import com.mywatch.kakaomap.R
+import com.mywatch.kakaomap.tile.batteryTileLayout
 import com.mywatch.kakaomap.model.Coord
 import com.mywatch.kakaomap.model.PathStep
 import com.mywatch.kakaomap.model.RouteChoices
@@ -668,6 +669,60 @@ class ScreensRenderTest {
             Row.Note("최근 바뀐 것:\n" + t.recent.filter { it !in near }.take(5).joinToString("\n", transform = ::line)),
         )
         shoot("battery_trend", rows, pages = 4)
+    }
+
+    /**
+     * 배터리 타일 — 둥근 480px(44mm)·432px(40mm)·작은 원형(192dp) 에 글 세 줄(소모율·언제 15%·0%·상태)이 잘리지 않고 들어가는지, 긴 글로.
+     * 타일 렌더러(protolayout)로 실제 타일처럼 그린다. 기기 값에 글꼴 배율(1)·렌더러 버전(최근 워치 어림 1.500)을 꼭 준다 — 글꼴 배율이
+     * 없으면(0) 아래 '자세히' 단추 글 크기가 무한대가 되어 비어 보였다 (잘림은 BatteryTileFitTest 가 잰다)
+     */
+    @Test
+    fun batteryTile() {
+        val app = org.robolectric.RuntimeEnvironment.getApplication()
+        val t = com.mywatch.kakaomap.tile.BatteryTileService
+        val cases = listOf(
+            "night" to com.mywatch.kakaomap.tile.BatteryTileService.Snapshot("배터리 55%", "시간당 4.0% · 주의", "내일 15% 새벽 3:24 · 0% 오전 7:40", t.STATUS_NIGHT, "0% 내일 오전 7:40"),
+            "issue" to com.mywatch.kakaomap.tile.BatteryTileService.Snapshot("배터리 31%", "시간당 12.5% · 비정상", "15% 오후 10:05 · 0% 내일 새벽 2:10", "Play 서비스 과소모 — 캐시 지우기", "0% 내일 새벽 2:10"),
+            "charging" to com.mywatch.kakaomap.tile.BatteryTileService.Snapshot("충전 중 100%", "하루 평균 시간당 2.4%", t.FORECAST_CHARGING, "Samsung Galaxy… 업데이트 뒤 더 닳음"),
+            "drift" to com.mywatch.kakaomap.tile.BatteryTileService.Snapshot("배터리 8%", t.RATE_COLLECTING, t.FORECAST_LATER, "잔량 표시가 25포인트 낮음 — 실제론 더 남음"),
+        )
+        for ((widthDp, label, fontScale) in listOf(Triple(226, "44mm", 1f), Triple(203, "40mm", 1f), Triple(192, "small", 1f), Triple(226, "44mm_big", 1.3f))) {
+            // 렌더러가 화면 크기(구성)·글꼴 배율도 보므로 그 워치처럼
+            org.robolectric.RuntimeEnvironment.setQualifiers("+w${widthDp}dp-h${widthDp}dp")
+            org.robolectric.RuntimeEnvironment.setFontScale(fontScale)
+            val device = androidx.wear.protolayout.DeviceParametersBuilders.DeviceParameters.Builder()
+                .setScreenWidthDp(widthDp).setScreenHeightDp(widthDp).setScreenDensity(340f / 160f).setFontScale(fontScale)
+                .setRendererSchemaVersion(androidx.wear.protolayout.expression.VersionBuilders.VersionInfo.Builder().setMajor(1).setMinor(500).build())
+                .setScreenShape(androidx.wear.protolayout.DeviceParametersBuilders.SCREEN_SHAPE_ROUND)
+                .setDevicePlatform(androidx.wear.protolayout.DeviceParametersBuilders.DEVICE_PLATFORM_WEAR_OS)
+                .build()
+            val size = (widthDp * 340f / 160f).toInt()
+            for ((name, snap) in cases) {
+                val root = androidx.wear.protolayout.material3.materialScope(app, device, allowDynamicTheme = false) {
+                    batteryTileLayout(app, snap)
+                }
+                val layout = androidx.wear.protolayout.LayoutElementBuilders.Layout.Builder().setRoot(root).build()
+                val renderer = androidx.wear.tiles.renderer.TileRenderer(app, androidx.core.content.ContextCompat.getMainExecutor(app)) { }
+                val parent = android.widget.FrameLayout(app)
+                val future = renderer.inflateAsync(layout, androidx.wear.protolayout.ResourceBuilders.Resources.Builder().setVersion("1").build(), parent)
+                shadowOf(Looper.getMainLooper()).idle()
+                future.get(10, java.util.concurrent.TimeUnit.SECONDS)
+                val spec = android.view.View.MeasureSpec.makeMeasureSpec(size, android.view.View.MeasureSpec.EXACTLY)
+                parent.measure(spec, spec)
+                parent.layout(0, 0, size, size)
+                val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+                val c = Canvas(bmp)
+                c.drawColor(Color.BLACK)
+                parent.draw(c)
+                val mask = Path().apply {
+                    addRect(0f, 0f, size.toFloat(), size.toFloat(), Path.Direction.CW)
+                    addCircle(size / 2f, size / 2f, size / 2f, Path.Direction.CCW)
+                }
+                c.drawPath(mask, Paint().apply { color = Color.rgb(40, 40, 40) })
+                FileOutputStream(File(out, "battery_tile_${label}_$name.png")).use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
+            }
+        }
+        org.robolectric.RuntimeEnvironment.setFontScale(1f)
     }
 
     /** '지금 할 일' 후보 전부 — 제목 두 줄·설명 세 줄 안에 잘리지 않고 들어가는지 (TodoText 로 맞춘 글) */

@@ -25,6 +25,9 @@ data class Forecast(val level: Int, val pph: Double, val at15: Long?, val at0: L
         else "15% $fifteen · 0% $zero"
     }
 
+    /** 작은 워치 타일 한 줄용: 0% 되는 때만 (그 날짜도) — "0% 내일 오전 7:40" */
+    fun compact(zone: ZoneId, now: Long = System.currentTimeMillis()): String = "0% ${clock(at0, zone, now)}"
+
     companion object {
         private val AMPM = setOf("밤", "새벽", "오전", "오후")
 

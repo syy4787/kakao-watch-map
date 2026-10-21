@@ -42,6 +42,17 @@ data class GaugeDrift(
             else -> null
         }
 
+    /**
+     * 타일 상태 줄 (의심일 때만) — 어느 쪽으로 틀렸는지와 할 일을 짧게. [headline] 뒷부분('게이지가 12포인트 높게 세는 중(갑자기
+     * 꺼질 수 있음)')은 작은 워치 타일 두 줄을 넘었다
+     */
+    val tile: String?
+        get() = when {
+            driftPoints <= -GaugeDriftRule.SUSPECT_POINTS -> "잔량 표시가 ${-driftPoints}포인트 낮음 — 실제론 더 남음"
+            driftPoints >= GaugeDriftRule.SUSPECT_POINTS -> "잔량 표시가 ${driftPoints}포인트 높음 — 미리 충전"
+            else -> null
+        }
+
     val advice: String?
         get() = when {
             driftPoints <= -GaugeDriftRule.SUSPECT_POINTS -> "홈 + 뒤로 가기 버튼을 꺼질 때까지(7초 이상) 눌러 강제 재시작하면 게이지가 전압 기준으로 다시 맞춰집니다 — 충전기 위에서 하면 안전합니다. 그 전까지 표시보다 실제 잔량이 더 많다고 보면 됩니다"

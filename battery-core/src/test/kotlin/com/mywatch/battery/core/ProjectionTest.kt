@@ -73,4 +73,14 @@ class ProjectionTest {
         assertEquals("0% 오후 11:30", Forecast(10, 4.0, null, t(21, 23, 30)).short(zone, now))
         assertTrue(TodoText.width(Forecast(40, 4.0, t(22, 3, 24), t(22, 7, 40)).short(zone, now)) <= 22)
     }
+
+    /** 작은 워치 타일용 한 줄: 0% 되는 때만 (그 날짜도 붙여) — 두 줄이면 아래 상태 줄이 칸 밖으로 밀렸다 (맞춤 시험에서 찾음) */
+    @Test
+    fun theSmallTileLineIsOnlyWhenItRunsOut() {
+        fun t(d: Int, h: Int, m: Int) = LocalDateTime.of(2026, 10, d, h, m).atZone(zone).toInstant().toEpochMilli()
+        val now = at(22)
+        assertEquals("0% 내일 오전 7:40", Forecast(40, 4.0, t(22, 3, 24), t(22, 7, 40)).compact(zone, now))
+        assertEquals("0% 오후 11:30", Forecast(10, 4.0, null, t(21, 23, 30)).compact(zone, now))
+        assertTrue(TodoText.width(Forecast(40, 4.0, t(22, 3, 24), t(23, 7, 40)).compact(zone, now)) <= 11)
+    }
 }

@@ -61,8 +61,38 @@ class BatteryTileTest {
         val now = at(12)
         drain(now, 9, 40.0, -8.0, plugged = true)
         val s = BatteryTileService.snapshot(context, now, zone)
-        assertTrue(s.title, s.title.endsWith("충전 중"))
-        assertTrue(s.rate, s.rate.contains("충전 중"))
+        assertTrue(s.title, s.title.startsWith("충전 중 "))
+        // 제목이 '충전 중 N%' 이라 소모율 줄은 짧게 '측정 쉼' (방전 기록이 거의 없으면)
+        assertEquals(BatteryTileService.RATE_CHARGING, s.rate)
+    }
+
+    /** 충전 중엔 지금 소모율 대신 하루 평균(방전 구간만) — 밤에 충전하며 오늘 하루가 어땠는지 본다. 방전이 3시간도 안 되면 말하지 않는다 */
+    @Test
+    fun chargingShowsTheDaysAverage() {
+        val now = at(22)
+        drain(now - 2 * q, 17, 71.0, 4.0)                                   // 4시간 시간당 4%
+        log.append(BatterySample(now - q, 55, plugged = true))
+        log.append(BatterySample(now, 57, plugged = true))
+        val s = BatteryTileService.snapshot(context, now, zone)
+        assertTrue(s.title, s.title.startsWith("충전 중 "))
+        assertTrue(s.rate, s.rate.startsWith("하루 평균 시간당 4."))
+        assertEquals(BatteryTileService.FORECAST_CHARGING, s.forecast)
+        assertEquals(BatteryTileService.FORECAST_CHARGING, s.forecastSmall)
+        // 방전 기록이 짧으면(2시간) 평균 대신 '측정 쉼'
+        fresh()
+        drain(now - 2 * q, 9, 63.0, 4.0)
+        log.append(BatterySample(now - q, 55, plugged = true))
+        log.append(BatterySample(now, 57, plugged = true))
+        assertEquals(BatteryTileService.RATE_CHARGING, BatteryTileService.snapshot(context, now, zone).rate)
+    }
+
+    /** 잔량 표시가 크게 어긋나면 어느 쪽인지와 할 일을 짧게 — 작은 타일 두 줄을 넘던 긴 문장 대신 */
+    @Test
+    fun aDriftingGaugeSaysWhichWayInAFewWords() {
+        val now = at(12)
+        for (i in 0..96) log.append(BatterySample(now - (96 - i) * q, (60 - 1.5 * i / 4).toInt(), voltageMv = 3950, currentUa = -15_000))
+        val s = BatteryTileService.snapshot(context, now, zone).status
+        assertTrue(s, s.startsWith("잔량 표시가") && s.contains("포인트 낮음"))
     }
 
     /** 알려진 문제는 15분 기록(지킴이)이 찾아 적어 둔 것을 보인다 — 타일이 앱별 통계 파일을 읽지 않게 (점검에서 찾음) */
@@ -134,6 +164,28 @@ class BatteryTileTest {
         assertTrue(BatteryTileService.snapshot(context, now, zone).status.contains("절전 켬"))
         Guardian.saveState(context, Guardian.state(context).copy(saverBroken = true))
         assertFalse(BatteryTileService.snapshot(context, now, zone).status.contains("절전 켬"))
+    }
+
+    /**
+     * 워치가 타일에 보내는 기기 값(폭·글꼴 배율·렌더러 버전)을 적어 두어 하루 요약에 '[타일]' 줄로 — 맞춤 시험(BatteryTileFitTest)의
+     * 어림(렌더러 1.500·글꼴 1배)을 실제 워치 값으로 맞추려고 (리뷰 권고). 같은 값이면 다시 쓰지 않는다
+     */
+    @Test
+    fun theTileDeviceIsNotedForTheDailySummary() {
+        val d = androidx.wear.protolayout.DeviceParametersBuilders.DeviceParameters.Builder()
+            .setScreenWidthDp(226).setScreenHeightDp(226).setFontScale(1.12f)
+            .setRendererSchemaVersion(androidx.wear.protolayout.expression.VersionBuilders.VersionInfo.Builder().setMajor(1).setMinor(502).build())
+            .build()
+        BatteryTileService.noteDevice(context, d)
+        val note = com.mywatch.kakaomap.battery.TileDeviceNote.read(context)
+        assertEquals("226dp · 글꼴 1.12배 · 렌더러 1.502", note)
+        val now = at(12)
+        drain(now, 9, 63.0, 4.0)
+        val samples = log.readAll()
+        val a = com.mywatch.battery.core.DrainAnalyzer(445, zone).analyze(samples, now)
+        val ins = com.mywatch.kakaomap.battery.Insights(a, null, emptyList(), emptyList(), com.mywatch.battery.core.LeverEffect(emptyList(), emptyList()), tileDevice = note)
+        val text = com.mywatch.kakaomap.battery.BatterySummary.text(a, null, "SM-L350", now, ins)
+        assertTrue(text, text.contains("[타일] 226dp · 글꼴 1.12배 · 렌더러 1.502"))
     }
 
     @Test

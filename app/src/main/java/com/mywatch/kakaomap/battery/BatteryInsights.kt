@@ -53,6 +53,8 @@ data class Insights(
     val bootAt: Long? = null,
     /** '최근 며칠'에 나오는 패키지의 앱 이름 (분석하는 IO 스레드에서 미리 — 화면은 이것만 본다) */
     val appNames: Map<String, String> = emptyMap(),
+    /** 워치가 타일에 보낸 기기 값 한 줄 ([TileDeviceNote]) — 하루 요약에 */
+    val tileDevice: String? = null,
 )
 
 
@@ -107,7 +109,8 @@ object BatteryInsights {
             culprits.take(12).map { it.use.pkg } + night?.ranks?.map { it.use.pkg }.orEmpty() + listOfNotNull(face) +
             breakdown?.steepest.orEmpty().flatMap { h -> listOfNotNull(h.topApp, h.culprit?.use?.pkg) }
         val names = shown.map { it.substringBefore('+') }.distinct().mapNotNull { pkg -> label(pkg)?.let { pkg to it } }.toMap()
-        return Insights(analysis, breakdown, culprits, issues, effect, wakes, night, levers, chart, face, charging, trend, bootAt, names)
+        val tileDevice = runCatching { TileDeviceNote.read(c) }.getOrNull()
+        return Insights(analysis, breakdown, culprits, issues, effect, wakes, night, levers, chart, face, charging, trend, bootAt, names, tileDevice)
     }
 
     /** 미리 찾아 둔 이름으로 보일 이름 (공유 uid 의 '+N' 은 ' 외 N') — 화면을 그리는 동안 패키지 관리자를 부르지 않게 */

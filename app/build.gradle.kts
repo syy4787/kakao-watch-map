@@ -142,6 +142,10 @@ dependencies {
     testImplementation("org.json:json:20240303")                            // 단위 테스트용 JSON 구현
     testImplementation("org.robolectric:robolectric:4.17")                  // 워치 화면을 실제로 그려 보는 테스트
     testImplementation("androidx.work:work-testing:2.10.5")                 // 업데이트 작업(WorkManager) 테스트
+    // 타일을 실제로 그려 보는 테스트(글자 잘림 확인)용 렌더러 — 라이브러리 리소스(R)가 단위 테스트에 들어오려면 debug 쪽에 둬야 한다
+    // (fragment-testing 과 같은 방식). 배포하는 release 빌드에는 들어가지 않는다. 대신 debug 의 src/main 컴파일 경로에도 보이니
+    // 앱 코드에서 이 렌더러를 import 하지 말 것 (debug 에선 되고 release 에서만 깨진다 — CI 의 assembleRelease 가 잡음)
+    debugImplementation("androidx.wear.tiles:tiles-renderer:1.6.2")
 }
 
 /**

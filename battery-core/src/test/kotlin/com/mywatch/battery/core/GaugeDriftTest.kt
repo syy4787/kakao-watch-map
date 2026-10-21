@@ -163,4 +163,18 @@ class GaugeDriftTest {
         assertTrue(a.verdict.reasons.toString(), a.verdict.reasons.any { it.contains("가짜 소모") })
         assertTrue(a.verdict.tags.contains("phantom"))
     }
+
+    /**
+     * 타일 상태 줄 — 어느 쪽으로 틀렸는지와 그래서 무엇을 할지 짧게 (전에 쓰던 headline 뒷부분 '게이지가 12포인트 높게 세는
+     * 중(갑자기 꺼질 수 있음)'은 작은 워치 타일 두 줄을 넘었다). 정상 범위면 없다
+     */
+    @Test
+    fun aShortTileLineSaysWhichWayAndWhatToDo() {
+        val low = GaugeDrift(30, 55, -25, "높음", 8, 3900).tile!!
+        assertTrue(low, low.contains("25포인트 낮음") && low.contains("더 남음"))
+        val high = GaugeDrift(40, 28, 12, "높음", 8, 3800).tile!!
+        assertTrue(high, high.contains("12포인트 높음") && high.contains("미리 충전"))
+        assertNull(GaugeDrift(50, 45, 5, "높음", 8, 3900).tile)
+        for (t in listOf(low, high, GaugeDrift(50, 12, 38, "높음", 8, 3700).tile!!)) assertTrue(t, TodoText.width(t) <= 24.0)
+    }
 }

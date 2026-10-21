@@ -153,6 +153,7 @@ object BatterySummary {
             w.advice().forEach { appendLine(" · $it") }
         }
         insights?.watchFace?.let { appendLine("[시계 화면] $it") }
+        insights?.tileDevice?.let { appendLine("[타일] $it") }
         insights?.bootAt?.let { appendLine("[재시작] 마지막 부팅 ${time(it)} (${(now - it) / (24 * 3_600_000L)}일 전)") }
         insights?.trend?.let { t ->
             trendLine(t)?.let { appendLine("[최근 며칠] $it") }
