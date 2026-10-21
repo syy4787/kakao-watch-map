@@ -2,7 +2,6 @@ package com.mywatch.kakaomap
 
 import android.view.Surface
 import com.mywatch.kakaomap.location.HeadingMath
-import com.mywatch.kakaomap.location.WearSide
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -15,8 +14,10 @@ import kotlin.math.sin
 /**
  * 내 위치 부채꼴이 '내가 보는 방향'을 가리키는지.
  * 워치를 보려고 손목을 들면 화면이 얼굴 쪽으로 서는데, 12시 방향(Y축)만으로 방위를 재면 거의 하늘을 가리켜
- * 방향이 마구 흔들리거나 뒤집혔다(사용자: "반대였다가 비스듬했다가 난리"). 오른손목에 버튼 방향을 바꿔
- * 화면을 180° 돌려 차면 12시가 몸 쪽을 가리켜 정반대가 된다.
+ * 방향이 마구 흔들리거나 뒤집혔다(사용자: "반대였다가 비스듬했다가 난리").
+ *
+ * 사용자가 차는 법(2026-10-21): 오른손목, 보려고 들면 버튼이 오른쪽(팔꿈치 쪽)을 향한다 = 화면을 돌리지 않은 기본 방향.
+ * 그러면 버튼 축(기기 X)은 팔뚝을 따라 좌우로 놓이고, 내가 보는 앞은 화면의 12시(기기 Y) 쪽이다 — 버튼 쪽도 그 반대도 아니다.
  *
  * 회전 행렬은 기기 축(X·Y·Z)을 세계 좌표(동·북·위)로 옮기는 것 — 열이 각 기기 축이다(안드로이드 SensorManager 와 같음).
  */
@@ -92,81 +93,47 @@ class HeadingMathTest {
     }
 
     /**
-     * 오른손목에 버튼이 손 쪽으로 오게(화면 180°) 찼는데 시스템이 화면 회전을 알려 주지 않는 경우(갤럭시워치 실제 증상:
-     * "정면을 보면 뒤를 본다고 뜸"). 기기의 12시(Y)는 몸 쪽, 화면의 위쪽은 앞. [tiltDeg] 만큼 얼굴 쪽으로 세움
+     * 사용자의 실제 자세: 오른손목, 팔뚝을 가슴 앞으로 가로질러(손은 왼쪽, 팔꿈치는 오른쪽) 화면을 [tiltDeg] 만큼 얼굴 쪽으로 세움.
+     * 버튼(기기 +X)은 팔꿈치 쪽 = 내 오른쪽. [armDeg] = 손이 앞쪽으로 들린 정도(팔뚝이 정확히 좌우가 아닐 때)
      */
-    private fun lookingFlipped(forward: V, tiltDeg: Double): FloatArray {
-        val a = Math.toRadians(tiltDeg)
-        return matrix(y = -(forward * cos(a) + up * sin(a)), z = -forward * sin(a) + up * cos(a))
+    private fun rightWristLooking(forward: V, tiltDeg: Double, armDeg: Double = 0.0): FloatArray {
+        val right = forward cross up                       // 앞을 보고 선 내 오른쪽
+        val a = Math.toRadians(armDeg)
+        val t = Math.toRadians(tiltDeg)
+        val y0 = forward * cos(a) + right * sin(a)          // 화면 12시(수평일 때) — 팔뚝에 수직, 몸 바깥쪽
+        return matrix(y = y0 * cos(t) + up * sin(t), z = -y0 * sin(t) + up * cos(t))
     }
 
-    /** 손목을 들어 화면을 보는 동안 센서가 보내는 표본들 (각도는 조금씩 흔들림) */
-    private fun glances(n: Int, sample: (Double) -> FloatArray) = List(n) { k -> sample(25.0 + (k % 7) * 5.0) }
+    private fun bearingOf(e: Double, n: Double) = (Math.toDegrees(kotlin.math.atan2(e, n)) + 360) % 360
 
     @Test
-    fun flippedWristTheSystemDoesNotReportIsLearnedAndPointsForward() {
-        val side = WearSide()
-        assertEquals(false, side.flipped)
-        // 아직 모를 때: 수평에 가까우면 12시 쪽(뒤)을 가리킨다 — 지금까지 사용자가 본 증상
-        assertHeading(180.0, HeadingMath.screenHeadingDeg(lookingFlipped(north, 5.0), Surface.ROTATION_0, side.flipped))
-        // 화면을 4초쯤 보면(초당 16번) 뒤집어 찬 것을 알아챈다
-        glances(80) { lookingFlipped(north, it) }.forEach { side.observe(it, Surface.ROTATION_0) }
-        assertEquals(true, side.flipped)
-        for (tilt in listOf(0.0, 5.0, 20.0, 45.0, 70.0, 90.0)) {
-            assertHeading(0.0, HeadingMath.screenHeadingDeg(lookingFlipped(north, tilt), Surface.ROTATION_0, side.flipped))
-            assertHeading(90.0, HeadingMath.screenHeadingDeg(lookingFlipped(east, tilt), Surface.ROTATION_0, side.flipped))
+    fun rightWristButtonsFacingRightPointsWhereIFace() {
+        for (forward in listOf(north, east, -north, -east)) {
+            val expected = bearingOf(forward.e, forward.n)
+            for (tilt in listOf(0.0, 15.0, 30.0, 45.0, 60.0, 80.0)) {
+                val r = rightWristLooking(forward, tilt)
+                // 버튼(기기 X)은 정말 내 오른쪽을 향한다 — 사용자가 말한 그대로
+                assertHeading((expected + 90) % 360, bearingOf(r[0].toDouble(), r[3].toDouble()))
+                assertHeading(expected, HeadingMath.screenHeadingDeg(r, Surface.ROTATION_0))
+            }
         }
     }
 
     @Test
-    fun flippedWristTheSystemDoesReportIsNotFlippedTwice() {
-        val side = WearSide()
-        glances(200) { lookingFlipped(north, it) }.forEach { side.observe(it, Surface.ROTATION_180) }
-        assertEquals(false, side.flipped)
-        assertHeading(0.0, HeadingMath.screenHeadingDeg(lookingFlipped(north, 10.0), Surface.ROTATION_180, side.flipped))
-    }
-
-    @Test
-    fun normalWearStaysNormal() {
-        val side = WearSide()
-        glances(300) { looking(-east, it) }.forEach { side.observe(it, Surface.ROTATION_0) }
-        assertEquals(false, side.flipped)
-        assertHeading(270.0, HeadingMath.screenHeadingDeg(looking(-east, 10.0), Surface.ROTATION_0, side.flipped))
-    }
-
-    @Test
-    fun relearnsWhenIPutTheWatchOnTheOtherWay() {
-        val side = WearSide(flipped = true)
-        glances(100) { looking(north, it) }.forEach { side.observe(it, Surface.ROTATION_0) }
-        assertEquals(false, side.flipped)
-    }
-
-    @Test
-    fun aFewOddMomentsDoNotFlipIt() {
-        // 10번 중 3번은 화면을 바깥으로 젖힌 자세(반대 신호)여도 그대로
-        val side = WearSide()
-        repeat(60) { k ->
-            val m = if (k % 10 < 3) lookingFlipped(north, 30.0) else looking(north, 30.0)
-            side.observe(m, Surface.ROTATION_0)
+    fun theButtonAxisIsNeverTheAnswer() {
+        // 어떤 기울기에서도 부채꼴은 버튼 쪽(오른쪽, +90°)도 그 반대(왼쪽, −90°)도 아니다
+        for (tilt in 0..85 step 5) {
+            val h = HeadingMath.screenHeadingDeg(rightWristLooking(north, tilt.toDouble()), Surface.ROTATION_0)!!
+            val offRight = ((h - 90 + 540) % 360) - 180
+            val offLeft = ((h - 270 + 540) % 360) - 180
+            assertTrue("기울기 $tilt° 에서 $h°", kotlin.math.abs(offRight) > 80 && kotlin.math.abs(offLeft) > 80)
         }
-        assertEquals(false, side.flipped)
     }
 
     @Test
-    fun postureThatSaysNothingDoesNotTeach() {
-        val side = WearSide()
-        val s = sin(Math.toRadians(40.0))
-        val c = cos(Math.toRadians(40.0))
-        repeat(200) {
-            // 화면을 옆으로 굴림(12시 축은 수평 그대로, 화면은 동쪽으로 기울어짐) — 앞뒤를 알 수 없음
-            side.observe(matrix(y = -north, z = east * s + up * c), Surface.ROTATION_0)
-            // 팔을 늘어뜨려 화면이 옆을 봄 / 화면이 땅을 봄
-            side.observe(matrix(y = -up, z = east), Surface.ROTATION_0)
-            side.observe(matrix(y = -north, z = -up), Surface.ROTATION_0)
-            // 바닥에 수평으로 둠(기울기 없음)
-            side.observe(matrix(y = -north, z = up), Surface.ROTATION_0)
-        }
-        assertEquals(false, side.flipped)
+    fun aForearmHeldAtAnAngleTurnsTheConeByThatMuch() {
+        // 손이 앞쪽으로 20° 들린 채 보면 12시도 오른쪽으로 20° — 손목으로 재는 방향의 타고난 한계(크게 틀리지 않음)
+        assertHeading(20.0, HeadingMath.screenHeadingDeg(rightWristLooking(north, 35.0, armDeg = 20.0), Surface.ROTATION_0))
     }
 
     @Test

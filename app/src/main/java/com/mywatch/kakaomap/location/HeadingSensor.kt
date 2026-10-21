@@ -14,8 +14,7 @@ import kotlin.math.cos
 import kotlin.math.sin
 
 /**
- * 화면을 보는 내가 바라보는 방위(0° = 정북, 시계 방향) — 손목을 들어 화면이 서도, 오른손목에 화면을 180° 돌려 차도
- * ([HeadingMath]). 시스템이 화면 회전을 알려 주지 않아도 찬 방향을 센서로 알아내 저장해 둔다([WearSide]).
+ * 화면을 보는 내가 바라보는 방위(0° = 정북, 시계 방향) — 화면의 12시 쪽, 손목을 들어 화면이 서도([HeadingMath]).
  * 회전 벡터 센서를 쓰고, 위치를 알면 자북 → 진북 보정을 한다.
  */
 class HeadingSensor(private val context: Context, private val onHeading: (Float) -> Unit) : SensorEventListener {
@@ -23,11 +22,8 @@ class HeadingSensor(private val context: Context, private val onHeading: (Float)
     private val sm = context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
     private val sensor: Sensor? = sm.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR)
     private val matrix = FloatArray(9)
-    /** 화면이 돌아간 정도(시스템이 알려 준 것) — 갤럭시워치는 버튼 위치를 바꿔도 0 으로 알려 준다 */
+    /** 화면이 돌아간 정도(시스템이 알려 준 것) */
     private var displayRotation = Surface.ROTATION_0
-    private val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-    /** 화면의 위쪽이 실제로는 몸 쪽인지 — 지난번에 알아낸 것부터 */
-    private val wearSide = WearSide(flipped = prefs.getBoolean(KEY_FLIPPED, false))
     private var sx = 0.0
     private var sy = 0.0
     private var initialized = false
@@ -36,6 +32,11 @@ class HeadingSensor(private val context: Context, private val onHeading: (Float)
         private set
 
     val available: Boolean get() = sensor != null
+
+    init {
+        // 예전 판이 '오른손목에 뒤집어 찼다'고 짐작해 저장한 값 — 틀린 짐작일 수 있어 지운다 (이제 쓰지 않음)
+        runCatching { context.getSharedPreferences(OLD_PREFS, Context.MODE_PRIVATE).edit().remove(OLD_KEY_FLIPPED).apply() }
+    }
 
     fun start() {
         displayRotation = runCatching { context.display?.rotation }.getOrNull() ?: Surface.ROTATION_0
@@ -53,12 +54,8 @@ class HeadingSensor(private val context: Context, private val onHeading: (Float)
 
     override fun onSensorChanged(event: SensorEvent) {
         SensorManager.getRotationMatrixFromVector(matrix, event.values)
-        if (wearSide.observe(matrix, displayRotation)) {
-            prefs.edit().putBoolean(KEY_FLIPPED, wearSide.flipped).apply()
-            initialized = false     // 반대였던 방위를 천천히 돌리지 않고 바로
-        }
         // 화면을 비스듬히 땅으로 향하는 등 바라보는 방향을 알 수 없는 자세면 이전 방위를 그대로 둔다
-        val raw = HeadingMath.screenHeadingDeg(matrix, displayRotation, wearSide.flipped) ?: return
+        val raw = HeadingMath.screenHeadingDeg(matrix, displayRotation) ?: return
         val azimuth = Math.toRadians(raw)   // 라디안, 북=0, 동=+π/2
         // 각도 평활화: sin/cos 성분을 따로 저역 통과
         if (!initialized) {
@@ -77,7 +74,7 @@ class HeadingSensor(private val context: Context, private val onHeading: (Float)
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
 
     private companion object {
-        const val PREFS = "heading"
-        const val KEY_FLIPPED = "screen_up_is_back"
+        const val OLD_PREFS = "heading"
+        const val OLD_KEY_FLIPPED = "screen_up_is_back"
     }
 }

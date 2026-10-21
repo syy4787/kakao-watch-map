@@ -41,6 +41,8 @@ object Guardian {
     /** 게이지 보정 루틴 단계 */
     const val N_CAL = 7306
     const val ACTION_RESTORE = "com.mywatch.kakaomap.battery.RESTORE"
+    /** 잔량 표시 오차 알림의 '보정 루틴 시작' 버튼 */
+    const val ACTION_CAL_START = "com.mywatch.kakaomap.battery.CAL_START"
 
     private const val K_NIGHT_SAVER = "g_night_saver"
     private const val K_NIGHT_AOD = "g_night_aod"
@@ -58,6 +60,8 @@ object Guardian {
     private const val K_S_SAVER_SEEN = "gs_saver_seen"
     private const val K_S_SAVER_BROKEN = "gs_saver_broken"
     private const val K_S_DRIFT_NOTIFY_AT = "gs_drift_notify_at"
+    /** 마지막으로 알린 드리프트(포인트) — 알림에서 보정을 시작할 때 '시작 때 오차'로 */
+    internal const val K_S_LAST_DRIFT = "gs_last_drift"
     private const val K_LAST_ACTION = "gs_last_action"
 
     private fun prefs(c: Context) = c.getSharedPreferences(BatteryLog.PREFS, Context.MODE_PRIVATE)
@@ -136,6 +140,10 @@ object Guardian {
         if (!GaugeDriftRule.shouldNotify(d, now, last)) return
         val nm = channel(c) ?: return
         val text = "${d.headline}. ${d.advice ?: ""}".trim()
+        val calibrate = PendingIntent.getBroadcast(
+            c, 3, Intent(c, GuardianReceiver::class.java).setAction(ACTION_CAL_START),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
         val n = NotificationCompat.Builder(c, CHANNEL)
             .setSmallIcon(R.drawable.ic_warning)
             .setContentTitle("잔량 표시가 ${-d.driftPoints}포인트 낮습니다")
@@ -143,9 +151,10 @@ object Guardian {
             .setStyle(NotificationCompat.BigTextStyle().bigText(text))
             .setContentIntent(openScreen(c))
             .setAutoCancel(true)
+            .addAction(0, "보정 루틴 시작", calibrate)
             .build()
         nm.notify(N_DRIFT, n)
-        p.edit().putLong(K_S_DRIFT_NOTIFY_AT, now).apply()
+        p.edit().putLong(K_S_DRIFT_NOTIFY_AT, now).putInt(K_S_LAST_DRIFT, d.driftPoints).apply()
         noteAction(c, "잔량 표시 오차 알림 (${d.driftPoints}포인트, 신뢰도 ${d.confidence})")
     }
 
@@ -262,9 +271,18 @@ object Guardian {
     }
 }
 
-/** 알림의 '되돌리기' 버튼 */
+/** 알림의 '되돌리기'·'보정 루틴 시작' 버튼 */
 class GuardianReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
-        if (intent.action == Guardian.ACTION_RESTORE) Guardian.restoreNow(context)
+        when (intent.action) {
+            Guardian.ACTION_RESTORE -> Guardian.restoreNow(context)
+            Guardian.ACTION_CAL_START -> {
+                val p = context.getSharedPreferences(BatteryLog.PREFS, Context.MODE_PRIVATE)
+                val drift = if (p.contains(Guardian.K_S_LAST_DRIFT)) p.getInt(Guardian.K_S_LAST_DRIFT, 0) else null
+                Calibration.start(context, driftPoints = drift)
+                runCatching { context.getSystemService(NotificationManager::class.java)?.cancel(Guardian.N_DRIFT) }
+                Calibration.notifyStarted(context)
+            }
+        }
     }
 }

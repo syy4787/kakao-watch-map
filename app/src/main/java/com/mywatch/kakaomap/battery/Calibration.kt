@@ -50,8 +50,12 @@ object Calibration {
         if (next != st) save(c, next)
     }
 
+    /** 알림에서 시작했을 때 — 첫 단계 할 일을 알린다 */
+    fun notifyStarted(c: Context) = runCatching {
+        show(c, "게이지 보정 시작 — 충전기에 올리세요", "${CalibrationRule.stepLabel(1)}. 단계마다 알려 드립니다. (배터리 보호(85% 제한)는 보정 동안 꺼 두세요 — 100%에 닿아야 합니다)")
+    }
+
     private fun notify(c: Context, a: CalibrationAction) {
-        val nm = Guardian.channel(c) ?: return
         val (title, text) = when (a) {
             is CalibrationAction.HoldFull -> "완충 — 1시간 더 꽂아 두세요 (보정 ${a.step}단계)" to
                 "잔량 게이지는 완충 상태에서 용량을 다시 배웁니다. 1시간 뒤 다음 할 일을 알려 드립니다."
@@ -64,6 +68,11 @@ object Calibration {
                     "몇 시간 쓰고 나면 배터리 화면 '잔량 표시 점검'에서 지금 오차를 확인하세요. 그래도 크면 강제 재시작(홈+뒤로 7초) 뒤 서비스센터 상담이 맞습니다.")
             CalibrationAction.Expired -> "게이지 보정 기한 지남" to "14일 안에 끝나지 않아 멈췄습니다. 배터리 화면에서 다시 시작할 수 있습니다."
         }
+        show(c, title, text)
+    }
+
+    private fun show(c: Context, title: String, text: String) {
+        val nm = Guardian.channel(c) ?: return
         val n = NotificationCompat.Builder(c, Guardian.CHANNEL)
             .setSmallIcon(R.drawable.ic_battery)
             .setContentTitle(title)

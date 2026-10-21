@@ -66,6 +66,8 @@ import com.mywatch.kakaomap.data.RouteRepository
 import com.mywatch.kakaomap.location.HeadingMath
 import com.mywatch.kakaomap.location.HeadingSensor
 import com.mywatch.kakaomap.location.Locator
+import com.mywatch.kakaomap.location.MapTurn
+import com.mywatch.kakaomap.location.MapTurnCheck
 import com.mywatch.kakaomap.location.PermissionHelp
 import com.mywatch.kakaomap.location.toFix
 import com.mywatch.kakaomap.model.Action
@@ -159,6 +161,12 @@ class MainActivity : ComponentActivity() {
     private var course: HeadingMath.Course? = null
     /** 부채꼴에 마지막으로 준 회전값(라디안, −π~π) */
     private var lastLabelRad = 0f
+    /** 나침반 지도가 정말 내가 보는 쪽으로 도는지 화면 좌표로 확인·저장 ([MapTurnCheck]) */
+    private val turnPrefs by lazy { getSharedPreferences(TURN_PREFS, MODE_PRIVATE) }
+    private val turnCheck by lazy { MapTurnCheck(turnPrefs.getInt(TURN_SIGN, 1), turnPrefs.getBoolean(TURN_TRACKING_BROKEN, false)) }
+    /** 위로 오게 하려고 마지막으로 준 방위와 그때 (부팅 후 ms) — 지도가 따라올 시간을 두고 잰다 */
+    private var shownHeading = Float.NaN
+    private var shownAt = 0L
     private lateinit var headingSensor: HeadingSensor
     private val fused by lazy { LocationServices.getFusedLocationProviderClient(this) }
     private var updatesRunning = false
@@ -202,7 +210,7 @@ class MainActivity : ComponentActivity() {
         val byUser = permissionByUser
         permissionByUser = false
         if (result.values.any { it }) {
-            setLocMode(LocMode.FOLLOW)
+            setLocMode(defaultFollowMode())
             // '안내 시작'을 정확한 위치 권한 때문에 미뤄 뒀다면 이제 시작 (알림 권한 요청도 그 뒤에 — 한 번에 하나만 뜰 수 있음)
             val active = RouteRepository.activeRoute
             if (active != null && active.startNavigation && Locator.hasPrecise(this)) {
@@ -460,7 +468,7 @@ class MainActivity : ComponentActivity() {
 
         syncRoute()
         if (Locator.hasPermission(this)) {
-            if (RouteRepository.activeRoute == null) setLocMode(LocMode.FOLLOW) else refreshLocationPlan()
+            if (RouteRepository.activeRoute == null) setLocMode(defaultFollowMode()) else refreshLocationPlan()
         } else if (!askedPermissionBefore()) {
             requestLocationPermission(byUser = false)   // 처음 한 번만 저절로
         }
@@ -620,8 +628,8 @@ class MainActivity : ComponentActivity() {
         val needPrecise = active.startNavigation && Locator.hasPermission(this) && !Locator.hasPrecise(this)
         if (needPrecise) askPreciseOnce()
         if (active.startNavigation && Locator.hasPermission(this)) {
-            // 나침반 모드로 보고 있었다면(재탐색 등) 그대로 유지
-            setLocMode(if (locMode == LocMode.COMPASS) LocMode.COMPASS else LocMode.FOLLOW)
+            // 북쪽이 위(따라가기)를 직접 골라 보고 있었다면 그대로, 아니면 내가 보는 쪽이 위
+            setLocMode(if (locMode == LocMode.FOLLOW) LocMode.FOLLOW else defaultFollowMode())
             // 화면이 꺼져도 따라가며 진동으로 안내 (워치페이스에 진행 중 아이콘)
             if (!needPrecise) {
                 maybeAskNotificationPermission()
@@ -854,14 +862,29 @@ class MainActivity : ComponentActivity() {
             requestLocationPermission(byUser = true)
             return
         }
-        setLocMode(
-            when (locMode) {
-                LocMode.NONE -> LocMode.FOLLOW
-                LocMode.FOLLOW -> if (headingSensor.available) LocMode.COMPASS else LocMode.NONE
-                LocMode.COMPASS -> LocMode.NONE
-            }
-        )
+        val next = when (locMode) {
+            LocMode.NONE -> defaultFollowMode()
+            LocMode.COMPASS -> LocMode.FOLLOW
+            LocMode.FOLLOW -> LocMode.NONE
+        }
+        setLocMode(next)
+        // 지금 지도가 어느 쪽이 위인지 잠깐 알려 준다 (부채꼴을 어떻게 읽을지)
+        when (next) {
+            LocMode.COMPASS -> showStatus(getString(R.string.map_heading_up), autoHideMs = 1_500)
+            LocMode.FOLLOW -> showStatus(getString(R.string.map_north_up), autoHideMs = 2_500)
+            LocMode.NONE -> Unit
+        }
     }
+
+    /**
+     * 내 위치를 따라갈 때의 기본: 방향 센서가 있으면 지도가 내가 보는 쪽으로 돈다(위 = 앞, 파란 부채꼴은 늘 위).
+     * 북쪽이 위인 지도에선 부채꼴이 '지도 위의 방위'라, 워치를 들고 보면 북쪽을 볼 때만 앞을 가리키는 것처럼 보인다
+     * (동쪽을 보면 버튼 쪽, 서쪽이면 그 반대, 남쪽이면 뒤 — 사용자가 본 증상 그대로)
+     */
+    private fun defaultFollowMode(): LocMode = if (headingSensor.available) LocMode.COMPASS else LocMode.FOLLOW
+
+    /** 나침반 지도를 SDK 의 '라벨 따라 회전'에 맡길지 — 반대로 도는 것을 보면 직접 돌린다 */
+    private fun sdkTurnsMap(): Boolean = locMode == LocMode.COMPASS && !turnCheck.trackingBroken
 
     /** [keepRotation] = 지도를 손으로 끌어 따라가기가 풀림 — 나침반 모드로 돌아가 있던 지도를 손가락 밑에서 북쪽으로 돌리지 않는다 */
     private fun setLocMode(mode: LocMode, keepRotation: Boolean = false) {
@@ -886,12 +909,14 @@ class MainActivity : ComponentActivity() {
                 if (previous == LocMode.COMPASS && !keepRotation) map.moveCamera(CameraUpdateFactory.rotateTo(0.0), CameraAnimation.from(300))
             }
             LocMode.FOLLOW, LocMode.COMPASS -> {
-                // 따라가기는 북쪽이 위 — 나침반 모드에서 지도를 끌어 돌아간 채 남은 지도를 바로 세운다
-                if (mode == LocMode.FOLLOW && previous == LocMode.NONE) map.moveCamera(CameraUpdateFactory.rotateTo(0.0), CameraAnimation.from(300))
+                // 따라가기는 북쪽이 위 — 나침반에서 왔거나 지도를 끌어 돌아간 채 남은 지도를 바로 세운다
+                if (mode == LocMode.FOLLOW && previous != LocMode.FOLLOW) map.moveCamera(CameraUpdateFactory.rotateTo(0.0), CameraAnimation.from(300))
                 myLabel?.let {
                     tracking?.startTracking(it)
-                    tracking?.setTrackingRotation(mode == LocMode.COMPASS)
+                    tracking?.setTrackingRotation(sdkTurnsMap())
                 }
+                // 나침반으로 들어오면 지금 방향으로 바로 (다음 센서 값을 기다리지 않고)
+                if (mode == LocMode.COMPASS) heading?.let { lastHeadingApplied = Float.NaN; applyHeading(it) }
                 RouteRepository.lastLocation?.let {
                     map.moveCamera(CameraUpdateFactory.newCenterPosition(LatLng.from(it.lat, it.lng)), CameraAnimation.from(300))
                 }
@@ -983,7 +1008,7 @@ class MainActivity : ComponentActivity() {
             )
             if (locMode != LocMode.NONE) myLabel?.let {
                 map.trackingManager?.startTracking(it)
-                map.trackingManager?.setTrackingRotation(locMode == LocMode.COMPASS)
+                map.trackingManager?.setTrackingRotation(sdkTurnsMap())
             }
         } else {
             label.moveTo(pos, 500)
@@ -1016,11 +1041,41 @@ class MainActivity : ComponentActivity() {
         if (compass && now - lastHeadingAt < 200) return
         lastHeadingApplied = deg
         lastHeadingAt = now
+        if (compass) checkMapTurn(now)
         // 카카오 Label 회전은 −180~180°. 뒤쪽(±180°)을 넘을 때는 애니메이션 없이 — 숫자대로 돌리면
         // 반대쪽으로 한 바퀴 가까이 휘돌아(나침반 모드에선 지도까지) 방향이 '난리'로 보인다
         val target = HeadingMath.labelRadians(deg * AppConfig.HEADING_SIGN)
-        label.rotateTo(target, HeadingMath.rotationAnimMs(lastLabelRad, target, 120))
+        val animMs = HeadingMath.rotationAnimMs(lastLabelRad, target, 120)
+        label.rotateTo(target, animMs)
         lastLabelRad = target
+        if (compass && !sdkTurnsMap()) {
+            // SDK 가 반대로 돌리는 워치: 지도(카메라)를 직접 돌려 내가 보는 쪽을 위로
+            kakaoMap?.moveCamera(CameraUpdateFactory.rotateTo(turnCheck.cameraRadians(deg.toDouble())), CameraAnimation.from(animMs.coerceAtLeast(1)))
+        }
+        shownHeading = deg
+        shownAt = now
+    }
+
+    /**
+     * 나침반 지도의 위쪽이 정말 내가 보는 방향인지 화면 좌표로 잰다(가운데와 그 북쪽 점). 회전 방향을 배우거나 SDK 의
+     * '라벨 따라 회전'이 반대로 도는 것을 알아채면 저장하고 바로 고친다. 지도가 따라올 시간(0.25초)이 지난 값과만 비교한다
+     */
+    private fun checkMapTurn(now: Long) {
+        val map = kakaoMap ?: return
+        if (shownHeading.isNaN() || now - shownAt < TURN_SETTLE_MS) return
+        runCatching {
+            val cam = map.cameraPosition ?: return
+            val center = cam.position ?: return
+            val p0 = map.toScreenPoint(center) ?: return
+            val p1 = map.toScreenPoint(LatLng.from(center.latitude + TURN_PROBE_DEG, center.longitude)) ?: return
+            val top = MapTurn.screenTopBearing(p0.x.toFloat(), p0.y.toFloat(), p1.x.toFloat(), p1.y.toFloat()) ?: return
+            if (turnCheck.observe(cam.rotationAngle, top, shownHeading.toDouble(), sdkTurnsMap())) {
+                turnPrefs.edit().putInt(TURN_SIGN, turnCheck.sign).putBoolean(TURN_TRACKING_BROKEN, turnCheck.trackingBroken).apply()
+                ErrorLog.record("지도·나침반", "회전 방향 확인: sign=${turnCheck.sign}, SDK 따라 회전 ${if (turnCheck.trackingBroken) "반대 → 직접 돌림" else "정상"} (위쪽 ${top.toInt()}°, 원함 ${shownHeading.toInt()}°)")
+                map.trackingManager?.setTrackingRotation(sdkTurnsMap())
+                lastHeadingApplied = Float.NaN    // 다음 방향 값에서 바로 다시 돌린다
+            }
+        }.onFailure { ErrorLog.record("지도·나침반", it) }
     }
 
     private fun angleDiff(a: Float, b: Float): Float {
@@ -1216,6 +1271,13 @@ class MainActivity : ComponentActivity() {
         private const val ZOOM_CHAIN_MS = 600L
         private const val STALE_MARKER_NS = 10 * 60_000L * 1_000_000L
         private const val AMBIENT_REDRAW_MS = 5_000L
+
+        /** 나침반 지도 회전 확인 ([MapTurnCheck]) — 저장 이름, 지도가 따라올 시간, 북쪽 점까지(약 110 m) */
+        private const val TURN_PREFS = "map_turn"
+        private const val TURN_SIGN = "sign"
+        private const val TURN_TRACKING_BROKEN = "sdk_follow_reversed"
+        private const val TURN_SETTLE_MS = 250L
+        private const val TURN_PROBE_DEG = 0.001
 
         /** 다른 화면에서 지도로 돌아오기 (경로를 표시하도록) */
         fun open(context: Context) {

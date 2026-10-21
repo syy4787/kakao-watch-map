@@ -126,6 +126,9 @@ class BatteryActivityTest {
         assertTrue(drift.sub ?: "", (drift.sub ?: "").contains("강제 재시작"))
         val verdict = rows(adapter).filterIsInstance<Row.Step>().first { it.key == "verdict" }
         assertTrue(verdict.title, verdict.title.contains("잔량 표시 오차 의심"))
+        // 머리글의 '지금' 줄에도 전압 기준 실제 잔량 (배터리 상태를 못 읽는 시험 환경에선 마지막 기록으로)
+        val header = rows(adapter).filterIsInstance<Row.Header>().first()
+        assertTrue(header.subtitle ?: "", (header.subtitle ?: "").contains("전압 기준 약"))
         click(a, adapter, BatteryActivity.A_FORCED_RESTART)
         val until = System.currentTimeMillis() + 5_000
         while (System.currentTimeMillis() < until && log.readAll().none { it.event == Event.USER_NOTE }) { shadowOf(Looper.getMainLooper()).idle(); Thread.sleep(20) }

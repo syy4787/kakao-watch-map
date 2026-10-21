@@ -22,8 +22,8 @@ import kotlin.math.sin
 import kotlin.math.sqrt
 
 /**
- * 실제 센서 흐름으로: 오른손목에 버튼을 손 쪽으로(화면 180°) 찼는데 시스템은 화면 회전을 0 으로 알려 줄 때
- * (갤럭시워치 실제 증상 "정면을 보면 뒤를 본다고 뜸") 내 위치 방향이 앞을 가리키게 되고, 그걸 기억해 다음에 처음부터 맞는지.
+ * 실제 센서 흐름으로: 사용자처럼 오른손목에 기본 방향(보려고 들면 버튼이 오른쪽)으로 차고 북쪽을 보며 화면을 볼 때
+ * 내 위치 방향이 북쪽(앞)을 가리키는지. 예전 버전이 '뒤집어 찼다'고 잘못 배워 저장해 둔 값이 있어도 무시하고 지운다.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35], qualifiers = "w226dp-h226dp-round-340dpi", application = Application::class)
@@ -33,10 +33,10 @@ class HeadingSensorTest {
     private val sm = context.getSystemService(SensorManager::class.java)
     private val sensor: Sensor = ShadowSensor.newInstance(Sensor.TYPE_ROTATION_VECTOR).also { shadowOf(sm).addSensor(it) }
 
-    /** 북쪽을 보며 화면을 [tiltDeg] 만큼 얼굴 쪽으로 세운, 뒤집어 찬 워치 — 기기 12시(Y)는 몸 쪽(남) */
-    private fun flippedLookingNorth(tiltDeg: Double): FloatArray {
+    /** 북쪽을 보며 화면을 [tiltDeg] 만큼 얼굴 쪽으로 세운 워치(오른손목, 버튼은 오른쪽 = 동쪽) — 기기 12시(Y)는 앞(북) */
+    private fun rightWristLookingNorth(tiltDeg: Double): FloatArray {
         val a = Math.toRadians(tiltDeg)
-        val y = doubleArrayOf(0.0, -cos(a), -sin(a))            // 동·북·위
+        val y = doubleArrayOf(0.0, cos(a), sin(a))             // 동·북·위
         val z = doubleArrayOf(0.0, -sin(a), cos(a))
         val x = doubleArrayOf(y[1] * z[2] - y[2] * z[1], y[2] * z[0] - y[0] * z[2], y[0] * z[1] - y[1] * z[0])
         return rotationVector(x, y, z)
@@ -76,24 +76,17 @@ class HeadingSensorTest {
     }
 
     @Test
-    fun flippedWristIsLearnedThenRememberedNextTime() {
+    fun rightWristLookingNorthPointsNorthEvenWithAnOldFlippedGuessSaved() {
+        // 예전 버전이 '뒤집어 찼다'고 저장해 뒀던 값 — 이제는 쓰지 않고 지운다
+        val prefs = context.getSharedPreferences("heading", Context.MODE_PRIVATE)
+        prefs.edit().putBoolean("screen_up_is_back", true).commit()
         val got = mutableListOf<Float>()
-        val first = HeadingSensor(context) { got += it }
-        first.start()
-        repeat(90) { k -> send(flippedLookingNorth(25.0 + (k % 7) * 5.0)) }
-        // 거의 수평으로 내려 봐도
-        repeat(10) { send(flippedLookingNorth(5.0)) }
-        first.stop()
+        val sensor = HeadingSensor(context) { got += it }
+        sensor.start()
+        for (tilt in listOf(5.0, 20.0, 35.0, 50.0, 65.0)) repeat(4) { send(rightWristLookingNorth(tilt)) }
+        sensor.stop()
         assertTrue("방위를 하나도 못 받음", got.isNotEmpty())
-        assertTrue("마지막 방위 ${got.last()}° — 북(0°)이어야", offNorth(got.last()) < 10f)
-
-        // 다음에 지도를 열면 처음부터 맞다 (수평에 가까운 자세 — 배우기 전이면 남쪽을 가리키는 자세)
-        val again = mutableListOf<Float>()
-        val second = HeadingSensor(context) { again += it }
-        second.start()
-        send(flippedLookingNorth(5.0))
-        second.stop()
-        assertEquals(1, again.size)
-        assertTrue("다시 열었을 때 ${again.single()}° — 북(0°)이어야", offNorth(again.single()) < 10f)
+        got.forEach { assertTrue("방위 $it° — 북(0°)이어야", offNorth(it) < 10f) }
+        assertEquals(false, prefs.contains("screen_up_is_back"))
     }
 }

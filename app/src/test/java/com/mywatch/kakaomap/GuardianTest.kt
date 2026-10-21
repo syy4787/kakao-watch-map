@@ -179,6 +179,13 @@ class GuardianTest {
         val text = n.extras.getCharSequence(Notification.EXTRA_BIG_TEXT).toString()
         assertTrue(text, text.contains("낮게 세는 중"))
         assertTrue(text, text.contains("강제 재시작"))
+        // 알림의 '보정 루틴 시작' 버튼 → 보정 1단계, 시작 때 오차 기억
+        assertTrue(n.actions.map { it.title.toString() }.toString(), n.actions.any { it.title.toString() == "보정 루틴 시작" })
+        com.mywatch.kakaomap.battery.GuardianReceiver().onReceive(context, android.content.Intent(Guardian.ACTION_CAL_START))
+        val cs = Calibration.state(context)
+        assertEquals(1, cs.step)
+        assertTrue(cs.driftBefore.toString(), (cs.driftBefore ?: 0) <= -20)
+        assertTrue(shadowOf(nm).getNotification(Guardian.N_CAL).extras.getCharSequence(Notification.EXTRA_TITLE).toString().contains("보정 시작"))
         nm.cancel(Guardian.N_DRIFT)
         log.append(BatterySample(t = t + 4 * q, level = 19, voltageMv = 3950, currentUa = -20_000))
         Guardian.tick(context, log, t + 4 * q, stats = UidStatsSource { emptyMap() }, zone = zone)

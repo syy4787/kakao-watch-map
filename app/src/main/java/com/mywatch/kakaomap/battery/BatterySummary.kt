@@ -3,6 +3,7 @@ package com.mywatch.kakaomap.battery
 import com.mywatch.battery.core.Analysis
 import com.mywatch.battery.core.BatterySample
 import com.mywatch.battery.core.DrainAnalyzer
+import com.mywatch.battery.core.GaugeDrift
 import com.mywatch.battery.core.Grade
 import com.mywatch.battery.core.Rate
 import com.mywatch.battery.core.Status
@@ -18,11 +19,11 @@ object BatterySummary {
 
     fun time(t: Long): String = clock.format(Date(t))
 
-    /** "57% · 3.91V · 33.1℃ · −84mA · 방전 중" */
-    fun nowLine(s: BatterySample?): String {
+    /** "57% · 3.91V · 33.1℃ · −84mA · 방전 중" — 게이지 드리프트가 의심되면 "(전압 기준 약 N%)" 를 덧붙인다 */
+    fun nowLine(s: BatterySample?, drift: GaugeDrift? = null): String {
         if (s == null) return "읽는 중…"
         val parts = ArrayList<String>()
-        parts += "${s.level}%"
+        parts += "${s.level}%" + (drift?.takeIf { it.suspicious }?.let { " (전압 기준 약 ${(s.level - it.driftPoints).coerceIn(0, 100)}%)" } ?: "")
         s.voltageMv?.let { parts += String.format(Locale.US, "%.2fV", it / 1000.0) }
         s.tempDeciC?.let { parts += String.format(Locale.US, "%.1f℃", it / 10.0) }
         s.currentUa?.let { parts += "${it / 1000}mA" }
@@ -69,7 +70,7 @@ object BatterySummary {
     fun text(a: Analysis, live: BatterySample?, model: String, now: Long = System.currentTimeMillis()): String = buildString {
         appendLine("갤럭시워치 배터리 기록 요약 — ${time(now)}")
         appendLine("기기: $model")
-        appendLine("지금: ${nowLine(live)}")
+        appendLine("지금: ${nowLine(live, a.drift)}")
         appendLine()
         appendLine("[판정] ${a.verdict.grade.label} — ${a.verdict.headline}")
         a.verdict.reasons.forEach { appendLine(" · $it") }

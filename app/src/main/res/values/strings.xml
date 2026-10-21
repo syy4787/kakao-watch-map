@@ -62,6 +62,8 @@
     <string name="start_navigation">안내 시작</string>
     <string name="fastest">가장 빠름</string>
     <string name="end_route">안내 종료</string>
+    <string name="map_heading_up">내가 보는 쪽이 위</string>
+    <string name="map_north_up">북쪽이 위 — 파란 부채꼴은 지도 위의 방위</string>
     <string name="precise_location_needed">길안내는 \'정확한 위치\'를 허용해야 해요</string>
     <string name="gps_weak">GPS 신호 약함 · 위치 추정 중</string>
     <string name="transit_note">버스 도착 시간은 공공데이터(TAGO) 실시간 정보, 기차·고속·시외버스는 공공데이터(TAGO) 시간표예요.</string>

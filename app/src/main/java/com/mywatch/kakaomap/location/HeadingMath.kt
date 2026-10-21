@@ -9,12 +9,17 @@ import kotlin.math.hypot
 /**
  * 내 위치 부채꼴의 방위 계산 (순수 계산 — 단위 테스트로 검증).
  *
- * 예전에는 기기 12시 축(Y)의 수평 방향만 썼다. 워치를 보려고 손목을 들면 화면이 얼굴 쪽으로 서서 Y축이 거의
- * 하늘을 가리키므로 방위가 흔들리고, 조금만 더 세우면 뒤로 뒤집혔다. 또 오른손목에 버튼 방향을 바꿔 차면
- * 화면이 180° 돌아가 12시가 몸 쪽이 된다. 그래서 '화면의 위쪽(U) − 화면이 바라보는 쪽(Z)' 의 수평 방향을 쓴다:
- * 수평으로 놓으면 U, 똑바로 세우면 −Z(화면 뒤 = 내가 보는 앞)가 주로 쓰여 어떤 기울기에서도 앞을 가리킨다.
- * 갤럭시워치는 버튼 방향을 바꿔 차도 앱에 화면 회전을 알려 주지 않아(사용자: "정면을 보면 뒤를 본다고 뜸")
- * 화면의 위쪽이 실제로는 몸 쪽일 수 있다 — 그건 [WearSide] 가 센서로 알아내 [screenHeadingDeg] 의 flipped 로 준다.
+ * 내가 보는 앞 = 화면의 12시(위쪽)가 가리키는 쪽. 사용자는 오른손목에 차고, 보려고 들면 버튼이 오른쪽(팔꿈치 쪽)을 향한다
+ * — 화면을 돌리지 않은 기본 방향이라 버튼 축(기기 X)은 팔뚝을 따라 좌우로 놓이고, 앞은 그에 수직인 12시(기기 Y)다.
+ * 버튼 쪽도, 그 반대쪽도 앞이 아니다.
+ *
+ * 12시 축만 쓰면 워치를 보려고 손목을 들어 화면이 얼굴 쪽으로 설 때 그 축이 거의 하늘을 가리켜 방위가 흔들리고 뒤로 뒤집힌다.
+ * 그래서 '화면의 위쪽(U) − 화면이 바라보는 쪽(Z)' 의 수평 방향을 쓴다: 수평으로 놓으면 U, 똑바로 세우면 −Z(화면 뒤 = 내가 보는 앞)가
+ * 주로 쓰여 어떤 기울기에서도 앞을 가리킨다. 화면이 돌아가 있으면(시스템이 알려 준 Surface.ROTATION_*) 그 위쪽을 쓴다.
+ *
+ * (2026-10-14 판은 '오른손목에 화면을 뒤집어 찼다'고 짐작해 센서로 앞뒤를 배웠다 — 사용자는 뒤집어 차지 않으며, 그 짐작은 지도를
+ * 남에게 보여 주는 자세 같은 것에 속아 방향을 거꾸로 만들 수 있어 뺐다. 그때의 증상 "정면을 보면 뒤를 본다고 뜸"·오늘의
+ * "버튼 쪽을 가리킴"은 북쪽이 위인 지도에서 부채꼴이 지도 위의 방위를 가리킨 것 — 이제 지도가 내가 보는 쪽으로 돈다.)
  */
 object HeadingMath {
 
@@ -24,14 +29,12 @@ object HeadingMath {
     /**
      * [r] = SensorManager.getRotationMatrixFromVector 의 3×3 행렬(기기 → 세계: 동·북·위, 행 우선).
      * [displayRotation] = 화면이 기기 기본 방향에서 돌아간 정도(Surface.ROTATION_*).
-     * [flipped] = 화면의 위쪽이 실제로는 몸 쪽을 향한다([WearSide] 가 알아낸 것).
-     * 돌려주는 값은 화면 위쪽이 가리키는 쪽에서 본 '내가 보는 방향'의 방위 0~360° (정북 0, 시계 방향), 모르면 null
+     * 돌려주는 값은 '내가 보는 방향'의 방위 0~360° (정북 0, 시계 방향), 모르면 null
      */
-    fun screenHeadingDeg(r: FloatArray, displayRotation: Int, flipped: Boolean = false): Double? {
+    fun screenHeadingDeg(r: FloatArray, displayRotation: Int): Double? {
         val (ue, un) = screenUp(r, displayRotation)
-        val s = if (flipped) -1.0 else 1.0
-        val fe = s * ue - r[2]
-        val fn = s * un - r[5]
+        val fe = ue - r[2]
+        val fn = un - r[5]
         if (hypot(fe, fn) < MIN_HORIZONTAL) return null
         return (Math.toDegrees(atan2(fe, fn)) + 360) % 360
     }

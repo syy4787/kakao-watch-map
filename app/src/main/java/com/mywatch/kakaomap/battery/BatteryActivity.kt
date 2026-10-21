@@ -69,11 +69,12 @@ class BatteryActivity : ComponentActivity() {
 
     private fun reload() {
         lifecycleScope.launch {
-            val a = withContext(Dispatchers.IO) {
-                runCatching { DrainAnalyzer(WatchModels.nominalMah(Build.MODEL)).analyze(log.readAll()) }
-                    .onFailure { ErrorLog.record("배터리·분석", it) }.getOrNull()
+            val (a, last) = withContext(Dispatchers.IO) {
+                runCatching { val all = log.readAll(); DrainAnalyzer(WatchModels.nominalMah(Build.MODEL)).analyze(all) to all.maxByOrNull { it.t } }
+                    .onFailure { ErrorLog.record("배터리·분석", it) }.getOrNull() ?: (null to null)
             }
             analysis = a
+            lastLogged = last
             render()
         }
     }
@@ -84,7 +85,7 @@ class BatteryActivity : ComponentActivity() {
         if (picking) { ui.rows = pickRows(); return }
         val now = System.currentTimeMillis()
         val rows = mutableListOf<Row>()
-        rows += Row.Header("배터리", BatterySummary.nowLine(live))
+        rows += Row.Header("배터리", BatterySummary.nowLine(live ?: lastSample(a), a.drift))
         notice?.let { rows += Row.Note(it) }
 
         rows += Row.Header("소모율")
@@ -230,10 +231,15 @@ class BatteryActivity : ComponentActivity() {
     }
 
     private fun renderLive() {
-        if (picking || analysis == null || ui.rows.isEmpty()) return
+        val a = analysis
+        if (picking || a == null || ui.rows.isEmpty()) return
         val first = ui.rows.firstOrNull() as? Row.Header ?: return
-        ui.adapter.replace(0, first.copy(subtitle = BatterySummary.nowLine(live)))
+        ui.adapter.replace(0, first.copy(subtitle = BatterySummary.nowLine(live ?: lastSample(a), a.drift)))
     }
+
+    /** 배터리 상태를 못 읽는 환경(시험)에선 마지막 기록을 '지금' 으로 */
+    private var lastLogged: BatterySample? = null
+    private fun lastSample(a: Analysis): BatterySample? = if (a.samples > 0) lastLogged else null
 
     private fun rateRow(label: String, r: Rate, g: Grade) =
         Row.Step(color(g), R.drawable.ic_battery, if (g == Grade.UNKNOWN) null else g.label, "$label: ${BatterySummary.rateLine(r)}", null, key = "rate:$label")
