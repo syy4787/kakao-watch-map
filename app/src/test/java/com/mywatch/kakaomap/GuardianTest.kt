@@ -290,6 +290,29 @@ class GuardianTest {
         assertFalse(Levers(context).holdsAnything)
     }
 
+    /**
+     * 삼성 취침 모드처럼 다른 것이 밤사이 바꾼 값은 아침에 덮어쓰지 않는다 — 우리가 둔 값(0)이 그대로일 때만 되돌린다.
+     * (취침 모드가 이미 AOD 를 꺼 둔 밤: 우리는 바꾸지 않았으니, 아침에 취침 모드가 켠 AOD 를 다시 끄면 안 됨)
+     */
+    @Test
+    fun valuesChangedByBedtimeModeOvernightAreLeftAloneInTheMorning() {
+        grant()
+        Settings.Global.putString(cr, "ambient_enabled", "0")        // 취침 모드가 이미 끔
+        Settings.Global.putString(cr, "ambient_tilt_to_wake", "1")
+        fill(at(0, 30), 8, 60.0, 2.0)
+        Guardian.tick(context, log, at(0, 30), stats = UidStatsSource { emptyMap() }, zone = zone)
+        assertEquals("0", Settings.Global.getString(cr, "ambient_tilt_to_wake"))
+        // 아침: 취침 모드가 끝나며 AOD 를 켜고, 사용자가 밤에 손목 올림을 손수 다시 켜 둠
+        Settings.Global.putString(cr, "ambient_enabled", "1")
+        Settings.Global.putString(cr, "ambient_tilt_to_wake", "1")
+        shadowOf(context.getSystemService(PowerManager::class.java)).setIsPowerSaveMode(true)
+        fill(at(7, 5), 8, 50.0, 1.0)
+        Guardian.tick(context, log, at(7, 5), stats = UidStatsSource { emptyMap() }, zone = zone)
+        assertEquals("아침에 켜진 AOD 를 다시 끄지 않는다", "1", Settings.Global.getString(cr, "ambient_enabled"))
+        assertEquals("1", Settings.Global.getString(cr, "ambient_tilt_to_wake"))
+        assertFalse(Levers(context).holdsAnything)
+    }
+
     /** 'Hey Google' 끄기는 고른 사람만 — 되돌리기로 원래대로 */
     @Test
     fun nightHotwordOffIsOptInAndRestored() {

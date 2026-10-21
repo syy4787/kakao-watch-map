@@ -175,11 +175,15 @@ class Levers(context: Context) {
         return write(key, value)
     }
 
-    /** 기억해 둔 값으로 되돌린다 (기억을 지운다). 실제로 바뀌었으면 true */
-    private fun putBack(slot: String, key: Key?): Boolean {
+    /**
+     * 기억해 둔 값으로 되돌린다 (기억을 지운다). 실제로 바뀌었으면 true.
+     * 지금 값이 우리가 둔 값([ours])일 때만 — 그 사이 사용자나 삼성 취침 모드가 바꿨으면 그쪽이 새것이라 건드리지 않는다
+     */
+    private fun putBack(slot: String, key: Key?, ours: String = "0"): Boolean {
         val v = recall(slot) ?: return false
         val k = key ?: return false
-        if (read(k) == v) return false
+        val now = read(k)
+        if (now == v || now != ours) return false
         return write(k, v)
     }
 
