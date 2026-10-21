@@ -152,15 +152,53 @@ class DayTrendTest {
     fun daysBeforeTheScreenRecordStartsUseTheSamplesForEveryDay() {
         val samples = days(listOf(1.0, 1.0, 1.0, 2.5, 2.5, 2.5))
         val now = at(16, 0) - 1
-        // 화면 기록이 14일부터뿐 (사흘) — 정확한 날이 4일이 안 되면 섞지 않고 모두 표본으로
+        // 화면 기록이 13일부터뿐 (사흘) — 정확한 날이 4일이 안 되면 섞지 않고 모두 표본으로
         val d = DayTrend.days(samples, now, zone, days = 6, screen = ScreenCover(emptyList(), at(13, 0)))
         assertTrue(d.none { it.exact })
         assertNotNull(DayTrend.shift(d))
-        // 넷째 날부터 기록이 있으면 그 앞날은 비우고 정확한 날만
-        val e = DayTrend.days(samples, now, zone, days = 6, screen = ScreenCover(emptyList(), at(12, 0)))
+        // 표본이 쓸 수 있는 날을 화면 기록이 다 덮으면(표본도 12일부터) 그 앞날은 비우고 정확한 날만
+        val e = DayTrend.days(samples.filter { it.t >= at(12, 0) }, now, zone, days = 6, screen = ScreenCover(emptyList(), at(12, 0)))
         assertEquals(listOf(false, false, true, true, true, true), e.map { it.exact })
         assertNull(e[0].pph)
         assertEquals(2.5, e[5].pph!!, 0.1)
+    }
+
+    /** 15분 표본이 화면 켜짐을 봤으면 그 구간은 대기가 아니다 — 사용 통계가 그 켜짐을 놓쳤어도 (리뷰에서 찾음) */
+    @Test
+    fun aSegmentTheSampleSawLitIsNotQuietEvenIfTheScreenRecordMissedIt() {
+        val samples = ArrayList<BatterySample>()
+        for (d in 10..15) {
+            var t = at(d, 0)
+            var level = 100
+            while (t <= at(d, 20)) {
+                val lit = d == 15 && t == at(15, 10, 15)
+                if (lit) level -= 10
+                samples += BatterySample(t, level, interactive = lit)
+                if (((t - at(d, 0)) / q) % 4 == 3L) level -= 1
+                t += q
+            }
+            while (t < at(d + 1, 0)) { samples += BatterySample(t, 100, plugged = true, status = Status.CHARGING); t += q }
+        }
+        val d = DayTrend.days(samples, at(16, 0) - 1, zone, days = 6, screen = ScreenCover(emptyList(), at(10, 0)))
+        assertTrue(d.all { it.exact })
+        assertEquals(1.0, d[5].pph!!, 0.1)
+    }
+
+    /**
+     * 화면 기록(시스템이 며칠만 보관)이 표본보다 짧으면 정확한 날만 쓸 때 앞날을 잃어 꺾임을 놓친다 — 13일에 꺾였는데 12일부터의
+     * 정확한 날만 보면 꺾이기 전이 하루뿐. 그럴 땐 모든 날을 표본으로 (리뷰에서 찾음)
+     */
+    @Test
+    fun aShortScreenRecordDoesNotHideAnEarlierShift() {
+        val samples = days(listOf(1.0, 1.0, 1.0, 2.5, 2.5, 2.5))   // 10/10~10/15
+        val now = at(16, 0) - 1
+        val d = DayTrend.days(samples, now, zone, days = 6, screen = ScreenCover(emptyList(), at(12, 0)))
+        assertTrue(d.none { it.exact })
+        assertEquals(LocalDate.of(2026, 10, 13), DayTrend.shift(d)!!.firstAfter)
+        // 끝나지 않은 오늘(대기 12시간 미만)은 정확한 날 수에 넣지 않는다 — 12일부터 사흘 + 오늘 아침뿐이면 표본으로
+        val morning = samples.filter { it.t >= at(13, 0) } + days(listOf(2.5), first = 16).filter { it.t <= at(16, 8) }
+        val m = DayTrend.days(morning, at(16, 8), zone, days = 7, screen = ScreenCover(emptyList(), at(13, 0)))
+        assertTrue(m.none { it.exact })
     }
 
     /**

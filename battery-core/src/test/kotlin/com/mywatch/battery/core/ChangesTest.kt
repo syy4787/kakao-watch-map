@@ -161,8 +161,8 @@ class ChangesTest {
         // 워치 '지금 할 일' 줄(제목 두 줄·설명 세 줄)에 들어가게 짧게
         for (c in changes + listOf(null)) {
             // (이름을 모르는 앱은 패키지 이름이 길 수 있다 — 워치는 앱 이름을 찾아 쓴다)
-            if (c?.subject != "com.example.early") assertTrue(advice(c).first, advice(c).first.length <= 22)
-            assertTrue(advice(c).second, advice(c).second.length <= 50)
+            if (c?.subject != "com.example.early") assertTrue(advice(c).first, ChangeFinder.width(advice(c).first) <= ChangeFinder.TITLE_MAX)
+            assertTrue(advice(c).second, ChangeFinder.width(advice(c).second) <= ChangeFinder.DETAIL_MAX)
         }
     }
 
@@ -218,6 +218,44 @@ class ChangesTest {
             Change(at(18, 11), ChangeKind.APP, gms, null, "26.40.31"),
         )
         assertEquals(listOf("tilt", gms, "tilt"), ChangeNote.settled(list).map { it.subject })
+    }
+
+    /**
+     * 되돌림 짝은 가장 짧은 것부터 — 아침 9시에 켜고, 저녁 8시에 끄고, 30분 뒤 다시 켰으면 짝은 저녁 30분(끔·켬)이고
+     * 남는 것은 아침에 켠 것이다 (앞에서부터 짝지으면 아침 켬·저녁 끔이 짝이 되어 '켬'이 저녁 8시 반으로 밀린다 — 리뷰에서 찾음)
+     */
+    @Test
+    fun theShortestFlipBackIsPairedFirst() {
+        val list = listOf(
+            Change(at(18, 9), ChangeKind.SETTING, "aod", "0", "1"),
+            Change(at(18, 20), ChangeKind.SETTING, "aod", "1", "0"),
+            Change(at(18, 20, 30), ChangeKind.SETTING, "aod", "0", "1"),
+        )
+        assertEquals(listOf(list[0]), ChangeNote.settled(list))
+    }
+
+    /** 할 일 글은 어떤 설정·지킴이 설정·잘 알려진 앱이든 워치 줄(제목 22자·설명 50자)에 들어가고, 따옴표가 겹치지 않는다 */
+    @Test
+    fun everyAdviceFitsTheWatchLine() {
+        val all = ChangeFinder.SETTING_NAMES.keys.map { Change(at(18, 9), ChangeKind.SETTING, it, "0", "1") } +
+            ChangeFinder.CONFIG_NAMES.keys.map { Change(at(18, 9), ChangeKind.CONFIG, it, "1", "0") } +
+            ChangeFinder.KNOWN.keys.flatMap { listOf(Change(at(18, 9), ChangeKind.APP, it, null, "26.40.31"), Change(at(18, 9), ChangeKind.APP, it, null, "+1.0")) } +
+            listOf(Change(at(18, 9), ChangeKind.FIRMWARE, "fw", "A", "B"), Change(at(18, 9), ChangeKind.FACE, "face", null, "x"),
+                Change(at(18, 9), ChangeKind.MORE_APPS, "apps", null, "3"),
+                // 이름이 긴 앱
+                Change(at(18, 9), ChangeKind.APP, "com.example.long", null, "2.0"))
+        val names = mapOf("com.example.long" to "Samsung Galaxy Wearable Plugin Service")
+        assertEquals("삼성 헬스 업데이트 뒤 더 닳음", ChangeFinder.advice(worse, listOf(all.first { it.subject == ChangeFinder.SHEALTH }), { null }).first)
+        assertTrue(ChangeFinder.advice(worse, listOf(all.last()), { names[it] }).first.let { it.startsWith("Samsung Galaxy") && it.contains("… 업데이트 뒤 더 닳음") })
+        // 너비는 한글 한 글자 = 1, 영문은 그보다 좁게
+        assertEquals(6.6, ChangeFinder.width("업데이트 뒤 더"), 0.01)   // 한글 6 + 띄어쓰기 2
+        assertTrue(ChangeFinder.width("Samsung Health") < 10)
+        for (c in all) {
+            val (title, detail) = ChangeFinder.advice(worse, listOf(c), { names[it] })
+            assertTrue("$title (${ChangeFinder.width(title)})", ChangeFinder.width(title) <= ChangeFinder.TITLE_MAX)
+            assertTrue("$detail (${ChangeFinder.width(detail)})", ChangeFinder.width(detail) <= ChangeFinder.DETAIL_MAX)
+            assertFalse(title, title.contains("''") || Regex("'[^']*'[^']*'[^']*'").containsMatchIn(title))
+        }
     }
 
     @Test

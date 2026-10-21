@@ -60,7 +60,8 @@ object DayTrend {
     /**
      * 오늘을 포함한 최근 [days]일, 오래된 날부터 (오늘은 지금까지). [screen] 이 있으면 그 기록이 하루 내내 있는 날은
      * 화면이 한 번도 안 켜진 구간만 대기로 센다(표본 사이 15분 안에 몇 분씩 본 날이 대기 소모를 부풀리지 않게) — 그런 날이
-     * [MIN_SIDE_DAYS] 의 두 배가 안 되면 섞지 않고 모든 날을 표본으로, 넘으면 기록이 없는 앞날은 비운다
+     * [MIN_SIDE_DAYS] 의 두 배가 안 되거나, 표본으로 쓸 수 있는 앞날을 잃게 되면 섞지 않고 모든 날을 표본으로,
+     * 아니면 기록이 없는 앞날은 비운다
      */
     fun days(samples: List<BatterySample>, now: Long, zone: ZoneId, days: Int = DAYS, screen: ScreenCover? = null): List<DayRate> {
         val sorted = samples.sortedBy { it.t }
@@ -72,12 +73,18 @@ object DayTrend {
         val sampled = windows.map { (d, start, end) -> DayRate(d, if (end > start) Rates.idleBetween(sorted, start, end) else Rate.NONE, partial = d == today) }
         if (screen == null) return sampled
         val spans = screen.spans.sortedBy { it.start }
-        val quiet = Rates.dischargeSegments(sorted).filter { untouched(it, spans) }
+        // 15분 표본이 화면 켜짐을 본 구간도 뺀다 (사용 통계가 그 켜짐을 놓쳤어도)
+        val quiet = Rates.dischargeSegments(sorted).filter { it.idle && untouched(it, spans) }
         val exact = windows.map { (d, start, end) ->
             if (start < screen.from || end <= start) DayRate(d, Rate.NONE, partial = d == today)
             else DayRate(d, Rates.rateWithin(quiet, start, end), exact = true, partial = d == today)
         }
-        return if (exact.count { it.exact && it.pph != null } >= 2 * MIN_SIDE_DAYS) exact else sampled
+        // 꺾임에 쓸 수 있는 날로 견준다 (끝나지 않은 오늘의 아침 몇 시간은 빼고). 화면 기록이 표본이 쓸 수 있는 날을 다 덮지 못하면
+        // (시스템이 며칠만 보관) 정확한 날만으로는 앞날을 잃어 그 무렵의 꺾임을 놓친다 — 그땐 쓸 수 있는 날이 줄지 않을 때만
+        val exactUsable = exact.count { it.exact && it.forShift != null }
+        val sampledUsable = sampled.filter { it.forShift != null }
+        val covers = sampledUsable.firstOrNull()?.let { it.date.atStartOfDay(zone).toInstant().toEpochMilli() >= screen.from } ?: true
+        return if (exactUsable >= 2 * MIN_SIDE_DAYS && (covers || exactUsable >= sampledUsable.size)) exact else sampled
     }
 
     /** 이 방전 구간 동안 화면이 한 번도 안 켜졌나 — [spans] 는 시작 순 */

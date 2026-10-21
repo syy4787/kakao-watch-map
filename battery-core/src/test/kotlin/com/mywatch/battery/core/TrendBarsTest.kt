@@ -53,4 +53,13 @@ class TrendBarsTest {
     fun nothingToDrawWithoutAnyDay() {
         assertNull(TrendBars.build(listOf(day(14, null), day(15, null)), null, emptyList(), zone, today))
     }
+
+    /** '며칠 더 필요' 글의 날 수는 꺾임 판단에 쓰는 날로 — 끝나지 않은 오늘의 아침 8시간은 막대엔 그려도 세지 않는다 */
+    @Test
+    fun usableDaysLeaveOutAPartialMorning() {
+        val morning = DayRate(today, Rate(2.0, null, 8.0, 16.0, null), partial = true)
+        val r = TrendReport(days.take(2) + morning, null, emptyList(), emptyList(), null, fresh = false)
+        assertEquals(2, r.validDays)
+        assertEquals(3, r.shownDays.count { it.pph != null })
+    }
 }

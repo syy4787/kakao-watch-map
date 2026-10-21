@@ -40,13 +40,19 @@ object CalibrationRule {
 
     fun isFull(s: BatterySample): Boolean = s.plugged && (s.status == Status.FULL || s.level >= 100)
 
+    /** 완충 뒤 충전기 위에서 조금 내려갔다 다시 채우는 중 (유지 시간을 끊지 않음) */
+    const val TOP_UP_FROM = 98
+
+    private fun topUp(s: BatterySample): Boolean = s.plugged && s.level >= TOP_UP_FROM
+
     fun decide(now: Long, st: CalibrationState, latest: BatterySample?): Pair<List<CalibrationAction>, CalibrationState> {
         if (!st.active) return emptyList<CalibrationAction>() to st
         if (now - st.startedAt > MAX_MS) return listOf(CalibrationAction.Expired) to CalibrationState()
         if (latest == null || latest.t > now || now - latest.t > STALE_MS) return emptyList<CalibrationAction>() to st
         return when (st.step) {
             1, 3 -> {
-                if (!isFull(latest)) emptyList<CalibrationAction>() to st.copy(fullSince = 0L)
+                // 충전기 위에서 99% 로 잠깐 내려갔다 채우는 것은 뺀 것이 아니다 — 유지를 다시 세지도, 알림을 되풀이하지도 않는다
+                if (!isFull(latest)) emptyList<CalibrationAction>() to (if (st.fullSince > 0 && topUp(latest)) st else st.copy(fullSince = 0L))
                 else if (st.fullSince == 0L) listOf(CalibrationAction.HoldFull(st.step)) to st.copy(fullSince = latest.t)
                 else if (latest.t - st.fullSince >= HOLD_FULL_MS) {
                     if (st.step == 1) listOf(CalibrationAction.StepDone(1)) to st.copy(step = 2, fullSince = 0L)

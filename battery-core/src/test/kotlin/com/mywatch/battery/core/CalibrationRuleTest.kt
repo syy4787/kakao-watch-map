@@ -56,6 +56,25 @@ class CalibrationRuleTest {
         assertEquals(t0 + 40 * min, s3.fullSince)
     }
 
+    /**
+     * 충전기 위에서 100% → 99%(잠깐 '충전 중') → 100% 로 오가는 것은 뺀 것이 아니다 — 1시간 유지를 처음부터 다시 세거나
+     * '완충 — 1시간 더' 알림을 밤새 되풀이하지 않는다 (점검에서 찾음)
+     */
+    @Test
+    fun aTopUpOnTheChargerDoesNotRestartTheHold() {
+        val st = CalibrationRule.start(t0, null)
+        val (_, s1) = CalibrationRule.decide(t0, st, full(t0))
+        val (a2, s2) = CalibrationRule.decide(t0 + 15 * min, s1, charging(t0 + 15 * min, 99))
+        assertTrue(a2.isEmpty()); assertEquals(t0, s2.fullSince)
+        val (a3, s3) = CalibrationRule.decide(t0 + 30 * min, s2, full(t0 + 30 * min))
+        assertTrue("다시 '완충' 알림 없음", a3.isEmpty()); assertEquals(t0, s3.fullSince)
+        val (a4, _) = CalibrationRule.decide(t0 + 60 * min, s3, full(t0 + 60 * min))
+        assertEquals(listOf(CalibrationAction.StepDone(1)), a4)
+        // 충전기 위라도 한참 내려가면(95%) 완충이 아니다 — 다시 센다
+        val (_, s5) = CalibrationRule.decide(t0 + 15 * min, s1, charging(t0 + 15 * min, 95))
+        assertEquals(0L, s5.fullSince)
+    }
+
     @Test
     fun drainingBelowTenPercentFinishesStepTwo() {
         val st = CalibrationRule.start(t0, null).copy(step = 2)

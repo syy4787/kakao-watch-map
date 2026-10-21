@@ -38,6 +38,8 @@ class BatterySampleWorker(context: Context, params: WorkerParameters) : Worker(c
                 com.mywatch.kakaomap.tile.BatteryTileService.refresh(applicationContext)
                 // 하루에 한 번 요약 파일 (PC 툴킷이 수집할 때 함께 가져가 보고서에 넣는다)
                 BatterySummary.writeDailyIfDue(applicationContext, log)
+                // 밤에 찾아 미뤄 둔 '언제부터 더 닳음' 알림은 아침에
+                runCatching { BatteryAlerts.flush(applicationContext) }
             }
         } catch (e: Exception) {
             ErrorLog.record("배터리·기록", e)

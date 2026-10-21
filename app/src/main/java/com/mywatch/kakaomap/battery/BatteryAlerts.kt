@@ -10,21 +10,40 @@ import com.mywatch.battery.core.AlertRule
 import com.mywatch.battery.core.ChangeFinder
 import com.mywatch.battery.core.DrainAnalyzer
 import com.mywatch.battery.core.TrendReport
+import com.mywatch.battery.core.DayTrend
 import com.mywatch.kakaomap.R
+import java.time.Instant
+import java.time.LocalDate
 import java.time.ZoneId
+import java.time.temporal.ChronoUnit
+import kotlin.math.abs
 
 /**
  * 비정상 소모 알림: 최근 2시간 내내 화면이 꺼져 있다시피 했는데 시간당 5% 넘게 닳았으면 한 번 알린다(6시간에 1번까지).
- * '언제부터 더 닳음' 알림: 최근 며칠 대기 소모가 늘어 꺾였으면 꺾인 날마다 한 번 (하루 요약 때).
+ * '언제부터 더 닳음' 알림: 최근 며칠 대기 소모가 늘어 꺾였으면 꺾임마다 한 번 (하루 요약 때, 밤이면 아침에).
+ * 밤(23~7시) 알림은 소리·진동 없는 채널로 — 화면을 깨워 배터리를 더 쓰지 않게.
  * 누르면 배터리 화면. 알림 권한이 없으면 조용히 넘어간다.
  */
 object BatteryAlerts {
+    /** 울리는 채널 (낮의 급한 알림·잠자기 전 충전 알림) */
     const val CHANNEL = "battery-watch"
+    /** 소리·진동 없이 목록에만 (밤 알림·참고 알림) */
+    const val CHANNEL_QUIET = "battery-quiet"
+    const val QUIET_FROM_HOUR = 23
+    const val QUIET_UNTIL_HOUR = 7
     const val NOTIFICATION_ID = 7301
-    /** '언제부터 더 닳음' 알림 (꺾인 날마다 한 번) */
+    /** '언제부터 더 닳음' 알림 (꺾임마다 한 번) */
     const val TREND_ID = 7308
+    /** 꺾인 날이 이만큼 안에서 옮겨 간 것은 같은 꺾임 */
+    const val SAME_SHIFT_DAYS = 3L
+    /** 새 꺾임이라도 지난 알림에서 이만큼은 지나야 다시 알린다 (훨씬 더 닳으면 바로) */
+    const val REALERT_MS = 7L * 24 * 3_600_000L
     private const val KEY_ALERT_AT = "alert_at"
     private const val KEY_TREND_FOR = "trend_notified_for"
+    private const val KEY_TREND_AT = "trend_notified_at"
+    private const val KEY_TREND_AFTER = "trend_notified_after"
+    private const val KEY_PENDING_TITLE = "trend_pending_title"
+    private const val KEY_PENDING_TEXT = "trend_pending_text"
     /** 타일에 보일 '언제부터' 한 줄과 그 줄을 보일 기한 (epoch ms) */
     const val KEY_TREND_LINE = "trend_line"
     const val KEY_TREND_UNTIL = "trend_until"
@@ -33,33 +52,76 @@ object BatteryAlerts {
         check(context, log.readRecent(1, now), now, null)
 
     /** [samples] 최근 표본, [screenOnMs] 최근 2시간 화면 켜짐(사용 통계로 알 때) */
-    fun check(context: Context, samples: List<com.mywatch.battery.core.BatterySample>, now: Long, screenOnMs: Long?) {
+    fun check(
+        context: Context, samples: List<com.mywatch.battery.core.BatterySample>, now: Long, screenOnMs: Long?,
+        zone: ZoneId = ZoneId.systemDefault(),
+    ) {
         val prefs = context.getSharedPreferences(BatteryLog.PREFS, Context.MODE_PRIVATE)
         val last = prefs.getLong(KEY_ALERT_AT, 0L).takeIf { it > 0 }
         val alert = AlertRule.check(samples, now, last, screenOnMs) ?: return
-        if (runCatching { notify(context, alert) }.isSuccess) prefs.edit().putLong(KEY_ALERT_AT, now).apply()
+        if (runCatching { notify(context, alert, quiet(now, zone)) }.isSuccess) prefs.edit().putLong(KEY_ALERT_AT, now).apply()
+    }
+
+    /** 밤(23~7시)인가 — 알림이 소리·진동으로 화면을 깨우지 않게 */
+    fun quiet(now: Long, zone: ZoneId = ZoneId.systemDefault()): Boolean {
+        val h = Instant.ofEpochMilli(now).atZone(zone).hour
+        return h >= QUIET_FROM_HOUR || h < QUIET_UNTIL_HOUR
+    }
+
+    /** 알림 관리자와 낼 채널 — [quiet] 면 소리·진동 없는 채널 (없으면 만든다) */
+    fun manager(context: Context, quiet: Boolean): Pair<NotificationManager, String>? {
+        val nm = context.getSystemService(NotificationManager::class.java) ?: return null
+        val id = if (quiet) CHANNEL_QUIET else CHANNEL
+        if (nm.getNotificationChannel(id) == null) {
+            nm.createNotificationChannel(
+                if (quiet) NotificationChannel(id, context.getString(R.string.battery_channel_quiet), NotificationManager.IMPORTANCE_LOW)
+                else NotificationChannel(id, context.getString(R.string.battery_channel), NotificationManager.IMPORTANCE_DEFAULT)
+            )
+        }
+        return nm to id
     }
 
     /**
      * 최근 7일 안에 대기 소모가 늘어 꺾였으면(그 무렵 바뀐 것에 맞는 할 일과 함께) 꺾인 날마다 한 번 알리고, 타일 한 줄을 정해 둔다.
      * 하루 요약을 쓸 때(하루 한 번) 부른다 — 사람들은 배터리 화면을 잘 열지 않으므로. 꺾임이 없거나 지났으면 타일 줄을 지운다
      */
-    fun trend(context: Context, trend: TrendReport?, names: (String) -> String?, zone: ZoneId = ZoneId.systemDefault()) {
+    fun trend(
+        context: Context, trend: TrendReport?, names: (String) -> String?, zone: ZoneId = ZoneId.systemDefault(),
+        now: Long = System.currentTimeMillis(),
+    ) {
         val prefs = context.getSharedPreferences(BatteryLog.PREFS, Context.MODE_PRIVATE)
         val t = trend?.takeIf { it.fresh }
         val shift = t?.shift
         val advice = t?.advice(names)
         if (t == null || shift == null || advice == null) {
-            prefs.edit().remove(KEY_TREND_LINE).remove(KEY_TREND_UNTIL).apply()
+            prefs.edit().remove(KEY_TREND_LINE).remove(KEY_TREND_UNTIL).remove(KEY_PENDING_TITLE).remove(KEY_PENDING_TEXT).apply()
             return
         }
         val until = shift.firstAfter.plusDays(TrendReport.FRESH_DAYS + 1).atStartOfDay(zone).toInstant().toEpochMilli()
         prefs.edit().putString(KEY_TREND_LINE, advice.first).putLong(KEY_TREND_UNTIL, until).apply()
-        val key = shift.firstAfter.toString()
-        if (prefs.getString(KEY_TREND_FOR, null) == key) return
-        if (runCatching { notifyTrend(context, advice.first, "${ChangeFinder.title(shift)} · ${ChangeFinder.numbers(shift)}\n할 일: ${advice.second}") }.isSuccess) {
-            prefs.edit().putString(KEY_TREND_FOR, key).apply()
-        }
+        // 같은 꺾임(날이 쌓이며 꺾인 날이 며칠 앞뒤로 옮겨 감)이거나 지난 알림이 일주일 안이면 다시 알리지 않는다 — 훨씬 더 닳으면 다시
+        val lastFor = prefs.getString(KEY_TREND_FOR, null)?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
+        val lastAt = prefs.getLong(KEY_TREND_AT, 0L)
+        val lastAfter = prefs.getFloat(KEY_TREND_AFTER, 0f).toDouble()
+        val same = lastFor != null && abs(ChronoUnit.DAYS.between(lastFor, shift.firstAfter)) <= SAME_SHIFT_DAYS
+        val tooSoon = lastAt > 0 && now - lastAt in 0 until REALERT_MS
+        val muchWorse = lastAfter > 0 && shift.after >= lastAfter * DayTrend.RATIO
+        if ((same || tooSoon) && !muchWorse) return
+        prefs.edit()
+            .putString(KEY_TREND_FOR, shift.firstAfter.toString()).putLong(KEY_TREND_AT, now).putFloat(KEY_TREND_AFTER, shift.after.toFloat())
+            .putString(KEY_PENDING_TITLE, advice.first)
+            .putString(KEY_PENDING_TEXT, "${ChangeFinder.title(shift)} · ${ChangeFinder.numbers(shift)}\n할 일: ${advice.second}")
+            .apply()
+        flush(context, now, zone)
+    }
+
+    /** 밤에 찾아 미뤄 둔 '언제부터 더 닳음' 알림을 낮이 되면 낸다 — 15분 기록마다 (설정값 몇 개만 읽는다) */
+    fun flush(context: Context, now: Long = System.currentTimeMillis(), zone: ZoneId = ZoneId.systemDefault()) {
+        val prefs = context.getSharedPreferences(BatteryLog.PREFS, Context.MODE_PRIVATE)
+        val title = prefs.getString(KEY_PENDING_TITLE, null) ?: return
+        if (quiet(now, zone)) return
+        val text = prefs.getString(KEY_PENDING_TEXT, null).orEmpty()
+        if (runCatching { notifyTrend(context, title, text) }.isSuccess) prefs.edit().remove(KEY_PENDING_TITLE).remove(KEY_PENDING_TEXT).apply()
     }
 
     /** 타일에 보일 '언제부터' 한 줄 (기한이 지났으면 null) */
@@ -69,9 +131,8 @@ object BatteryAlerts {
     }
 
     private fun notifyTrend(context: Context, title: String, text: String) {
-        val nm = context.getSystemService(NotificationManager::class.java) ?: return
-        channel(context, nm)
-        val n = NotificationCompat.Builder(context, CHANNEL)
+        val (nm, channel) = manager(context, quiet = false) ?: return
+        val n = NotificationCompat.Builder(context, channel)
             .setSmallIcon(R.drawable.ic_battery)
             .setContentTitle(title)
             .setContentText(text)
@@ -82,23 +143,16 @@ object BatteryAlerts {
         nm.notify(TREND_ID, n)
     }
 
-    private fun channel(context: Context, nm: NotificationManager) {
-        if (nm.getNotificationChannel(CHANNEL) == null) {
-            nm.createNotificationChannel(NotificationChannel(CHANNEL, context.getString(R.string.battery_channel), NotificationManager.IMPORTANCE_DEFAULT))
-        }
-    }
-
     private fun openBattery(context: Context): PendingIntent = PendingIntent.getActivity(
         context, 0, Intent(context, BatteryActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
         PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
     )
 
-    private fun notify(context: Context, alert: AlertRule.Alert) {
-        val nm = context.getSystemService(NotificationManager::class.java) ?: return
-        channel(context, nm)
+    private fun notify(context: Context, alert: AlertRule.Alert, quiet: Boolean) {
+        val (nm, channel) = manager(context, quiet) ?: return
         val open = openBattery(context)
         val pph = DrainAnalyzer.fmt(alert.pph)
-        val n = NotificationCompat.Builder(context, CHANNEL)
+        val n = NotificationCompat.Builder(context, channel)
             .setSmallIcon(R.drawable.ic_battery)
             .setContentTitle("배터리 시간당 ${pph}% — 비정상")
             .setContentText("화면을 거의 안 켰는데 ${DrainAnalyzer.fmt(alert.hours)}시간 동안 시간당 ${pph}% 닳았습니다. 홈+뒤로 버튼을 꺼질 때까지(7초 이상) 눌러 강제 재시작해 보세요.")

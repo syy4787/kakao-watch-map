@@ -265,6 +265,10 @@ object HtmlReport {
             sb.append("<td$cls>${d.pph?.let { fmt1(it) } ?: "-"}</td>")
         }
         sb.append("</tr></table>")
+        // 워치 화면·요약은 사용 통계가 있으면 화면이 켜졌던 구간을 빼고 잰다 — 이 표(15분 기록의 화면 상태)와 숫자가 다를 수 있다
+        if (f.watchSummary?.contains("사용 통계 기준") == true) {
+            sb.append("<p class=\"legend\">워치 화면의 '최근 며칠'은 사용 통계로 화면이 켜졌던 구간을 빼고 재서, 15분 기록으로 잰 이 표와 숫자가 조금 다를 수 있습니다.</p>")
+        }
         val shift = t.shift
         if (shift != null) {
             sb.append("<p class=\"${if (shift.worse) "bad" else "good"}\"><b>${esc(ChangeFinder.headline(shift))}</b></p>")
@@ -279,7 +283,7 @@ object HtmlReport {
             }
             t.advice { null }?.let { (todo, how) -> sb.append("<p>할 일: <b>${esc(todo)}</b> — ${esc(how)}</p>") }
         } else if (t.validDays < 2 * DayTrend.MIN_SIDE_DAYS) {
-            sb.append("<p>날마다 견주려면 대기 기록이 3시간 넘는 날이 ${2 * DayTrend.MIN_SIDE_DAYS}일 필요합니다 (지금 ${t.validDays}일).</p>")
+            sb.append("<p>날마다 견주려면 대기 기록이 ${DayTrend.MIN_HOURS.toInt()}시간 넘는 날이 ${2 * DayTrend.MIN_SIDE_DAYS}일 필요합니다 (지금 ${t.validDays}일).</p>")
         } else {
             sb.append("<p>날마다 대기 소모에 뚜렷한 꺾임은 없습니다.</p>")
         }

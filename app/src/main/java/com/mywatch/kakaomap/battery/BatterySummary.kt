@@ -16,21 +16,31 @@ import java.util.Locale
 /** 배터리 화면과 summary.txt 가 같이 쓰는 글 만들기 */
 object BatterySummary {
     private const val K_SUMMARY_AT = "summary_written_at"
-    /** 하루에 한 번 (시각이 조금씩 밀려도 되게 20시간) */
-    const val DAILY_MS = 20L * 3_600_000L
+    private const val K_SUMMARY_DAY = "summary_written_day"
+    /** 날마다 이 시각이 넘은 첫 기록 때 (꺾임 알림이 새벽에 울리지 않게) */
+    const val DAILY_FROM_HOUR = 7
+    /** 이만큼 못 썼으면 시각과 상관없이 (아침마다 꺼져 있던 워치) */
+    const val OVERDUE_MS = 30L * 3_600_000L
 
     /**
-     * 15분 작업에서: 마지막으로 쓴 지 하루가 지났으면 요약 파일을 새로 쓴다. 시각은 먼저 적는다 — 분석·쓰기가 실패해도
-     * 15분마다 30일치를 다시 읽고 분석하지 않게(이 앱이 배터리를 덜 쓰게). 실패한 날은 다음 날 다시
+     * 15분 작업에서: 날짜마다 한 번(아침 7시 넘어 첫 기록 때) 요약 파일을 새로 쓴다 — 20시간 간격처럼 날마다 새벽으로 밀려가지 않게.
+     * 시각은 먼저 적는다 — 분석·쓰기가 실패해도 15분마다 30일치를 다시 읽고 분석하지 않게(이 앱이 배터리를 덜 쓰게). 실패한 날은 다음 날 다시
      */
-    fun writeDailyIfDue(context: android.content.Context, log: BatteryLog, now: Long = System.currentTimeMillis()) {
+    fun writeDailyIfDue(
+        context: android.content.Context, log: BatteryLog, now: Long = System.currentTimeMillis(),
+        zone: java.time.ZoneId = java.time.ZoneId.systemDefault(),
+    ) {
         val p = context.getSharedPreferences(BatteryLog.PREFS, android.content.Context.MODE_PRIVATE)
-        if (now - p.getLong(K_SUMMARY_AT, 0L) < DAILY_MS) return
-        p.edit().putLong(K_SUMMARY_AT, now).apply()
+        val local = java.time.Instant.ofEpochMilli(now).atZone(zone)
+        val today = local.toLocalDate().toString()
+        val last = p.getLong(K_SUMMARY_AT, 0L)
+        val due = now - last >= OVERDUE_MS || now < last || (p.getString(K_SUMMARY_DAY, null) != today && local.hour >= DAILY_FROM_HOUR)
+        if (!due) return
+        p.edit().putLong(K_SUMMARY_AT, now).putString(K_SUMMARY_DAY, today).apply()
         val all = log.readAll()
         val ins = BatteryInsights.compute(context, all, now)
-        // 최근 며칠 대기 소모가 늘었으면 알림 한 번·타일 한 줄 (배터리 화면을 열지 않아도 알게)
-        runCatching { BatteryAlerts.trend(context, ins.trend, { ins.appNames[it] }) }
+        // 최근 며칠 대기 소모가 늘었으면 알림 한 번·타일 한 줄 (배터리 화면을 열지 않아도 알게, 밤이면 아침에)
+        runCatching { BatteryAlerts.trend(context, ins.trend, { ins.appNames[it] }, zone, now) }
         val a = ins.analysis ?: return
         log.writeSummary(text(a, null, android.os.Build.MODEL ?: "", now, ins))
     }

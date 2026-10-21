@@ -58,8 +58,8 @@ data class TrendReport(
     /** 보여 줄 날들 — 기록이 시작되기 전의 빈 날은 뺀다 */
     val shownDays: List<DayRate> get() = days.dropWhile { it.pph == null }
 
-    /** 기록 있는 날 수 — [DayTrend.MIN_SIDE_DAYS] 의 두 배는 있어야 꺾임을 본다 */
-    val validDays: Int get() = days.count { it.pph != null }
+    /** 꺾임 판단에 쓸 수 있는 날 수 (끝나지 않은 오늘의 짧은 기록은 빼고) — [DayTrend.MIN_SIDE_DAYS] 의 두 배는 있어야 꺾임을 본다 */
+    val validDays: Int get() = days.count { it.forShift != null }
 
     /** 사용 통계의 화면 켜짐으로 센 날들인가 (아니면 15분 표본의 화면 상태로) */
     val exact: Boolean get() = days.any { it.exact }

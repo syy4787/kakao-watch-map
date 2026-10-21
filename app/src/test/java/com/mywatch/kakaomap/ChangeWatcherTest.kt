@@ -269,6 +269,46 @@ class ChangeWatcherTest {
         assertEquals(Event.PERIODIC to "", notes[3])
     }
 
+    /**
+     * 기록은 30일만 남는다 — 처음 남긴 '적기 시작' 표시가 정리돼 지워지면 그 뒤 꺾임이 모두 '모름'이 된다.
+     * 그래서 2주마다 다시 남긴다 (가장 이른 표시가 늘 기록 안에 있게 — 리뷰에서 찾음)
+     */
+    @Test
+    fun theStartMarkIsRenewedBeforeTheLogForgetsIt() {
+        assertEquals("chg:on=1", ChangeWatcher.collect(context, at(1, 8), zone))
+        assertEquals("", ChangeWatcher.collect(context, at(15, 7), zone))
+        assertEquals("chg:on=1", ChangeWatcher.collect(context, at(15, 9), zone))
+        assertEquals("", ChangeWatcher.collect(context, at(15, 10), zone))
+    }
+
+    /** 예전 빌드가 부팅 표시를 숫자로 남겼어도 넘어지지 않고(앱 변화 기록이 멈추지 않고) 새 표시로 바꾼다 */
+    @Test
+    fun anOldNumberBootMarkIsReplaced() {
+        context.getSharedPreferences(BatteryLog.PREFS, Context.MODE_PRIVATE).edit().putLong("cw_boot", 123_456L).commit()
+        collect(at(21, 8))
+        install(gms, "26.41.10", system = true, lastUpdate = at(21, 9))
+        changed = listOf(gms)
+        assertEquals(gms, collect(at(21, 10)).single().subject)
+    }
+
+    /**
+     * 기준 시각 바로 앞(60초 안)에 업데이트된 앱이 15분 뒤 구성 요소를 켜고 꺼 또 바뀐 목록에 오르면 두 번 적던 것 —
+     * 앱마다 적은 업데이트 시각을 기억해 한 번만 (리뷰에서 찾음)
+     */
+    @Test
+    fun anUpdateIsNotedOnceEvenIfThePackageShowsUpAgain() {
+        collect(at(21, 8))
+        install(gms, "26.41.10", system = true, lastUpdate = at(21, 9, 59))
+        changed = listOf(gms)
+        assertEquals(gms, collect(at(21, 10)).single().subject)
+        seq = 6
+        assertTrue(collect(at(21, 10, 15)).isEmpty())
+        // 정말 다시 업데이트되면 또 적는다
+        install(gms, "26.42.10", system = true, lastUpdate = at(21, 10, 20))
+        seq = 7
+        assertEquals("26.42.10", collect(at(21, 10, 30)).single().to)
+    }
+
     @Test
     fun aGuardianToggleBecomesAConfigChange() {
         val c = ChangeNote.decode(1, ChangeWatcher.configNote("night_aod", from = false, to = true)).single()

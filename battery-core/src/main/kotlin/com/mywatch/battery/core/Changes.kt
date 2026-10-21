@@ -101,14 +101,26 @@ object ChangeNote {
     fun settled(changes: List<Change>, withinMs: Long = REVERTED_WITHIN_MS): List<Change> {
         val sorted = changes.sortedBy { it.t }
         val drop = HashSet<Int>()
-        for (i in sorted.indices) {
-            if (i in drop) continue
-            val a = sorted[i]
-            if (a.kind != ChangeKind.SETTING && a.kind != ChangeKind.CONFIG && a.kind != ChangeKind.FACE) continue
-            // 같은 대상의 다음 변화가 되돌림이면 짝으로 뺀다
-            val j = (i + 1 until sorted.size).firstOrNull { k -> k !in drop && sorted[k].kind == a.kind && sorted[k].subject == a.subject } ?: continue
-            val b = sorted[j]
-            if (b.t - a.t <= withinMs && b.to == a.from && a.from != null) { drop += i; drop += j }
+        val revertible = setOf(ChangeKind.SETTING, ChangeKind.CONFIG, ChangeKind.FACE)
+        // 대상마다, 이웃한 두 변화 중 되돌림인 짝을 가장 짧은 것부터 뺀다 — 아침에 켜고 저녁에 잠깐 껐다 다시 켰으면
+        // 저녁의 끔·켬이 짝이고 아침에 켠 것이 남는다 (앞에서부터 짝지으면 '켬'이 저녁으로 밀린다)
+        sorted.indices.filter { sorted[it].kind in revertible }.groupBy { sorted[it].kind to sorted[it].subject }.values.forEach { group ->
+            val alive = group.toMutableList()
+            while (true) {
+                var best = -1
+                var bestGap = Long.MAX_VALUE
+                for (k in 0 until alive.size - 1) {
+                    val a = sorted[alive[k]]
+                    val b = sorted[alive[k + 1]]
+                    val gap = b.t - a.t
+                    if (gap <= withinMs && gap < bestGap && a.from != null && b.to == a.from) { best = k; bestGap = gap }
+                }
+                if (best < 0) break
+                drop += alive[best]
+                drop += alive[best + 1]
+                alive.removeAt(best + 1)
+                alive.removeAt(best)
+            }
         }
         return sorted.filterIndexed { i, _ -> i !in drop }
     }
@@ -248,7 +260,8 @@ object ChangeFinder {
                 "길면 1주 적응(삼성) — 그 뒤엔 Play 서비스 캐시 지우기 → 강제 재시작"
             ChangeKind.APP -> when (c.subject) {
                 GMS -> "Play 서비스 업데이트 뒤 더 닳음" to "Play 서비스 앱 정보 › 저장공간 › 캐시 지우기 → 강제 재시작"
-                else -> "${appName(c.subject, names)} ${if (c.to?.startsWith("+") == true) "설치" else "업데이트"} 뒤 더 닳음" to
+                // 이름이 길면 줄에 들어가게 이름을 줄인다 (전체 이름은 '그 무렵 바뀐 것' 목록에)
+                else -> fit(SHORT[c.subject] ?: appName(c.subject, names), " ${if (c.to?.startsWith("+") == true) "설치" else "업데이트"} 뒤 더 닳음") to
                     "그 앱의 동기화·알림·측정 설정을 보거나, 하루 지워 두고 비교"
             }
             ChangeKind.FACE -> "시계 화면을 바꾼 뒤 더 닳음" to "삼성 기본 시계 화면으로 하루 써 보고 비교"
@@ -259,10 +272,45 @@ object ChangeFinder {
                 "location" -> "위치를 켠 뒤 더 닳음" to "앱별 소모에서 GPS 쓰는 앱을 보세요"
                 else -> "${obj(SETTING_NAMES[c.subject] ?: c.subject)} 켠 뒤 더 닳음" to "꺼 보고 비교"
             }
-            ChangeKind.CONFIG -> "지킴이 ${obj("'${CONFIG_NAMES[c.subject] ?: c.subject}'")} 끈 뒤 더 닳음" to "다시 켜 보세요"
+            ChangeKind.CONFIG -> {
+                // 이름에 따옴표가 있으면('Hey Google') 겹치지 않게 그대로
+                val n = (CONFIG_NAMES[c.subject] ?: c.subject).let { if ('\'' in it) it else "'$it'" }
+                ("지킴이 ${obj(n)} 끈 뒤 더 닳음".takeIf { width(it) <= TITLE_MAX } ?: "지킴이 설정을 끈 뒤 더 닳음") to
+                    "지킴이에서 ${obj(n)} 다시 켜 보세요"
+            }
             ChangeKind.MORE_APPS -> "앱 여럿 업데이트 뒤 더 닳음" to "앱별 소모 1위 앱을 보세요 (Play 서비스면 캐시 지우기)"
             ChangeKind.TRACKING -> head to "앱별 소모 1위(Play 서비스인지)를 보세요"
         }
+    }
+
+    /** 할 일 제목(13sp 두 줄)·설명(12sp 세 줄)에 들어가는 너비 — 한글 글자 수로 */
+    const val TITLE_MAX = 22.0
+    const val DETAIL_MAX = 50.0
+
+    /** 할 일 제목에 쓰는 짧은 이름 */
+    private val SHORT = mapOf(SHEALTH to "삼성 헬스")
+
+    /**
+     * 화면에서 차지하는 너비를 한글 한 글자 = 1 로 어림한다 (영문·숫자는 한글보다 좁다 — 'Samsung Health' 14자는 한글 8자쯤).
+     * 글자 수로 재면 영문 이름을 쓸데없이 줄이게 된다
+     */
+    fun width(s: String): Double = s.sumOf { ch ->
+        when {
+            ch in '가'..'힣' || ch.code in 0x3130..0x318F || ch.code in 0x4E00..0x9FFF || ch.code in 0xFF00..0xFFEF -> 1.0
+            ch == '…' || ch.code in 0x2190..0x21FF -> 1.0   // 말줄임표·화살표
+            ch == ' ' -> 0.3
+            ch in 'A'..'Z' -> 0.68
+            ch.isLetterOrDigit() -> 0.55
+            else -> 0.4
+        }
+    }
+
+    /** [name] + [tail] 을 제목 너비 안에 — 넘치면 이름을 줄여 '…' */
+    fun fit(name: String, tail: String): String {
+        if (width(name + tail) <= TITLE_MAX) return name + tail
+        var n = name
+        while (n.length > 1 && width(n.trimEnd() + "…" + tail) > TITLE_MAX) n = n.dropLast(1)
+        return n.trimEnd() + "…" + tail
     }
 
     /**

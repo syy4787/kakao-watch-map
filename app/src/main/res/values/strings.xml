@@ -92,6 +92,7 @@
     <!-- 첫 화면·유튜브의 업데이트 버튼 -->
     <string name="hub_battery_desc">배터리 기록 열기</string>
     <string name="battery_channel">배터리 감시</string>
+    <string name="battery_channel_quiet">배터리 참고 (소리·진동 없음)</string>
     <string name="hub_update">업데이트</string>
     <string name="hub_update_new">새 버전 업데이트</string>
     <string name="update_deferred">화면을 닫아서 설치를 미뤘어요. 앱을 다 닫으면 알아서 설치돼요</string>

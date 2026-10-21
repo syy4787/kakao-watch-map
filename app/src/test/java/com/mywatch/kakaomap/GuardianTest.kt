@@ -155,6 +155,43 @@ class GuardianTest {
         assertTrue(culprits[0].flags.toString(), culprits[0].flags.any { it.contains("stuck") })
     }
 
+    /** 밤(23~7시)의 비정상 소모 알림은 소리·진동 없는 채널로 — 화면을 깨우지 않게 (점검에서 찾음). 낮엔 울린다 */
+    @Test
+    fun lateNightAlertsArePostedQuietly() {
+        grant()
+        val stats = object : UidStatsSource {
+            var wl = 0L
+            override fun take() = mapOf("com.example.drain" to UidUse("com.example.drain", wakelockMs = wl))
+        }
+        fill(at(23, 15), 9, 80.0, 1.0)
+        Guardian.tick(context, log, at(23, 15), stats = stats, zone = zone)
+        stats.wl = 14 * 60_000L
+        fill(at(23, 30), 9, 80.0, 6.0)
+        Guardian.tick(context, log, at(23, 30), stats = stats, zone = zone)
+        assertEquals(BatteryAlerts.CHANNEL_QUIET, shadowOf(nm).getNotification(Guardian.N_ABNORMAL).channelId)
+    }
+
+    /** 하루 요약(꺾임 알림 포함)은 날짜마다 한 번, 아침 7시 넘어 첫 기록 때 — 20시간 간격으로 새벽에 밀려가지 않게 (점검에서 찾음) */
+    @Test
+    fun theDailySummaryRunsOncePerDayAfterSeven() {
+        fill(at(8, 0, d = 13), 9, 80.0, 1.0)
+        val p = context.getSharedPreferences(BatteryLog.PREFS, Context.MODE_PRIVATE)
+        fun run(t: Long) = com.mywatch.kakaomap.battery.BatterySummary.writeDailyIfDue(context, log, t, zone)
+        run(at(8, 0, d = 13))
+        assertEquals(at(8, 0, d = 13), p.getLong("summary_written_at", 0L))
+        run(at(2, 0, d = 14))
+        assertEquals("다음 날 새벽엔 아직", at(8, 0, d = 13), p.getLong("summary_written_at", 0L))
+        run(at(7, 15, d = 14))
+        assertEquals(at(7, 15, d = 14), p.getLong("summary_written_at", 0L))
+        run(at(21, 0, d = 14))
+        assertEquals("같은 날 두 번 안 씀", at(7, 15, d = 14), p.getLong("summary_written_at", 0L))
+        // 30시간 넘게 못 썼으면(아침마다 꺼져 있었음 등) 시각과 상관없이
+        run(at(3, 0, d = 15))
+        assertEquals(at(7, 15, d = 14), p.getLong("summary_written_at", 0L))
+        run(at(2, 0, d = 16))
+        assertEquals(at(2, 0, d = 16), p.getLong("summary_written_at", 0L))
+    }
+
     @Test
     fun bedtimeChargeReminder() {
         grant()

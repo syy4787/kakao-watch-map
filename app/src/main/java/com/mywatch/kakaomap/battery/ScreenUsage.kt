@@ -3,9 +3,11 @@ package com.mywatch.kakaomap.battery
 import android.Manifest
 import android.app.AppOpsManager
 import android.app.usage.UsageEvents
+import android.app.usage.UsageEventsQuery
 import android.app.usage.UsageStatsManager
 import android.content.Context
 import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Process
 import com.mywatch.battery.core.AppSpan
 import com.mywatch.battery.core.ScreenCover
@@ -42,38 +44,48 @@ class ScreenUsage(context: Context) {
     data class Usage(val screen: List<Span>, val apps: List<AppSpan>, val notifications: List<Pair<String, Long>>)
 
     /**
-     * 며칠 단위 추세용 화면 켜짐 구간 — 화면 이벤트만 모은다. 시스템은 이벤트를 며칠만 보관하므로, 가장 이른 이벤트(종류 무관)
-     * 때부터 믿는다([ScreenCover.from]). 이벤트가 하나도 없으면 null
+     * 며칠 단위 추세용 화면 켜짐 구간 — 화면 이벤트만 모은다(안드로이드 15+ 는 시스템이 그 두 종류만 걸러 보내 열흘치도 가볍다).
+     * 시스템은 이벤트를 며칠만 보관하므로 가장 이른 화면 이벤트 때부터 믿는다([ScreenCover.from]) — 그 앞의 화면 상태는 모른다.
+     * 화면 이벤트가 하나도 없으면 null (화면이 켜진 때를 모르는 것이지 안 켜진 것이 아니다)
      */
     fun readScreen(from: Long, to: Long): ScreenCover? {
         if (!available || to <= from) return null
         val usm = app.getSystemService(UsageStatsManager::class.java) ?: return null
-        val events = runCatching { usm.queryEvents(from, to) }.getOrNull() ?: return null
+        val events = screenEvents(usm, from, to) ?: return null
         val e = UsageEvents.Event()
         val screen = ArrayList<Span>()
         var first: Long? = null
         var screenStart: Long? = null
-        var sawScreenEvent = false
         while (events.hasNextEvent()) {
             if (!events.getNextEvent(e)) break
+            val type = e.eventType
+            if (type != UsageEvents.Event.SCREEN_INTERACTIVE && type != UsageEvents.Event.SCREEN_NON_INTERACTIVE) continue
             val t = e.timeStamp.coerceIn(from, to)
             if (first == null) first = t
-            when (e.eventType) {
-                UsageEvents.Event.SCREEN_INTERACTIVE -> {
-                    if (screenStart == null) screenStart = t
-                    sawScreenEvent = true
-                }
-                UsageEvents.Event.SCREEN_NON_INTERACTIVE -> {
-                    // 기록이 시작될 때 이미 켜져 있었으면 기록 처음부터 (창 처음이 아니라 — 그 앞은 기록이 없다)
-                    val s = screenStart ?: if (!sawScreenEvent) first else null
-                    if (s != null && t > s) screen += Span(s, t)
-                    screenStart = null
-                    sawScreenEvent = true
-                }
+            if (type == UsageEvents.Event.SCREEN_INTERACTIVE) {
+                if (screenStart == null) screenStart = t
+            } else {
+                // 첫 화면 이벤트가 '꺼짐'이면 그 앞은 기록이 없다 — 그때부터 믿으므로 구간은 없다
+                screenStart?.let { s -> if (t > s) screen += Span(s, t) }
+                screenStart = null
             }
         }
         screenStart?.let { if (to > it) screen += Span(it, to) }
         return first?.let { ScreenCover(screen, it) }
+    }
+
+    /** 화면 이벤트 — 안드로이드 15+ 는 종류를 걸러 받고, 그 전(또는 실패하면)은 모두 받아 거른다 */
+    private fun screenEvents(usm: UsageStatsManager, from: Long, to: Long): UsageEvents? {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.VANILLA_ICE_CREAM) {
+            runCatching {
+                usm.queryEvents(
+                    UsageEventsQuery.Builder(from, to)
+                        .setEventTypes(UsageEvents.Event.SCREEN_INTERACTIVE, UsageEvents.Event.SCREEN_NON_INTERACTIVE)
+                        .build()
+                )
+            }.getOrNull()?.let { return it }
+        }
+        return runCatching { usm.queryEvents(from, to) }.getOrNull()
     }
 
     fun readAll(from: Long, to: Long): Usage? {

@@ -96,18 +96,22 @@ class BatteryInsightsTest {
         assertEquals(listOf(Span(at(18), at(18, 10))), screen)
     }
 
-    /** 며칠 단위 추세용: 화면 이벤트만 — 시스템이 보관한 가장 이른 이벤트부터 믿는다 (없으면 null) */
+    /**
+     * 며칠 단위 추세용: 화면 이벤트만 — 시스템이 보관한 가장 이른 화면 이벤트부터 믿는다. 화면 이벤트가 하나도 없으면 null
+     * (화면이 켜진 때를 모르는 것이지 안 켜진 것이 아니다 — 모든 구간을 '화면이 안 켜진 대기'로 세지 않게, 리뷰에서 찾음)
+     */
     @Test
     fun theScreenRecordForTheTrendStartsAtTheEarliestKeptEvent() {
         allowUsage()
         assertNull("기록이 없으면 null", ScreenUsage(context).readScreen(at(0, d = 11), at(18)))
         event("com.example.app", at(9, d = 13), UsageEvents.Event.ACTIVITY_RESUMED)
-        event("android", at(9, 30, d = 13), UsageEvents.Event.SCREEN_NON_INTERACTIVE)   // 기록이 시작될 때 이미 켜져 있던 화면
+        assertNull("화면 이벤트가 없으면 null", ScreenUsage(context).readScreen(at(0, d = 11), at(18)))
+        event("android", at(9, 30, d = 13), UsageEvents.Event.SCREEN_NON_INTERACTIVE)   // 기록이 시작될 때 이미 켜져 있던 화면 — 그 앞은 모름
         event("android", at(12, d = 14), UsageEvents.Event.SCREEN_INTERACTIVE)
         event("android", at(12, 5, d = 14), UsageEvents.Event.SCREEN_NON_INTERACTIVE)
         val cover = ScreenUsage(context).readScreen(at(0, d = 11), at(18))!!
-        assertEquals(at(9, d = 13), cover.from)
-        assertEquals(listOf(Span(at(9, d = 13), at(9, 30, d = 13)), Span(at(12, d = 14), at(12, 5, d = 14))), cover.spans)
+        assertEquals(at(9, 30, d = 13), cover.from)
+        assertEquals(listOf(Span(at(12, d = 14), at(12, 5, d = 14))), cover.spans)
     }
 
     /**
@@ -135,8 +139,9 @@ class BatteryInsightsTest {
             }
             while (t < at(0, d = d + 1)) { samples += BatterySample(t = t, level = 100, plugged = true); t += q }
         }
-        // 기록이 첫날부터 있음을 알리는 이벤트
-        event("com.example.app", at(0, 1, d = 13), UsageEvents.Event.ACTIVITY_RESUMED)
+        // 화면 기록이 첫날 앞부터 있음 (전날 밤에 잠깐 본 화면)
+        event("android", at(23, 0, d = 12), UsageEvents.Event.SCREEN_INTERACTIVE)
+        event("android", at(23, 1, d = 12), UsageEvents.Event.SCREEN_NON_INTERACTIVE)
         val now = at(0, d = 20) - 1
         val trend = com.mywatch.kakaomap.battery.BatteryInsights.compute(context, samples, now, zone).trend!!
         assertTrue(trend.exact)

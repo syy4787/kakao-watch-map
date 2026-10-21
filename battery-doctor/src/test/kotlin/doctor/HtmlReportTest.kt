@@ -77,6 +77,15 @@ class HtmlReportTest {
         assertTrue(section.contains("10/16부터 대기 소모가 시간당 1.0% → 2.5%로 늘었습니다"))
         assertTrue(section.contains("Google Play 서비스 업데이트 (26.40.31)"))
         assertTrue(section, section.contains("캐시 지우기"))
+        assertFalse("워치가 표본으로 쟀으면 다를 까닭 없음", section.contains("사용 통계로"))
+        // 워치 요약이 사용 통계 기준이면 이 표(15분 기록)와 숫자가 조금 다를 수 있다고 적는다
+        val fx = f.copy(watchSummary = "[최근 며칠] 10/12 0.9 · 10/13 0.9 (대기 %/h, 사용 통계 기준)")
+        val withNote = HtmlReport.render(fx, fs, Analyzer.verdict(fx, fs), emptyMap(), zone)
+        assertTrue(withNote.contains("사용 통계로 화면이 켜졌던 구간을 빼고"))
+        // 날이 모자라면 몇 시간 넘는 날이 며칠 필요한지 (워치와 같은 6시간)
+        val few = f.copy(watchTrend = com.mywatch.battery.core.TrendReport.of(samples.filter { it.t < at(15, 0) }, at(14, 22), zone))
+        val short = HtmlReport.render(few, fs, Analyzer.verdict(few, fs), emptyMap(), zone)
+        assertTrue(short, short.contains("6시간 넘는 날이 4일 필요합니다 (지금 3일)"))
     }
 
     @Test

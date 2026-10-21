@@ -19,7 +19,8 @@ import kotlin.math.abs
 /**
  * '그 무렵 바뀐 것' 기록 — 15분 표본·부팅 표본을 남길 때 지난번 뒤에 바뀐 것을 표본 note 로 ([ChangeNote]):
  * 워치 소프트웨어(빌드)·앱(설치·업데이트·지움)·시계 화면·사용자가 바꾼 설정(AOD·손목 올림·터치로 켜기·'Hey Google'·위치).
- *  · 처음 볼 땐 기억만 하고 '적기 시작' 표시(`on=1`)를 남긴다 — 그 앞의 변화는 '없음'이 아니라 '모름'.
+ *  · 처음 볼 땐 기억만 하고 '적기 시작' 표시(`on=1`)를 남긴다 — 그 앞의 변화는 '없음'이 아니라 '모름'. 기록은 30일만 남으므로
+ *    표시는 2주마다 다시 남긴다.
  *  · 앱: [PackageManager.getChangedPackages] 는 구성 요소를 켜고 끄기만 해도(Play 서비스가 자주 함) 알리므로, 지난번 뒤에
  *    실제로 깔리거나 업데이트된 것(lastUpdateTime)과 지워진 것만. 이 앱 자신은 뺀다(자주 업데이트되고, 소모는 '앱별 소모'에 보인다).
  *    순번은 부팅마다 0부터라 부팅 횟수(Settings.Global.BOOT_COUNT)로 부팅을 가린다.
@@ -30,6 +31,10 @@ import kotlin.math.abs
  */
 object ChangeWatcher {
     private const val P_SINCE = "cw_since"
+    /** 마지막으로 '적기 시작' 표시를 남긴 때 */
+    private const val P_MARK = "cw_mark"
+    /** 이미 적은 앱 업데이트 ("패키지@업데이트 시각" 을 ';' 로) — 같은 업데이트를 두 번 적지 않게 */
+    private const val P_REPORTED = "cw_rep"
     private const val P_LAST = "cw_last"
     private const val P_FW = "cw_fw"
     private const val P_SEQ = "cw_seq"
@@ -38,6 +43,13 @@ object ChangeWatcher {
     private const val P_SET = "cw_set_"
     /** 한 표본에 적는 앱 수 (나머지는 '앱 N개 더') */
     const val MAX_APPS = 8
+    /**
+     * '적기 시작' 표시를 다시 남기는 간격 — 기록은 30일만 남으므로 처음 표시가 정리돼도 더 늦은 표시가 남아
+     * 그 뒤의 꺾임이 '모름'이 되지 않게 ([ChangeNote.trackedSince] 는 기록에 남은 가장 이른 표시)
+     */
+    const val MARK_EVERY_MS = 14 * 24 * 3_600_000L
+    /** 기억해 둘 적은 업데이트 수 */
+    private const val MAX_REPORTED = 40
     /** 부팅 횟수를 못 읽는 기기: 부팅 시각이 이만큼 넘게 다르면 다른 부팅 */
     private const val BOOT_SLACK_MS = 5 * 60_000L
     /** 지난번 뒤에 업데이트됐나를 볼 때의 여유 */
@@ -83,9 +95,11 @@ object ChangeWatcher {
         val edit = prefs.edit()
         val items = ArrayList<ChangeNote.Item>()
         fun part(name: String, block: () -> Unit) = runCatching(block).onFailure { ErrorLog.record("배터리·변화", "$name: ${it.javaClass.simpleName}") }
-        if (!prefs.contains(P_SINCE)) {
+        if (!prefs.contains(P_SINCE)) edit.putLong(P_SINCE, now)
+        val mark = prefs.getLong(P_MARK, Long.MIN_VALUE)
+        if (mark == Long.MIN_VALUE || now - mark >= MARK_EVERY_MS || now < mark) {
             items += ChangeNote.Item(ChangeKind.TRACKING, "on")
-            edit.putLong(P_SINCE, now)
+            edit.putLong(P_MARK, now)
         }
         part("소프트웨어") { firmware(prefs, edit)?.let { items += it } }
         part("앱") { items += apps(c, prefs, edit, now) }
@@ -118,7 +132,8 @@ object ChangeWatcher {
     private fun sameBoot(c: Context, prefs: SharedPreferences, edit: SharedPreferences.Editor, now: Long): Boolean {
         val count = bootCount(c)
         val cur = if (count != null) "n$count" else "t${bootTime(now)}"
-        val old = prefs.getString(P_BOOT, null)
+        // 예전 빌드가 숫자로 남긴 표시는 모르는 것으로 (읽다 넘어져 앱 변화 기록이 멈추지 않게)
+        val old = prefs.all[P_BOOT] as? String
         val same = when {
             old == null -> false
             count != null -> old == cur
@@ -131,7 +146,7 @@ object ChangeWatcher {
     }
 
     private fun apps(c: Context, prefs: SharedPreferences, edit: SharedPreferences.Editor, now: Long): List<ChangeNote.Item> {
-        val known = prefs.contains(P_BOOT)
+        val known = prefs.all[P_BOOT] is String
         // 바뀐 앱 순번은 부팅마다 0부터 다시 센다
         val seq = if (sameBoot(c, prefs, edit, now)) prefs.getInt(P_SEQ, 0) else 0
         val res = changedPackages(c, seq)
@@ -139,17 +154,23 @@ object ChangeWatcher {
         if (!known || res == null) return emptyList()   // 처음엔 기준만
         val lastLook = prefs.getLong(P_LAST, 0L)
         val pm = c.packageManager
+        val reported = prefs.getString(P_REPORTED, null).orEmpty().split(';').filter { it.isNotEmpty() }.toMutableList()
         val entries = res.second.distinct().filter { it != c.packageName }.mapNotNull { pkg ->
             val info = runCatching { pm.getPackageInfo(pkg, PackageManager.MATCH_DISABLED_COMPONENTS) }.getOrNull()
                 ?: return@mapNotNull AppEntry(pkg, "-", system = false)   // 지워짐
             // 구성 요소를 켜고 끈 것뿐(업데이트 시각 그대로)이면 바뀐 것이 아니다
             if (info.lastUpdateTime < lastLook - LOOK_SLACK_MS) return@mapNotNull null
+            // 지난번 바로 앞(여유 60초 안)의 업데이트를 이미 적었으면 다시 적지 않는다
+            val key = "$pkg@${info.lastUpdateTime}"
+            if (key in reported) return@mapNotNull null
+            reported += key
             val ver = info.versionName?.trim()?.substringBefore(' ')?.takeIf { it.isNotEmpty() } ?: info.longVersionCode.toString()
             // 처음 깔린 때 = 마지막 업데이트 때 → 새로 깖
             val fresh = info.firstInstallTime > 0 && abs(info.lastUpdateTime - info.firstInstallTime) < 60_000L
             AppEntry(pkg, if (fresh) "+$ver" else ver, system = ((info.applicationInfo?.flags ?: 0) and ApplicationInfo.FLAG_SYSTEM) != 0)
         }
         // Play 서비스·Samsung Health → 사용자 앱 → 시스템 앱
+        edit.putString(P_REPORTED, reported.takeLast(MAX_REPORTED).joinToString(";"))
         val sorted = entries.sortedBy { e -> if (e.pkg == ChangeFinder.GMS || e.pkg == ChangeFinder.SHEALTH) 0 else if (!e.system) 1 else 2 }
         val shown = sorted.take(MAX_APPS).map { ChangeNote.Item(ChangeKind.APP, it.pkg, to = it.version) }
         val more = sorted.size - shown.size
