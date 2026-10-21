@@ -99,6 +99,24 @@ class HtmlReportTest {
         assertTrue(html.contains("[알려진 문제] Google Play 서비스 과소모 &lt;b&gt;CPU&lt;/b&gt;"))
     }
 
+    /** 설정 점검: Wear 의 화면 켜기 설정과, 이 워치에 있는 화면 켜기·AOD·절전 관련 키 전부(삼성 키 이름 확인용) */
+    @Test
+    fun settingsCheckListsWakeKeysAndEveryRelatedKeyOnThisWatch() {
+        val f = Facts(settings = mapOf(
+            "global" to mapOf("ambient_tilt_to_wake" to "1", "hotword_detection_enabled" to "1", "wifi_on" to "1", "samsung_aod_style" to "2"),
+            "system" to mapOf("aod_mode" to "1", "screen_brightness" to "120"),
+        ))
+        val html = HtmlReport.render(f, emptyList(), DoctorVerdict(Cause.NORMAL, "낮음", "h", emptyList(), listOf("1", "2", "3"), emptyList()), emptyMap(), zone)
+        val section = Regex("<h2>설정 점검.*?</section>", RegexOption.DOT_MATCHES_ALL).find(html)!!.value
+        assertTrue(section.contains("손목 올려 화면 켜기"))
+        assertTrue(section.contains("global/ambient_tilt_to_wake"))
+        assertTrue(section.contains("Hey Google"))
+        assertTrue(section.contains("화면 켜기·AOD·절전 관련 키"))
+        assertTrue(section.contains("global/samsung_aod_style=2"))
+        assertTrue(section.contains("system/aod_mode=1"))
+        assertFalse(section.contains("screen_brightness=120"))
+    }
+
     @Test
     fun escapesHtmlAndShowsSources() {
         val f = Facts(model = "SM-L350 <test> & co")

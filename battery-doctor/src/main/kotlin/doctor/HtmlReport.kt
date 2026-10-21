@@ -185,6 +185,12 @@ object HtmlReport {
             Check("global", "wifi_on", "", "Wi-Fi"),
             Check("global", "bluetooth_on", "", "블루투스"),
             Check("secure", "ambient_enabled", "", "AOD(ambient)"),
+            Check("global", "ambient_enabled", "", "AOD(ambient, Wear 전역)"),
+            Check("global", "ambient_tilt_to_wake", "", "손목 올려 화면 켜기(1=켬)"),
+            Check("global", "ambient_touch_to_wake", "", "화면 터치로 켜기(1=켬)"),
+            Check("global", "hotword_detection_enabled", "", "'Hey Google' 음성 호출(1=켬)"),
+            Check("global", "battery_saver_mode", "", "Wear 절전 방식(0 없음·1 가볍게·2 시계만·3 시간만·4 제조사)"),
+            Check("global", "bedtime_mode", "", "취침 모드(1=켬)"),
             Check("secure", "location_mode", "", "위치 모드"),
             Check("system", "screen_off_timeout", "", "화면 자동 꺼짐(ms)"),
             Check("system", "screen_brightness_mode", "", "자동 밝기(1=켬)"),
@@ -201,6 +207,13 @@ object HtmlReport {
             sb.append("<tr><td>${esc(c.meaning)}</td><td><code>${esc(c.ns)}/${esc(c.key)}</code></td><td>${esc(v ?: "-")}</td><td class=\"${if (judge.startsWith("위험")) "bad" else ""}\">${esc(judge)}</td></tr>")
         }
         sb.append("</table>")
+        // 삼성 워치는 제 이름의 키를 더 쓸 수 있다 — 화면 켜기·AOD·절전에 관한 키를 모두 보여 줘 실제 이름을 확인하게
+        val related = f.settings.flatMap { (ns, m) -> m.filterKeys { RELATED_KEY.containsMatchIn(it) }.map { "$ns/${it.key}=${it.value}" } }.sorted()
+        if (related.isNotEmpty()) {
+            sb.append("<details><summary>이 워치의 화면 켜기·AOD·절전 관련 키 ${related.size}개</summary><pre class=\"raw\">")
+            sb.append(esc(related.take(80).joinToString("\n")))
+            sb.append("</pre></details>")
+        }
         f.idle?.userWhitelist?.takeIf { it.isNotEmpty() }?.let { sb.append("<p>Doze 예외(사용자 추가): ${it.joinToString(", ") { p -> "<code>${esc(p)}</code>" }} — 배터리 최적화에서 빠진 앱들입니다.</p>") }
     }
 
@@ -297,6 +310,9 @@ object HtmlReport {
     private fun fmt1(x: Double) = String.format(Locale.US, "%.1f", x)
     private fun pct(x: Double) = String.format(Locale.US, "%.1f", x)
     private val stampFmt = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
+
+    /** 화면 켜기·AOD·절전에 관한 설정 키 이름 (삼성 고유 키 찾기용) */
+    private val RELATED_KEY = Regex("aod|ambient|always_on|wake|tilt|wrist|raise|gesture|hotword|bedtime|power_sav|battery_saver|low_power|doze", RegexOption.IGNORE_CASE)
     private fun stamp(t: Long, zone: ZoneId) = Instant.ofEpochMilli(t).atZone(zone).format(stampFmt)
 
     private const val CSS = """

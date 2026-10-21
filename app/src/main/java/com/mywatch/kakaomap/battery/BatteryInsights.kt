@@ -34,6 +34,8 @@ data class Insights(
     val wakes: WakeStats? = null,
     /** 밤사이 뒤에서 쓴 앱 (앱별 통계가 있을 때) */
     val night: NightReport? = null,
+    /** 레버 점검 한 줄 ([Levers.checkLine]) — 요약 파일에 */
+    val levers: String? = null,
 )
 
 object BatteryInsights {
@@ -53,6 +55,7 @@ object BatteryInsights {
         val issues = KnownIssues.detect(culprits)
         val effect = runCatching { LeverEffects.nightMode(samples, GuardianJournal(c).nightSessions(now), now, zone) }
             .getOrDefault(LeverEffect(emptyList(), emptyList()))
-        return Insights(analysis, breakdown, culprits, issues, effect, wakes, night)
+        val levers = runCatching { Levers(c).checkLine(Guardian.state(c).saverBroken) }.getOrNull()
+        return Insights(analysis, breakdown, culprits, issues, effect, wakes, night, levers)
     }
 }

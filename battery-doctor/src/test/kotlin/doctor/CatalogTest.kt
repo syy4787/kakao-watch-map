@@ -136,6 +136,28 @@ class CatalogTest {
         assertNull(reset.undo(null))
     }
 
+    /** 손목 올림·터치로 켜기·'Hey Google' — 키가 있고 켜져 있을 때만. 손목 올림은 워치 앱이 센 '알림 없이 금방 꺼진 화면'이 많으면 추천 */
+    @Test
+    fun wakeGestureAndHotwordLevers() {
+        val g = mapOf("ambient_tilt_to_wake" to "1", "ambient_touch_to_wake" to "1", "hotword_detection_enabled" to "1")
+        val f = Facts(settings = mapOf("global" to g))
+        val levers = Catalog.levers(f, emptyList())
+        val tilt = levers.id("tilt-wake-off")!!
+        assertEquals(Tier.CAUTION, tilt.tier)
+        assertFalse(tilt.recommended)
+        assertEquals(listOf(listOf("shell", "settings", "put", "global", "ambient_tilt_to_wake", "0")), tilt.apply)
+        assertEquals(listOf(listOf("shell", "settings", "put", "global", "ambient_tilt_to_wake", "1")), tilt.undo("1"))
+        assertEquals(listOf(listOf("shell", "settings", "put", "global", "ambient_touch_to_wake", "0")), levers.id("touch-wake-off")!!.apply)
+        assertEquals(listOf(listOf("shell", "settings", "put", "global", "hotword_detection_enabled", "0")), levers.id("hotword-off")!!.apply)
+        assertFalse(levers.id("hotword-off")!!.recommended)
+        // 이미 꺼져 있거나 키가 없으면 항목 없음
+        assertNull(Catalog.levers(Facts(settings = mapOf("global" to mapOf("ambient_tilt_to_wake" to "0"))), emptyList()).id("tilt-wake-off"))
+        assertNull(Catalog.levers(Facts(), emptyList()).id("tilt-wake-off"))
+        // 워치 앱 요약의 지표: 알림 없이 5초 안에 꺼진 화면 120번 → 추천
+        val busy = f.copy(watchMetrics = mapOf("gesture_wakes" to 120.0))
+        assertTrue(Catalog.levers(busy, emptyList()).id("tilt-wake-off")!!.recommended)
+    }
+
     @Test
     fun readStateUsesAdb() {
         val (_, levers) = sampleLevers()

@@ -191,11 +191,17 @@ class BatteryActivity : ComponentActivity() {
         fun toggle(id: String, on: Boolean, label: String) = Row.Action(id, if (on) R.drawable.ic_check else R.drawable.ic_close, "$label · ${if (on) "켜짐" else "꺼짐"}", accent = on)
         rows += toggle("$A_TOGGLE${T_NIGHT_SAVER}", cfg.nightSaver, "밤(00~07시) 절전 모드")
         rows += toggle("$A_TOGGLE${T_NIGHT_AOD}", cfg.nightAodOff, "밤에 AOD 끄기" + (if (levers.aodKey == null && levers.canWriteSecure) " (이 워치엔 키 없음)" else ""))
+        val missing = " (이 워치엔 키 없음)"
+        rows += toggle("$A_TOGGLE${T_NIGHT_WAKE}", cfg.nightWakeOff, "밤에 손목 올림·터치로 켜기 끄기" +
+            (if (levers.tiltKey == null && levers.touchKey == null && levers.canWriteSecure) missing else ""))
+        rows += toggle("$A_TOGGLE${T_NIGHT_HOTWORD}", cfg.nightHotwordOff, "밤에 'Hey Google' 끄기" +
+            (if (levers.hotwordKey == null && levers.canWriteSecure) missing else ""))
         rows += toggle("$A_TOGGLE${T_NIGHT_LOCATION}", cfg.nightLocationOff, "밤에 위치 끄기")
         rows += toggle("$A_TOGGLE${T_NIGHT_SYNC}", cfg.nightSyncOff, "밤에 계정 동기화 끄기")
         rows += toggle("$A_TOGGLE${T_ABNORMAL}", cfg.abnormalSaver, "비정상 소모면 바로 절전")
         rows += toggle("$A_TOGGLE${T_REMINDER}", cfg.chargeReminder, "잠자기 전 충전 알림")
-        rows += Row.Note("밤 모드는 화면이 30분 넘게 꺼져 있을 때만 시작하고, 절전을 손수 끄면 12시간 쉽니다")
+        rows += Row.Note("밤 모드는 화면이 30분 넘게 꺼져 있을 때만 시작하고, 절전을 손수 끄면 12시간 쉽니다. 밤에도 버튼으로는 화면이 켜집니다")
+        rows += Row.Note("레버 점검: " + levers.check(st.saverBroken).joinToString(" · ") { "${it.label} ${if (it.usable) "✓" else "✗"}(${it.state})" })
         insights?.nightEffect?.let { e ->
             rows += Row.Note(e.headline?.let { "효과: $it" }
                 ?: "효과: 비교할 밤이 아직 모자람 (켠 밤 ${e.with.size} · 안 켠 밤 ${e.without.size} — 각 2밤 이상이면 밤 소모가 얼마나 줄었는지 보여 줍니다)")
@@ -345,6 +351,8 @@ class BatteryActivity : ComponentActivity() {
                     T_NIGHT_AOD -> cfg.copy(nightAodOff = !cfg.nightAodOff)
                     T_NIGHT_LOCATION -> cfg.copy(nightLocationOff = !cfg.nightLocationOff)
                     T_NIGHT_SYNC -> cfg.copy(nightSyncOff = !cfg.nightSyncOff)
+                    T_NIGHT_WAKE -> cfg.copy(nightWakeOff = !cfg.nightWakeOff)
+                    T_NIGHT_HOTWORD -> cfg.copy(nightHotwordOff = !cfg.nightHotwordOff)
                     T_ABNORMAL -> cfg.copy(abnormalSaver = !cfg.abnormalSaver)
                     T_REMINDER -> cfg.copy(chargeReminder = !cfg.chargeReminder)
                     else -> cfg
@@ -440,6 +448,8 @@ class BatteryActivity : ComponentActivity() {
         const val T_NIGHT_AOD = "nightAod"
         const val T_NIGHT_LOCATION = "nightLocation"
         const val T_NIGHT_SYNC = "nightSync"
+        const val T_NIGHT_WAKE = "nightWake"
+        const val T_NIGHT_HOTWORD = "nightHotword"
         const val T_ABNORMAL = "abnormal"
         const val T_REMINDER = "reminder"
         val MODES = listOf("비행기 모드", "절전 모드", "시계만 사용", "평소대로")

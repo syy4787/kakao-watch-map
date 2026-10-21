@@ -75,6 +75,8 @@ data class Facts(
     val watchSamples: List<BatterySample> = emptyList(),
     /** 워치 앱이 쓴 요약 글 (사용 내역·알려진 문제·밤사이 범인) */
     val watchSummary: String? = null,
+    /** 그 요약의 '[지표]' 줄 (idle_pph, gesture_wakes …) — SummaryMetrics */
+    val watchMetrics: Map<String, Double> = emptyMap(),
     val collectedAt: Long? = null,
     /** 수집에 실패한 항목 이름 */
     val missing: List<String> = emptyList(),

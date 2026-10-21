@@ -53,6 +53,35 @@ class GuardianRulesTest {
         assertEquals(listOf<GuardianAction>(GuardianAction.NightOff), a4)
     }
 
+    /** 15분 표본이 놓친 아침 화면 켜짐도 사용 통계(화면이 꺼져 있던 시간)로 보이면 일어난 것 — 한밤중 잠깐 본 것은 그대로 */
+    @Test
+    fun aMorningGlanceSeenOnlyByUsageStatsEndsTheNight() {
+        val active = GuardianState(nightActive = true)
+        val quiet = drain(at(6, 10), 8, 50.0, 1.0)   // 표본은 전부 화면 꺼짐
+        val (a1, s1) = GuardianRules.decide(at(6, 10), zone, cfg, active, quiet, null, true, screenOffMs = 5 * 60_000L)
+        assertEquals(listOf<GuardianAction>(GuardianAction.NightOff), a1)
+        assertFalse(s1.nightActive)
+        val (a2, _) = GuardianRules.decide(at(3, 0), zone, cfg, active, drain(at(3, 0), 8, 50.0, 1.0), null, true, screenOffMs = 5 * 60_000L)
+        assertTrue(a2.isEmpty())
+        // 아침이어도 화면이 한참 꺼져 있었으면 07시까지 그대로
+        val (a3, _) = GuardianRules.decide(at(6, 10), zone, cfg, active, quiet, null, true, screenOffMs = 3 * 3_600_000L)
+        assertTrue(a3.isEmpty())
+    }
+
+    /** 손목 올림·터치로 켜기 끄기는 기본으로 밤 모드에 들고, 'Hey Google' 끄기는 고른 사람만 — 둘 다 그것만으로도 밤 모드를 연다 */
+    @Test
+    fun wakeGestureAndHotwordLeversAreNightWorkOnTheirOwn() {
+        val d = GuardianConfig()
+        assertTrue(d.nightWakeOff)
+        assertFalse(d.nightHotwordOff)
+        val only = GuardianConfig(nightSaver = false, nightAodOff = false, nightWakeOff = true)
+        assertTrue(only.anyNight)
+        val (a, _) = GuardianRules.decide(at(0, 30), zone, only, GuardianState(), drain(at(0, 30), 8, 60.0, 2.0), null, saverOnNow = false)
+        assertEquals(listOf<GuardianAction>(GuardianAction.NightOn), a)
+        assertTrue(GuardianConfig(nightSaver = false, nightAodOff = false, nightWakeOff = false, nightHotwordOff = true).anyNight)
+        assertFalse(GuardianConfig(nightSaver = false, nightAodOff = false, nightWakeOff = false).anyNight)
+    }
+
     @Test
     fun whenTheUserTurnsSaverOffWeBackOffForTwelveHours() {
         val now = at(1, 0)

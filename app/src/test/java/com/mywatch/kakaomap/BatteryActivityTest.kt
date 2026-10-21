@@ -160,6 +160,15 @@ class BatteryActivityTest {
         assertTrue(rows(adapter).filterIsInstance<Row.Action>().any { it.id == BatteryActivity.A_TOGGLE + BatteryActivity.T_NIGHT_SAVER && it.text.endsWith("꺼짐") })
         click(a, adapter, BatteryActivity.A_TOGGLE + BatteryActivity.T_NIGHT_LOCATION)
         assertTrue(com.mywatch.kakaomap.battery.Guardian.config(context).nightLocationOff)
+        // 손목 올림·터치로 켜기 끄기(기본 켬)와 'Hey Google' 끄기(기본 끔)
+        assertTrue(com.mywatch.kakaomap.battery.Guardian.config(context).nightWakeOff)
+        click(a, adapter, BatteryActivity.A_TOGGLE + BatteryActivity.T_NIGHT_WAKE)
+        assertFalse(com.mywatch.kakaomap.battery.Guardian.config(context).nightWakeOff)
+        click(a, adapter, BatteryActivity.A_TOGGLE + BatteryActivity.T_NIGHT_HOTWORD)
+        assertTrue(com.mywatch.kakaomap.battery.Guardian.config(context).nightHotwordOff)
+        // 레버 점검: 무엇이 이 워치에서 듣는지 (권한 없을 땐 '권한 필요')
+        val check = rows(adapter).filterIsInstance<Row.Note>().first { it.text.startsWith("레버 점검") }
+        assertTrue(check.text, check.text.contains("권한 필요"))
     }
 
     /** 사용 정보 접근은 PC 없이 워치 설정에서 허용할 수 있게 그 화면을 연다 */

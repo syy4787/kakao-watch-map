@@ -30,7 +30,8 @@ import java.time.ZoneId
 
 /**
  * 배터리 지킴이: 15분 표본마다 [GuardianRules] 가 정한 대로 레버([Levers])를 당기고 알린다.
- *  · 밤(00~07시)에 화면이 30분 넘게 꺼져 있으면 절전 모드·AOD 끔(설정에 따라 위치·동기화도) → 아침·충전·기상 때 원래대로
+ *  · 밤(00~07시)에 화면이 30분 넘게 꺼져 있으면 절전 모드·AOD·손목 올림/터치로 켜기 끔(설정에 따라 'Hey Google'·위치·동기화도)
+ *    → 아침·충전·기상 때 원래대로
  *  · 화면 꺼진 채 시간당 5% 넘게 새면 바로 절전 모드 + 범인 앱 알림(앱 정보로 바로 가기, 되돌리기)
  *  · 잠자기 전 아침까지 못 버틸 것 같으면 "N분 충전" 알림
  * 권한(WRITE_SECURE_SETTINGS)이 없으면 설정은 건드리지 않고 알림만 한다. 사용자가 절전을 손수 끄면 12시간 물러난다.
@@ -54,6 +55,8 @@ object Guardian {
     private const val K_NIGHT_AOD = "g_night_aod"
     private const val K_NIGHT_LOCATION = "g_night_location"
     private const val K_NIGHT_SYNC = "g_night_sync"
+    private const val K_NIGHT_WAKE = "g_night_wake"
+    private const val K_NIGHT_HOTWORD = "g_night_hotword"
     private const val K_ABNORMAL = "g_abnormal"
     private const val K_REMINDER = "g_reminder"
     private const val K_S_NIGHT = "gs_night"
@@ -83,6 +86,7 @@ object Guardian {
         GuardianConfig(
             nightSaver = p.getBoolean(K_NIGHT_SAVER, true), nightAodOff = p.getBoolean(K_NIGHT_AOD, true),
             nightLocationOff = p.getBoolean(K_NIGHT_LOCATION, false), nightSyncOff = p.getBoolean(K_NIGHT_SYNC, false),
+            nightWakeOff = p.getBoolean(K_NIGHT_WAKE, true), nightHotwordOff = p.getBoolean(K_NIGHT_HOTWORD, false),
             abnormalSaver = p.getBoolean(K_ABNORMAL, true), chargeReminder = p.getBoolean(K_REMINDER, true),
         )
     }
@@ -90,6 +94,7 @@ object Guardian {
     fun saveConfig(c: Context, cfg: GuardianConfig) = prefs(c).edit()
         .putBoolean(K_NIGHT_SAVER, cfg.nightSaver).putBoolean(K_NIGHT_AOD, cfg.nightAodOff)
         .putBoolean(K_NIGHT_LOCATION, cfg.nightLocationOff).putBoolean(K_NIGHT_SYNC, cfg.nightSyncOff)
+        .putBoolean(K_NIGHT_WAKE, cfg.nightWakeOff).putBoolean(K_NIGHT_HOTWORD, cfg.nightHotwordOff)
         .putBoolean(K_ABNORMAL, cfg.abnormalSaver).putBoolean(K_REMINDER, cfg.chargeReminder).apply()
 
     fun state(c: Context): GuardianState = prefs(c).let { p ->

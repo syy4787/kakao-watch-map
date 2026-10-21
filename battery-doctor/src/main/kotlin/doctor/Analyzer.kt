@@ -63,6 +63,7 @@ object Analyzer {
             watch = watch,
             watchSamples = samples,
             watchSummary = snapshot.watchSummary,
+            watchMetrics = com.mywatch.battery.core.SummaryMetrics.parse(snapshot.watchSummary),
             collectedAt = snapshot.time,
             missing = snapshot.failed(),
             snapshotDir = snapshot.dir.path,

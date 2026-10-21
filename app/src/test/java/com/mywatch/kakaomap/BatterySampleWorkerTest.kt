@@ -124,9 +124,18 @@ class BatterySampleWorkerTest {
     @Test
     fun aDailySummaryIsWrittenOnce() {
         context.getSharedPreferences(BatteryLog.PREFS, Context.MODE_PRIVATE).edit().clear().commit()
+        // 3시간치 기록 (시간당 2%)
+        val now = System.currentTimeMillis()
+        val q = 15 * 60_000L
+        for (i in 0..12) log.append(com.mywatch.battery.core.BatterySample(t = now - (13 - i) * q, level = 63 - i / 2, interactive = false))
         TestWorkerBuilder<BatterySampleWorker>(context, Executors.newSingleThreadExecutor()).build().doWork()
         assertTrue(log.summaryFile.exists())
         assertTrue(log.summaryFile.readText().contains("[판정]"))
+        // 이 워치에서 어느 레버가 듣는지 (PC 툴킷이 수집해 보고서에 싣는다)
+        assertTrue(log.summaryFile.readText().contains("[레버 점검] perm="))
+        // PC 툴킷이 읽는 숫자 한 줄
+        val metrics = com.mywatch.battery.core.SummaryMetrics.parse(log.summaryFile.readText())
+        assertTrue(metrics.toString(), metrics.containsKey("day_pph"))
         val first = log.summaryFile.lastModified()
         log.summaryFile.writeText("손대지 않음")
         TestWorkerBuilder<BatterySampleWorker>(context, Executors.newSingleThreadExecutor()).build().doWork()

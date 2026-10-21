@@ -14,6 +14,10 @@ data class GuardianConfig(
     val nightLocationOff: Boolean = false,
     /** 밤에 계정 자동 동기화 끄기 */
     val nightSyncOff: Boolean = false,
+    /** 밤에 손목 올림·화면 터치로 켜지는 것 끄기 (버튼으로는 켜진다 — 삼성 취침 모드와 같은 묶음) */
+    val nightWakeOff: Boolean = true,
+    /** 밤에 'Hey Google' 음성 호출 끄기 (고른 사람만) */
+    val nightHotwordOff: Boolean = false,
     /** 화면 꺼진 채 시간당 5% 넘게 새면 바로 절전 모드 */
     val abnormalSaver: Boolean = true,
     /** 잠자기 전, 아침까지 못 버틸 것 같으면 충전 알림 */
@@ -24,7 +28,7 @@ data class GuardianConfig(
     /** 충전 알림을 보는 시각 */
     val reminderMin: Int = 22 * 60 + 30,
 ) {
-    val anyNight: Boolean get() = nightSaver || nightAodOff || nightLocationOff || nightSyncOff
+    val anyNight: Boolean get() = nightSaver || nightAodOff || nightLocationOff || nightSyncOff || nightWakeOff || nightHotwordOff
 }
 
 /** 지킴이가 지금 무엇을 해 두었는지 — 되돌릴 때 필요 */
@@ -62,6 +66,8 @@ sealed class GuardianAction {
  */
 object GuardianRules {
     const val SCREEN_OFF_BEFORE_NIGHT_MS = 30L * 60_000L
+    /** 화면이 꺼진 지 이보다 짧으면 '방금 봤다' (표본 간격) */
+    const val WAKE_SEEN_MS = 15L * 60_000L
     const val USER_OVERRIDE_MS = 12L * 3_600_000L
     /** 절전을 켠 뒤 이만큼 지나도 시스템이 '절전 중'이 아니면 이 워치에선 안 되는 것 */
     const val SAVER_CONFIRM_MS = 35L * 60_000L
@@ -120,7 +126,9 @@ object GuardianRules {
 
         // 2. 밤 모드
         if (s.nightActive) {
-            val wakingUp = latest?.interactive == true && minutesUntil(minuteOfDay, cfg.nightEndMin) <= 120
+            // 아침 2시간 안에 화면을 봤다 = 일어났다. 15분 표본이 놓친 짧은 켜짐도 사용 통계(화면 꺼진 시간)로 안다
+            val lookedJustNow = latest?.interactive == true || (screenOffMs != null && screenOffMs < WAKE_SEEN_MS)
+            val wakingUp = lookedJustNow && minutesUntil(minuteOfDay, cfg.nightEndMin) <= 120
             if (!inNight || charging || wakingUp) {
                 actions += GuardianAction.NightOff
                 s = s.copy(nightActive = false, saverSeenOn = false)

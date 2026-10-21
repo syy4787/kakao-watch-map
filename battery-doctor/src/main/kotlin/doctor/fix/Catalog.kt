@@ -116,6 +116,23 @@ object Catalog {
                 undo = { b -> listOf(if (b == null || b == "null") listOf("shell", "settings", "delete", ns, "ambient_enabled") else listOf("shell", "settings", "put", ns, "ambient_enabled", b)) })
         }
 
+        // 화면 켜기 제스처·음성 호출 (Wear OS 설정 키 — 켜져 있을 때만). 손목 올림은 워치 앱이 센 '알림 없이 금방 꺼진 화면'이 많으면 추천
+        val gestureWakes = f.watchMetrics["gesture_wakes"]
+        global["ambient_tilt_to_wake"]?.takeIf { it.trim() == "1" }?.let {
+            out += wearSetting("tilt-wake-off", "ambient_tilt_to_wake", "손목 올려 화면 켜기 끄기",
+                "global/ambient_tilt_to_wake 를 0 으로 — 손목을 들어도 화면이 저절로 켜지지 않습니다(버튼·터치로 켬)." +
+                    (gestureWakes?.let { g -> " 워치 앱 기록: 알림 없이 5초 안에 꺼진 화면 하루 ${g.toInt()}번" } ?: ""),
+                recommended = gestureWakes != null && gestureWakes >= com.mywatch.battery.core.Wakes.GESTURE_ADVICE)
+        }
+        global["ambient_touch_to_wake"]?.takeIf { it.trim() == "1" }?.let {
+            out += wearSetting("touch-wake-off", "ambient_touch_to_wake", "화면 터치로 켜기 끄기",
+                "global/ambient_touch_to_wake 를 0 으로 — 옷·이불에 닿아 화면이 켜지는 것을 막습니다(버튼으로 켬)", recommended = false)
+        }
+        global["hotword_detection_enabled"]?.takeIf { it.trim() == "1" }?.let {
+            out += wearSetting("hotword-off", "hotword_detection_enabled", "'Hey Google' 음성 호출 끄기",
+                "global/hotword_detection_enabled 를 0 으로 — 늘 듣고 있는 음성 호출을 끕니다(버튼 길게 눌러 부르기는 그대로). 삼성 공식 절약 팁", recommended = false)
+        }
+
         // ── 강함 ──
         if (known(GMS)) out += Lever("gms-rollback", "Google Play 서비스 업데이트 제거(공장 버전으로)", "pm uninstall-system-updates — 2026년 Play 서비스 과소모의 최후 수단. Play 스토어가 다시 올릴 수 있으니 워치 Play 스토어의 자동 업데이트를 끄세요. 되돌리기 = Play 스토어에서 업데이트", Tier.STRONG, listOf(GMS),
             readState = { adb -> GmsPackage.versionName(adb.run(listOf("shell", "dumpsys", "package", GMS), 60).out) },
@@ -160,6 +177,15 @@ object Catalog {
     }
 
     // ── 조치 생성기 ──
+
+    /** Wear OS 설정 키(global) 하나를 0 으로 — 주의 등급, 되돌리기는 원래 값 */
+    private fun wearSetting(id: String, key: String, title: String, detail: String, recommended: Boolean) = Lever(
+        id, title, detail, Tier.CAUTION,
+        readState = { it.settingsGet("global", key) },
+        apply = listOf(listOf("shell", "settings", "put", "global", key, "0")),
+        undo = { b -> listOf(if (b == null || b == "null") listOf("shell", "settings", "delete", "global", key) else listOf("shell", "settings", "put", "global", key, b)) },
+        recommended = recommended,
+    )
 
     private fun setting(id: String, ns: String, key: String, value: String, title: String, detail: String, recommended: Boolean) = Lever(
         id, title, detail, Tier.SAFE,

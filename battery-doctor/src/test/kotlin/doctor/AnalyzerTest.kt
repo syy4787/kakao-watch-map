@@ -338,6 +338,17 @@ class AnalyzerTest {
         assertEquals(sev.sortedDescending(), sev)
     }
 
+    /** 워치 앱 요약의 '[지표]' 줄을 숫자로 읽는다 (없으면 빈 지도) */
+    @Test
+    fun watchMetricsComeFromTheWatchSummary() {
+        val snap = sampleSnapshot(tmp.root)
+        assertEquals(emptyMap<String, Double>(), Analyzer.facts(snap, zone).watchMetrics)
+        java.io.File(snap.dir, "watch_summary.txt").writeText("갤럭시워치 배터리 기록 요약\n[지표] idle_pph=1.8 gesture_wakes=120\n", Charsets.UTF_8)
+        val f = Analyzer.facts(snap, zone)
+        assertEquals(1.8, f.watchMetrics["idle_pph"]!!, 1e-9)
+        assertEquals(120.0, f.watchMetrics["gesture_wakes"]!!, 1e-9)
+    }
+
     @Test
     fun missingFilesAreReportedNotFatal() {
         val snap = sampleSnapshot(tmp.root, except = setOf("batterystats", "batterystats_checkin", "watch_log.csv", "battery"))

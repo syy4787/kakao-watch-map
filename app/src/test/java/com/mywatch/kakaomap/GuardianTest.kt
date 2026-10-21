@@ -235,6 +235,78 @@ class GuardianTest {
         assertEquals("com.example.x 외 2", HealthStore.label(context, "com.example.x+2"))
     }
 
+    /** 밤 모드: 손목 올림·화면 터치로 켜지는 것도 끄고(이 워치에 그 설정이 있을 때) 아침에 원래대로. 'Hey Google' 은 기본으로 그대로 */
+    @Test
+    fun nightTurnsWakeGesturesOffAndMorningRestoresThem() {
+        grant()
+        Settings.Global.putString(cr, "ambient_tilt_to_wake", "1")
+        Settings.Global.putString(cr, "ambient_touch_to_wake", "1")
+        Settings.Global.putString(cr, "hotword_detection_enabled", "1")
+        fill(at(0, 30), 8, 60.0, 2.0)
+        Guardian.tick(context, log, at(0, 30), stats = UidStatsSource { emptyMap() }, zone = zone)
+        assertEquals("0", Settings.Global.getString(cr, "ambient_tilt_to_wake"))
+        assertEquals("0", Settings.Global.getString(cr, "ambient_touch_to_wake"))
+        assertEquals("1", Settings.Global.getString(cr, "hotword_detection_enabled"))
+        assertTrue(Guardian.lastAction(context)!!, Guardian.lastAction(context)!!.contains("손목 올림"))
+
+        shadowOf(context.getSystemService(PowerManager::class.java)).setIsPowerSaveMode(true)
+        fill(at(7, 5), 8, 50.0, 1.0)
+        Guardian.tick(context, log, at(7, 5), stats = UidStatsSource { emptyMap() }, zone = zone)
+        assertEquals("1", Settings.Global.getString(cr, "ambient_tilt_to_wake"))
+        assertEquals("1", Settings.Global.getString(cr, "ambient_touch_to_wake"))
+        assertFalse(Levers(context).holdsAnything)
+    }
+
+    /** 'Hey Google' 끄기는 고른 사람만 — 되돌리기로 원래대로 */
+    @Test
+    fun nightHotwordOffIsOptInAndRestored() {
+        grant()
+        Settings.Global.putString(cr, "hotword_detection_enabled", "1")
+        Guardian.saveConfig(context, GuardianConfig(nightHotwordOff = true))
+        assertTrue(Guardian.config(context).nightHotwordOff)
+        fill(at(1, 0), 8, 60.0, 2.0)
+        Guardian.tick(context, log, at(1, 0), stats = UidStatsSource { emptyMap() }, zone = zone)
+        assertEquals("0", Settings.Global.getString(cr, "hotword_detection_enabled"))
+        Guardian.restoreNow(context, at(1, 10))
+        assertEquals("1", Settings.Global.getString(cr, "hotword_detection_enabled"))
+    }
+
+    @Test
+    fun nightHotwordOffComesBackInTheMorning() {
+        grant()
+        Settings.Global.putString(cr, "hotword_detection_enabled", "1")
+        Guardian.saveConfig(context, GuardianConfig(nightHotwordOff = true))
+        fill(at(1, 0), 8, 60.0, 2.0)
+        Guardian.tick(context, log, at(1, 0), stats = UidStatsSource { emptyMap() }, zone = zone)
+        assertEquals("0", Settings.Global.getString(cr, "hotword_detection_enabled"))
+        shadowOf(context.getSystemService(PowerManager::class.java)).setIsPowerSaveMode(true)
+        fill(at(7, 5), 8, 50.0, 1.0)
+        Guardian.tick(context, log, at(7, 5), stats = UidStatsSource { emptyMap() }, zone = zone)
+        assertEquals("1", Settings.Global.getString(cr, "hotword_detection_enabled"))
+        assertTrue(Guardian.lastAction(context)!!, Guardian.lastAction(context)!!.contains("'Hey Google' 복구"))
+    }
+
+    /** 레버 점검: 이 워치에 있는 설정과 권한을 하나씩 보여 준다 (실제 워치에서 어느 레버가 듣는지 확인용) */
+    @Test
+    fun leverCheckShowsWhatThisWatchSupports() {
+        Settings.Global.putString(cr, "ambient_tilt_to_wake", "1")
+        val before = Levers(context).check()
+        assertTrue(before.joinToString { it.toString() }, before.none { it.usable })
+        assertTrue(before.all { it.state.isNotBlank() })
+        grant()
+        val after = Levers(context).check().associateBy { it.id }
+        assertTrue(after.keys.toString(), after.keys.containsAll(listOf("saver", "aod", "tilt", "touch", "hotword", "location", "sync")))
+        assertTrue(after["aod"]!!.usable)
+        assertEquals("global/ambient_enabled", after["aod"]!!.key)
+        assertTrue(after["tilt"]!!.usable)
+        assertFalse(after["touch"]!!.usable)
+        assertEquals("이 워치엔 없음", after["touch"]!!.state)
+        assertTrue(after["sync"]!!.usable)
+        // 요약 파일·PC 툴킷이 읽는 한 줄
+        val line = Levers(context).checkLine()
+        assertTrue(line, line.contains("tilt=global/ambient_tilt_to_wake") && line.contains("touch=-"))
+    }
+
     @Test
     fun leversRememberTheFirstValueOnly() {
         grant()

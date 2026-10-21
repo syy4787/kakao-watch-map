@@ -7,6 +7,7 @@ import com.mywatch.battery.core.GaugeDrift
 import com.mywatch.battery.core.Grade
 import com.mywatch.battery.core.Rate
 import com.mywatch.battery.core.Status
+import com.mywatch.battery.core.SummaryMetrics
 import com.mywatch.battery.core.Thresholds
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -80,6 +81,21 @@ object BatterySummary {
         "'${e.name}' $state · ${span / 60}시간 ${span % 60}분 · ${rateLine(e.rate)} — ${e.grade.label}"
     }
 
+    /** PC 툴킷이 읽는 숫자 한 줄 (조치 추천·치료 전후 비교) — [SummaryMetrics] */
+    fun metricsLine(a: Analysis, insights: Insights?): String = SummaryMetrics.line(linkedMapOf(
+        "idle_pph" to (insights?.breakdown?.idlePph ?: a.idle24.percentPerHour),
+        "day_pph" to a.w24.percentPerHour,
+        "night_pph" to a.overnight?.percentPerHour,
+        "screen_pph" to insights?.breakdown?.screenPph,
+        "screen_share" to insights?.breakdown?.screenShare,
+        "wakes" to insights?.wakes?.wakes?.toDouble(),
+        "short_wakes" to insights?.wakes?.shortWakes?.toDouble(),
+        "gesture_wakes" to insights?.wakes?.gestureLikeWakes?.toDouble(),
+        "notif_wakes" to insights?.wakes?.notificationWakes?.toDouble(),
+        "notifications" to insights?.wakes?.notifications?.toDouble(),
+        "drift" to a.drift?.driftPoints?.toDouble(),
+    ))
+
     /** summary.txt 본문 */
     fun text(a: Analysis, live: BatterySample?, model: String, now: Long = System.currentTimeMillis(), insights: Insights? = null): String = buildString {
         appendLine("갤럭시워치 배터리 기록 요약 — ${time(now)}")
@@ -124,6 +140,8 @@ object BatterySummary {
         val ex = experimentLines(a, now)
         appendLine("[실험] " + if (ex.isEmpty()) "없음" else "")
         ex.forEach { appendLine(" · $it") }
+        insights?.levers?.let { appendLine("[레버 점검] $it") }
+        appendLine(metricsLine(a, insights))
         appendLine()
         appendLine("기록 ${a.samples}개, ${DrainAnalyzer.fmt(a.spanHours)}시간치")
         appendLine("기준: ${Thresholds.SOURCE_IDLE} / ${Thresholds.SOURCE_MIXED}")
