@@ -17,8 +17,12 @@ class ProbeBackoff(private val baseMs: Long = BASE_MS, private val maxMs: Long =
 
     fun found() { misses = 0 }
 
+    /** GPS 확인 결과 — 정확도 [USABLE_M] 이내로 잡혀야 '잡힘' (기지국·Wi-Fi 로 어림한 위치·못 잡음은 '못 잡음') */
+    fun record(accuracyM: Float?) { if (accuracyM != null && accuracyM <= USABLE_M) found() else missed() }
+
     companion object {
         const val BASE_MS = 4 * 60_000L
         const val MAX_MS = 16 * 60_000L
+        const val USABLE_M = 50f
     }
 }

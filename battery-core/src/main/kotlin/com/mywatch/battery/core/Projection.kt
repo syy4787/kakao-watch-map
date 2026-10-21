@@ -17,12 +17,14 @@ data class Forecast(val level: Int, val pph: Double, val at15: Long?, val at0: L
         fun clock(t: Long, zone: ZoneId, now: Long = System.currentTimeMillis()): String {
             val z = Instant.ofEpochMilli(t).atZone(zone)
             val today = Instant.ofEpochMilli(now).atZone(zone).toLocalDate()
-            val day = when (z.toLocalDate()) {
-                today -> ""
-                today.plusDays(1) -> "내일 "
+            val h = z.hour
+            val day = when {
+                z.toLocalDate() == today -> ""
+                // 다음 날 0시대는 말로 '오늘 밤 12시'
+                z.toLocalDate() == today.plusDays(1) && h == 0 -> "오늘 "
+                z.toLocalDate() == today.plusDays(1) -> "내일 "
                 else -> "${z.monthValue}/${z.dayOfMonth} "
             }
-            val h = z.hour
             val ampm = when (h) { 0 -> "밤"; in 1..5 -> "새벽"; in 6..11 -> "오전"; else -> "오후" }
             val h12 = if (h % 12 == 0) 12 else h % 12
             return "$day$ampm $h12:${"%02d".format(z.minute)}"

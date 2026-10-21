@@ -37,4 +37,17 @@ class NavNoticeTest {
         // 글이 그대로면 올리지 않음
         assertFalse(NavNotice.shouldUpdate(changed = false, sinceLastMs = 100_000, interactive = true, important = true))
     }
+    /**
+     * '다음 할 일이 바뀜'(바로 고침)은 안내 글이 아니라 구간·할 일로 정한다 — 안내 글 첫 줄엔 1m 단위 거리('117m 후 좌회전')가 있어
+     * 위치마다 바뀌므로, 그걸로 정하면 화면이 꺼져 있어도 위치마다 알림을 고친다(리뷰에서 찾음)
+     */
+    @Test
+    fun theStepKeyIgnoresTheDistanceInTheGuideText() {
+        val a = com.mywatch.kakaomap.nav.NavState(routeVersion = 1, stepIndex = 2, matched = true, toStepEndM = 117, guide = "117m 후 좌회전", bannerTitle = "좌회전")
+        val b = a.copy(toStepEndM = 112, guide = "112m 후 좌회전")
+        assertEquals(NavNotice.stepKey(a), NavNotice.stepKey(b))
+        assertTrue(NavNotice.stepKey(a) != NavNotice.stepKey(a.copy(stepIndex = 3)))
+        assertTrue(NavNotice.stepKey(a) != NavNotice.stepKey(a.copy(bannerTitle = "우회전")))
+        assertTrue(NavNotice.stepKey(a) != NavNotice.stepKey(a.copy(onRide = true)))
+    }
 }

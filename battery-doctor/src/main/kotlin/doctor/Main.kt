@@ -106,7 +106,7 @@ object Main {
      */
     fun compareWithPrevious(io: Console, dataDir: File, snap: Snapshot, after: Facts, journal: Journal, zone: ZoneId): Comparison? {
         val prev = Collect.before(dataDir, snap) ?: return null
-        val c = runCatching { Compare.of(Analyzer.facts(prev, zone), after, journal.entries()) }.getOrNull() ?: return null
+        val c = runCatching { Compare.of(Analyzer.facts(prev, zone), after, journal.entries(), zone) }.getOrNull() ?: return null
         val fmt = DateTimeFormatter.ofPattern("M/d HH:mm")
         io.println()
         io.println("━━ 지난 수집과 비교 (${Instant.ofEpochMilli(c.beforeAt).atZone(zone).format(fmt)} → ${Instant.ofEpochMilli(c.afterAt).atZone(zone).format(fmt)})" +

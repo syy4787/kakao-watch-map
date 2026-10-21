@@ -29,6 +29,13 @@ object NavNotice {
         else -> remainingM?.let { Format.distance(round(it)) }
     }
 
+    /**
+     * '다음 할 일'이 무엇인지 — 구간·할 일·탐/기다림·지나침. 안내 글(1m 단위 거리가 든 '117m 후 좌회전')은 위치마다 바뀌므로 쓰지 않는다.
+     * 이 값이 바뀌면 알림을 바로 고친다
+     */
+    fun stepKey(s: NavState): String =
+        listOf(s.routeVersion, s.stepIndex, s.bannerTitle, s.action, s.onRide, s.boardingStep, s.waitingBus, s.passedStop, s.missedRide).joinToString("|")
+
     fun shouldUpdate(changed: Boolean, sinceLastMs: Long, interactive: Boolean, important: Boolean): Boolean {
         if (!changed) return false
         if (important) return true

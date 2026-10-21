@@ -302,6 +302,8 @@ class GuardianTest {
         fill(at(0, 30), 8, 60.0, 2.0)
         Guardian.tick(context, log, at(0, 30), stats = UidStatsSource { emptyMap() }, zone = zone)
         assertEquals("0", Settings.Global.getString(cr, "ambient_tilt_to_wake"))
+        // 이미 꺼져 있던 AOD 는 바꾸지 않았으니 기억도 하지 않는다 ('지금 되돌리기'에 걸리지 않게)
+        assertFalse(context.getSharedPreferences(BatteryLog.PREFS, Context.MODE_PRIVATE).contains(Levers.B_AOD))
         // 아침: 취침 모드가 끝나며 AOD 를 켜고, 사용자가 밤에 손목 올림을 손수 다시 켜 둠
         Settings.Global.putString(cr, "ambient_enabled", "1")
         Settings.Global.putString(cr, "ambient_tilt_to_wake", "1")
@@ -311,6 +313,36 @@ class GuardianTest {
         assertEquals("아침에 켜진 AOD 를 다시 끄지 않는다", "1", Settings.Global.getString(cr, "ambient_enabled"))
         assertEquals("1", Settings.Global.getString(cr, "ambient_tilt_to_wake"))
         assertFalse(Levers(context).holdsAnything)
+    }
+
+    private fun event(pkg: String, t: Long, type: Int) =
+        shadowOf(context.getSystemService(android.app.usage.UsageStatsManager::class.java)).addEvent(pkg, t, type)
+
+    /** 새벽 알림이 화면을 잠깐 켠 것은 '일어남'이 아니다 — 밤 모드를 끝내지 않는다. 사람이 40초 보면 끝낸다 */
+    @Test
+    fun aNotificationFlashAtDawnDoesNotEndTheNight() {
+        grant()
+        val on = android.app.usage.UsageEvents.Event.SCREEN_INTERACTIVE
+        val off = android.app.usage.UsageEvents.Event.SCREEN_NON_INTERACTIVE
+        event("android", at(23, 30, d = 19), on)
+        event("android", at(23, 35, d = 19), off)
+        fill(at(0, 30), 8, 60.0, 2.0)
+        Guardian.tick(context, log, at(0, 30), stats = UidStatsSource { emptyMap() }, zone = zone)
+        assertTrue(Guardian.state(context).nightActive)
+        // 05:40 메신저 알림이 화면을 8초 켬
+        event("com.kakao.talk", at(5, 40), com.mywatch.kakaomap.battery.ScreenUsage.NOTIFICATION_INTERRUPTION)
+        event("android", at(5, 40) + 1_000, on)
+        event("android", at(5, 40) + 9_000, off)
+        shadowOf(context.getSystemService(PowerManager::class.java)).setIsPowerSaveMode(true)
+        fill(at(5, 45), 8, 55.0, 1.0)
+        Guardian.tick(context, log, at(5, 45), stats = UidStatsSource { emptyMap() }, zone = zone)
+        assertTrue("알림이 켠 화면으로는 끝내지 않는다", Guardian.state(context).nightActive)
+        // 06:10 사람이 40초 봄 → 일어남
+        event("android", at(6, 10), on)
+        event("android", at(6, 10) + 40_000, off)
+        fill(at(6, 15), 8, 54.0, 1.0)
+        Guardian.tick(context, log, at(6, 15), stats = UidStatsSource { emptyMap() }, zone = zone)
+        assertFalse(Guardian.state(context).nightActive)
     }
 
     /** 'Hey Google' 끄기는 고른 사람만 — 되돌리기로 원래대로 */

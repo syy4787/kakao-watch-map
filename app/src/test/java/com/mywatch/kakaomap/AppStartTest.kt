@@ -11,6 +11,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
+import org.junit.BeforeClass
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -26,6 +27,13 @@ import org.robolectric.annotation.Config
 class AppStartTest {
 
     private val context: Context = RuntimeEnvironment.getApplication()
+
+    companion object {
+        /** 시험들이 한 프로세스를 같이 쓰므로, 앞에서 지도 화면을 연 시험이 있어도 이 시험의 앱 시작은 새 프로세스처럼 (@BeforeClass 는 앱 생성 전에 돈다) */
+        @BeforeClass
+        @JvmStatic
+        fun freshProcess() = MapApp.resetMapSdkForTest()
+    }
 
     @Test
     fun aBackgroundStartDoesNotLoadTheMapEngine() {

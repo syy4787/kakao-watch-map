@@ -88,6 +88,8 @@ class NavigationService : Service() {
     private var builder: NotificationCompat.Builder? = null
     private var ongoing: OngoingActivity? = null
     private var shownText: String? = null
+    /** 알림에 마지막으로 보인 '다음 할 일' ([NavNotice.stepKey]) */
+    private var shownStepKey: String? = null
     private var lastNotifyAt = 0L
 
     private var rerouteJob: Job? = null
@@ -297,8 +299,8 @@ class NavigationService : Service() {
             fused.getCurrentLocation(request, cancel.token)
                 .addOnCompleteListener { task ->
                     val loc = if (task.isSuccessful) task.result else null
-                    // 실내라 못 잡으면 다음 확인을 늦춘다 (4→8→16분), 잡히면 4분부터
-                    if (loc == null) probeBackoff.missed() else probeBackoff.found()
+                    // 실내라 못 잡으면 다음 확인을 늦춘다 (4→8→16분), GPS 로 잡히면(50m 이내) 4분부터
+                    probeBackoff.record(loc?.takeIf { it.hasAccuracy() }?.accuracy)
                     if (running && tracking && plan?.power == LocPower.BALANCED) probeWake.schedule(SystemClock.elapsedRealtime() + probeBackoff.nextDelayMs())
                     if (loc != null && running && tracking) callback.onLocationResult(LocationResult.create(listOf(loc)))
                 }
@@ -673,6 +675,7 @@ class NavigationService : Service() {
         )
         val text = statusText(active, s)
         shownText = text
+        shownStepKey = NavNotice.stepKey(s)
         val b = NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_navigation)
             .setContentTitle(active?.let { "→ ${it.destinationName}" } ?: getString(R.string.map_name))
@@ -706,8 +709,10 @@ class NavigationService : Service() {
     private fun updateNotification(active: ActiveRoute, s: NavState) {
         val text = statusText(active, s)
         val now = SystemClock.elapsedRealtime()
-        val guideChanged = text.substringBefore(LEFT_SEP) != shownText?.substringBefore(LEFT_SEP)
-        val important = s.arrived || s.offRoute || s.rerouting || guideChanged
+        // 다음 할 일이 바뀌었는지는 구간·할 일로 (안내 글엔 1m 단위 거리가 있어 위치마다 바뀐다)
+        val key = NavNotice.stepKey(s)
+        val stepChanged = key != shownStepKey
+        val important = s.arrived || s.offRoute || s.rerouting || stepChanged
         val interactive = runCatching { getSystemService(android.os.PowerManager::class.java)?.isInteractive }.getOrNull() ?: true
         if (!NavNotice.shouldUpdate(text != shownText, now - lastNotifyAt, interactive, important)) return
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
@@ -715,6 +720,7 @@ class NavigationService : Service() {
         ) return
         lastNotifyAt = now
         shownText = text
+        shownStepKey = key
         val b = builder ?: return
         b.setContentTitle("→ ${active.destinationName}").setContentText(text)
         shortText(s)?.let { b.setShortCriticalText(it) }
@@ -767,8 +773,6 @@ class NavigationService : Service() {
     }
 
     companion object {
-        /** 알림 글에서 '다음 할 일'과 남은 거리를 가르는 곳 */
-        private const val LEFT_SEP = " · 남은 "
         private const val CHANNEL_ID = "navigation"
         private const val NOTIFICATION_ID = 42
         private const val GAVE_UP_NOTIFICATION_ID = 43

@@ -53,6 +53,22 @@ object Wakes {
     const val GESTURE_ADVICE = 80
     const val NOTIF_ADVICE = 50
 
+    /** 알림이 잠깐 켠 화면으로 보는 길이 (이보다 오래 켜져 있으면 읽은 것) */
+    const val FLASH_MAX_MS = 15_000L
+
+    /**
+     * 알림이 켜고 사람이 보지 않은 화면을 뺀다 — 알림 [NOTIF_WINDOW_MS] 안에 켜져 [FLASH_MAX_MS] 안에 꺼진 구간.
+     * 지킴이의 '아침에 화면을 봤다(일어났다)' 판단용 (화면 켜짐 시간 합계에는 그대로 넣는다 — 전기는 썼으니)
+     */
+    fun withoutNotificationFlashes(screen: List<Span>, notificationTimes: List<Long>): List<Span> {
+        if (notificationTimes.isEmpty()) return screen
+        val notes = notificationTimes.sorted()
+        return screen.filterNot { s ->
+            val i = notes.binarySearch(s.start).let { if (it >= 0) it else -it - 2 }   // s.start 이하인 마지막 알림
+            i >= 0 && s.start - notes[i] <= NOTIF_WINDOW_MS && s.ms < FLASH_MAX_MS
+        }
+    }
+
     fun analyze(screen: List<Span>, notifications: List<Pair<String, Long>>, from: Long, to: Long, screenPph: Double?): WakeStats {
         val spans = screen.filter { it.start >= from && it.start < to }.sortedBy { it.start }
         val notes = notifications.filter { it.second in from until to }.sortedBy { it.second }

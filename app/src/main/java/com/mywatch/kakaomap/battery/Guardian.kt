@@ -23,6 +23,7 @@ import com.mywatch.battery.core.GuardianAction
 import com.mywatch.battery.core.GuardianConfig
 import com.mywatch.battery.core.GuardianRules
 import com.mywatch.battery.core.GuardianState
+import com.mywatch.battery.core.Wakes
 import com.mywatch.battery.core.WatchModels
 import com.mywatch.kakaomap.R
 import com.mywatch.kakaomap.data.ErrorLog
@@ -130,8 +131,11 @@ object Guardian {
         val analysis: Analysis? = runCatching { DrainAnalyzer(WatchModels.nominalMah(Build.MODEL), zone).analyze(samples, now) }
             .onFailure { ErrorLog.record("배터리·지킴이", it) }.getOrNull()
         // 화면 켜짐을 사용 통계로 정확히 (권한이 있을 때) — 15분 표본 사이에 켰다 끈 것도 안다.
-        // 하루 동안 화면 기록이 하나도 없으면 이 기기가 기록을 안 남기는 것으로 보고 표본으로 어림한다
-        val screen = runCatching { ScreenUsage(c).read(now - SCREEN_LOOKBACK_MS, now) }.getOrNull()?.first?.takeIf { it.isNotEmpty() }
+        // 창 안에 화면 기록이 하나도 없으면 이 기기가 기록을 안 남기는 것으로 보고 표본으로 어림한다
+        val usage = runCatching { ScreenUsage(c).readAll(now - SCREEN_LOOKBACK_MS, now) }.getOrNull()?.takeIf { it.screen.isNotEmpty() }
+        val screen = usage?.screen
+        // '사람이 봤다'(아침 기상)는 알림이 잠깐 켠 화면을 빼고 본다 — 새벽 알림 한 번에 밤 모드가 끝나지 않게
+        val looked = usage?.let { u -> Wakes.withoutNotificationFlashes(u.screen, u.notifications.map { it.second }) }
 
         // 앱별 누적 사용량 → 이번 구간 사용량 (권한이 있을 때만)
         val source = stats ?: HealthReader(c).takeIf { it.available }
@@ -153,7 +157,7 @@ object Guardian {
         }
         val cfg = config(c)
         val st = state(c)
-        val screenOff = screen?.let { spans -> screenOffFor(spans, now) }
+        val screenOff = looked?.let { spans -> screenOffFor(spans, now) }
         val (actions, next) = GuardianRules.decide(now, zone, cfg, st, samples, analysis, levers.saverOn(), screenOff, screenOn2h)
         // 설정으로 절전이 안 켜지는 워치면 절전 레버는 빼고 나머지만
         val effective = if (st.saverBroken || next.saverBroken) cfg.copy(nightSaver = false) else cfg

@@ -213,7 +213,7 @@ class BatteryActivity : ComponentActivity() {
         rows += toggle("$A_TOGGLE${T_NIGHT_SAVER}", cfg.nightSaver, "밤(00~07시) 절전 모드")
         rows += toggle("$A_TOGGLE${T_NIGHT_AOD}", cfg.nightAodOff, "밤에 AOD 끄기" + (if (levers.aodKey == null && levers.canWriteSecure) " (이 워치엔 키 없음)" else ""))
         val missing = " (이 워치엔 키 없음)"
-        rows += toggle("$A_TOGGLE${T_NIGHT_WAKE}", cfg.nightWakeOff, "밤에 손목 올림·터치로 켜기 끄기" +
+        rows += toggle("$A_TOGGLE${T_NIGHT_WAKE}", cfg.nightWakeOff, "밤에 손목·터치 켜기 끄기" +
             (if (levers.tiltKey == null && levers.touchKey == null && levers.canWriteSecure) missing else ""))
         rows += toggle("$A_TOGGLE${T_NIGHT_HOTWORD}", cfg.nightHotwordOff, "밤에 'Hey Google' 끄기" +
             (if (levers.hotwordKey == null && levers.canWriteSecure) missing else ""))

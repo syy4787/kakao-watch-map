@@ -645,7 +645,7 @@ class ScreensRenderTest {
             Thread.sleep(20)
             shadowOf(Looper.getMainLooper()).idle()
         }
-        capture(activity, "battery_screen", pages = 4)
+        capture(activity, "battery_screen", pages = 16)
         controller.pause().stop().destroy()
         log.dir.deleteRecursively()
     }

@@ -162,7 +162,7 @@ class TubePlayerActivity : ComponentActivity() {
         url = target
         hideError()
         // 화면 종류(Shorts·일반)가 바뀔 수 있으니 지킴이는 새로 (어둡게 해 둔 화면은 밝게)
-        act(watchdog.pause())
+        act(watchdog.stop())
         watchdog = PlayerWatchdog(dim = !isShorts())
         // 같은 재생 화면에 주소의 # 만 바뀜 → 화면이 새 동영상을 연다 (방금 고른 것이라 바로 틂)
         session?.loadUri(target)
@@ -178,6 +178,8 @@ class TubePlayerActivity : ComponentActivity() {
         session?.setFocused(true)
         handler.removeCallbacks(heartbeat)
         handler.post(heartbeat)
+        // 화면이 다시 보임(손목을 듦·돌아옴) = 보고 있다 — 재생 지킴이가 처음부터 센다
+        onInput()
     }
 
     override fun onStop() {
@@ -188,7 +190,7 @@ class TubePlayerActivity : ComponentActivity() {
         session?.setFocused(false)
         session?.setActive(false)
         keepScreenOn(false)
-        act(watchdog.pause())
+        act(watchdog.stop())
         handler.removeCallbacks(watchTick)
         audio.stopped()
         super.onStop()
@@ -488,8 +490,9 @@ class TubePlayerActivity : ComponentActivity() {
         private fun idle() {
             keepScreenOn(false)
             audio.stopped()
-            act(watchdog.pause())
-            handler.removeCallbacks(watchTick)
+            // 다음 곡으로 넘어가는 잠깐의 멈춤일 수 있다 — 밝기는 지킴이가 10초 뒤에
+            watchdog.pause(SystemClock.elapsedRealtime())
+            scheduleWatch()
         }
     }
 

@@ -136,6 +136,8 @@ class BatterySampleWorkerTest {
         // PC 툴킷이 읽는 숫자 한 줄
         val metrics = com.mywatch.battery.core.SummaryMetrics.parse(log.summaryFile.readText())
         assertTrue(metrics.toString(), metrics.containsKey("day_pph"))
+        // 언제 쓴 요약인지 — PC 툴킷이 지난 수집보다 새 요약일 때만 비교에 쓴다
+        assertTrue(metrics.toString(), (metrics["at"] ?: 0.0) > now - 60_000)
         val first = log.summaryFile.lastModified()
         log.summaryFile.writeText("손대지 않음")
         TestWorkerBuilder<BatterySampleWorker>(context, Executors.newSingleThreadExecutor()).build().doWork()

@@ -25,4 +25,15 @@ class ProbeBackoffTest {
         b.found()
         assertEquals(4 * min, b.nextDelayMs())
     }
+    /** GPS 로 잡힌 것(정확도 50m 이내)만 '잡힘' — 기지국·Wi-Fi 로 어림한 오래된 위치는 못 잡은 것으로 (리뷰에서 찾음) */
+    @Test
+    fun onlyAnAccurateFixCountsAsFound() {
+        val b = ProbeBackoff()
+        b.record(null)
+        assertEquals(8 * min, b.nextDelayMs())
+        b.record(180f)
+        assertEquals(16 * min, b.nextDelayMs())
+        b.record(12f)
+        assertEquals(4 * min, b.nextDelayMs())
+    }
 }

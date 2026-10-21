@@ -92,7 +92,9 @@ object BatterySummary {
     }
 
     /** PC 툴킷이 읽는 숫자 한 줄 (조치 추천·치료 전후 비교) — [SummaryMetrics] */
-    fun metricsLine(a: Analysis, insights: Insights?): String = SummaryMetrics.line(linkedMapOf(
+    fun metricsLine(a: Analysis, insights: Insights?, now: Long = System.currentTimeMillis()): String = SummaryMetrics.line(linkedMapOf(
+        // 쓴 때 (epoch ms) — PC 툴킷이 지난 수집보다 새 요약인지 본다
+        "at" to now.toDouble(),
         "idle_pph" to (insights?.breakdown?.idlePph ?: a.idle24.percentPerHour),
         "day_pph" to a.w24.percentPerHour,
         "night_pph" to a.overnight?.percentPerHour,
@@ -156,7 +158,7 @@ object BatterySummary {
         appendLine("[실험] " + if (ex.isEmpty()) "없음" else "")
         ex.forEach { appendLine(" · $it") }
         insights?.levers?.let { appendLine("[레버 점검] $it") }
-        appendLine(metricsLine(a, insights))
+        appendLine(metricsLine(a, insights, now))
         appendLine()
         appendLine("기록 ${a.samples}개, ${DrainAnalyzer.fmt(a.spanHours)}시간치")
         appendLine("기준: ${Thresholds.SOURCE_IDLE} / ${Thresholds.SOURCE_MIXED}")

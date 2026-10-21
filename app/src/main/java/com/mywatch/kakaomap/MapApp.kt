@@ -184,5 +184,12 @@ class MapApp : Application() {
             }
             return initError
         }
+
+        /** 시험용: 같은 시험 프로세스에서 앞 시험이 지도 화면을 열었어도 '새 프로세스'처럼 */
+        @VisibleForTesting
+        internal fun resetMapSdkForTest() {
+            mapSdkTried = false
+            initError = null
+        }
     }
 }

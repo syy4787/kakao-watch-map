@@ -170,8 +170,9 @@ class Levers(context: Context) {
     /** [key] 를 [value] 로 바꾼다 — 처음 값은 [slot] 에 기억. 실제로 바뀌었으면 true (이미 그 값이면 쓰지 않는다) */
     private fun pull(slot: String, key: Key, value: String): Boolean {
         val cur = read(key) ?: return false
-        remember(slot) { cur }
+        // 이미 그 값이면 바꾸지도 기억하지도 않는다 — 아침에 되돌릴 것이 없다
         if (cur == value) return false
+        remember(slot) { cur }
         return write(key, value)
     }
 

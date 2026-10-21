@@ -1,6 +1,8 @@
 package doctor
 
+import com.mywatch.battery.core.DrainAnalyzer
 import doctor.fix.JournalEntry
+import java.time.ZoneId
 import java.util.Locale
 import kotlin.math.abs
 
@@ -35,8 +37,11 @@ object Compare {
     const val REL = 0.15
     const val MIN_HOURS = 2.0
 
-    fun of(before: Facts, after: Facts, journal: List<JournalEntry>): Comparison? {
+    fun of(before: Facts, after: Facts, journal: List<JournalEntry>, zone: ZoneId = ZoneId.systemDefault()): Comparison? {
         val rows = ArrayList<CompareRow>()
+        val beforeAt = before.collectedAt ?: return null
+        val afterAt = after.collectedAt ?: return null
+        if (afterAt <= beforeAt) return null
         fun pph(v: Double) = String.format(Locale.US, "시간당 %.1f%%", v)
         fun pct(v: Double) = String.format(Locale.US, "%.0f%%", v)
         fun row(label: String, b: Double?, a: Double?, minAbs: Double, fmt: (Double) -> String) {
@@ -49,21 +54,33 @@ object Compare {
             }
             rows += CompareRow(label, fmt(b), fmt(a), change)
         }
+        // dumpsys: '마지막 충전 뒤' 통계라, 이번 창이 지난 수집 때보다 길면(충전·초기화 없이 이어짐) 지난 구간을 품고 있어 비교하지 않는다
         val bs = before.stats?.takeIf { (it.onBatteryHours ?: 0.0) >= MIN_HOURS }
-        val `as` = after.stats?.takeIf { (it.onBatteryHours ?: 0.0) >= MIN_HOURS }
+        val `as` = after.stats?.takeIf { (it.onBatteryHours ?: 0.0) >= MIN_HOURS && (it.onBatteryMs ?: Long.MAX_VALUE) <= afterAt - beforeAt }
         row(TOTAL, bs?.percentPerHour, `as`?.percentPerHour, 0.2, ::pph)
         row(SCREEN_OFF, bs?.let(::screenOffPph), `as`?.let(::screenOffPph), 0.2, ::pph)
         row(AWAKE, bs?.screenOffAwakeRatio?.times(100), `as`?.screenOffAwakeRatio?.times(100), 3.0, ::pct)
         row(GMS, bs?.let(::gmsShare), `as`?.let(::gmsShare), 3.0, ::pct)
-        row(IDLE, before.watchMetrics["idle_pph"] ?: before.watch?.idle24?.percentPerHour, after.watchMetrics["idle_pph"] ?: after.watch?.idle24?.percentPerHour, 0.2, ::pph)
-        row(NIGHT, before.watchMetrics["night_pph"] ?: before.watch?.overnight?.percentPerHour, after.watchMetrics["night_pph"] ?: after.watch?.overnight?.percentPerHour, 0.2, ::pph)
-        row(GESTURE, before.watchMetrics["gesture_wakes"], after.watchMetrics["gesture_wakes"], 10.0) { "${it.toInt()}번" }
+
+        // 워치 쪽: 요약 지표가 양쪽 다 있고 이번 것이 지난 수집 뒤에 새로 쓰였을 때만 그것으로, 아니면 워치 기록(CSV)으로 — 섞지 않는다
+        val bAt = before.watchMetrics["at"]
+        val aAt = after.watchMetrics["at"]
+        val freshSummary = bAt != null && aAt != null && aAt > bAt && aAt > beforeAt
+        if (freshSummary) {
+            row(IDLE, before.watchMetrics["idle_pph"], after.watchMetrics["idle_pph"], 0.2, ::pph)
+            row(NIGHT, before.watchMetrics["night_pph"], after.watchMetrics["night_pph"], 0.2, ::pph)
+            row(GESTURE, before.watchMetrics["gesture_wakes"], after.watchMetrics["gesture_wakes"], 10.0) { "${it.toInt()}번" }
+        } else {
+            // 양쪽 다 워치 기록(CSV)으로 — 이번 쪽은 지난 수집 뒤의 기록만으로 다시 계산 (앞의 하루와 겹치지 않게)
+            val since = after.watchSamples.filter { it.t > beforeAt }
+            val afterLog = if (since.size >= 2) runCatching { DrainAnalyzer(after.nominalMah, zone).analyze(since, afterAt) }.getOrNull() else null
+            row(IDLE, before.watch?.idle24?.percentPerHour, afterLog?.idle24?.percentPerHour, 0.2, ::pph)
+            row(NIGHT, before.watch?.overnight?.percentPerHour, afterLog?.overnight?.percentPerHour, 0.2, ::pph)
+        }
         if (rows.isEmpty()) return null
 
-        val from = before.collectedAt ?: 0L
-        val to = after.collectedAt ?: Long.MAX_VALUE
-        val actions = journal.filter { it.time in (from + 1)..to && it.ok && !it.undone }.map { it.id }
-        return Comparison(from, to, actions, rows, headline(rows, actions.isNotEmpty()))
+        val actions = journal.filter { it.time in (beforeAt + 1)..afterAt && it.ok && !it.undone }.map { it.id }
+        return Comparison(beforeAt, afterAt, actions, rows, headline(rows, actions.isNotEmpty()))
     }
 
     /** 화면 꺼진 동안 시간당 % (dumpsys 의 화면 꺼짐 소모 ÷ 화면 꺼진 시간) */

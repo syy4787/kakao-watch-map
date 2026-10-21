@@ -61,4 +61,18 @@ class WakeStatsTest {
         assertEquals(1, w.wakes)
         assertEquals(0, w.notifications)
     }
+    /**
+     * 알림이 잠깐 켠 화면(알림 3초 안에 켜져 15초 안에 꺼짐)은 '사람이 봤다'가 아니다 — 지킴이가 새벽 알림 한 번에 밤 모드를 끝내지 않게.
+     * 알림 뒤라도 오래 켜져 있었으면(읽음) 남긴다
+     */
+    @Test
+    fun notificationFlashesAreNotPeopleLooking() {
+        val t0 = 1_792_000_000_000L
+        val flash = Span(t0 + 1_000, t0 + 9_000)               // 알림 1초 뒤 켜져 8초
+        val read = Span(t0 + 60_000 + 1_000, t0 + 60_000 + 40_000)   // 알림 뒤 39초 — 읽음
+        val raised = Span(t0 + 120_000, t0 + 125_000)          // 알림 없이 5초 — 손목을 듦
+        val kept = Wakes.withoutNotificationFlashes(listOf(flash, read, raised), listOf(t0, t0 + 60_000))
+        assertEquals(listOf(read, raised), kept)
+        assertEquals(listOf(flash), Wakes.withoutNotificationFlashes(listOf(flash), emptyList()))
+    }
 }
