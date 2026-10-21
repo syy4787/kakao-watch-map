@@ -38,7 +38,7 @@ class UpdateWorker(context: Context, params: WorkerParameters) : CoroutineWorker
     }
 
     companion object {
-        private const val NAME = "update-check"
+        internal const val NAME = "update-check"
         private const val OLD_NAME = "auto-update"
         /** 앱 화면을 열 때 맡기는 한 번짜리 확인 */
         const val CHECK_NOW_NAME = "update-check-now"
@@ -64,9 +64,15 @@ class UpdateWorker(context: Context, params: WorkerParameters) : CoroutineWorker
             runCatching { WorkManager.getInstance(context).enqueueUniqueWork(CHECK_NOW_NAME, ExistingWorkPolicy.KEEP, request) }
         }
 
+        /**
+         * 6시간마다 새 버전 확인. 앱이 뜰 때마다 불리므로 예약이 이미 있으면 그대로 둔다(KEEP) — 예약 내용([SCHEDULE_VERSION])이
+         * 바뀐 첫 시작에만 예전 작업을 정리하고 새 내용으로 바꾼다(UPDATE 는 시스템 작업을 지웠다 다시 만들기 때문)
+         */
         fun schedule(context: Context) {
             val wm = WorkManager.getInstance(context)
-            wm.cancelUniqueWork(OLD_NAME)   // 예전 '충전 중 + Wi-Fi 에서만' 작업 정리
+            val prefs = context.getSharedPreferences(UpdateManager.PREFS, Context.MODE_PRIVATE)
+            val changed = prefs.getInt(K_SCHEDULE_VERSION, 0) != SCHEDULE_VERSION
+            if (changed) wm.cancelUniqueWork(OLD_NAME)   // 예전 '충전 중 + Wi-Fi 에서만' 작업 정리
             val request = PeriodicWorkRequestBuilder<UpdateWorker>(6, TimeUnit.HOURS)
                 .setConstraints(
                     Constraints.Builder()
@@ -75,8 +81,13 @@ class UpdateWorker(context: Context, params: WorkerParameters) : CoroutineWorker
                         .build()
                 )
                 .build()
-            wm.enqueueUniquePeriodicWork(NAME, ExistingPeriodicWorkPolicy.UPDATE, request)
+            wm.enqueueUniquePeriodicWork(NAME, if (changed) ExistingPeriodicWorkPolicy.UPDATE else ExistingPeriodicWorkPolicy.KEEP, request)
+            if (changed) prefs.edit().putInt(K_SCHEDULE_VERSION, SCHEDULE_VERSION).apply()
         }
+
+        /** 예약 내용(주기·조건)을 바꾸면 올린다 */
+        private const val SCHEDULE_VERSION = 2
+        private const val K_SCHEDULE_VERSION = "check_schedule_version"
     }
 }
 

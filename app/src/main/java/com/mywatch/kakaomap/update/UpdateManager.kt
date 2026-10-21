@@ -98,7 +98,7 @@ object UpdateManager {
     /** 릴리스를 받는 곳 — 테스트에서만 가짜 서버로 바꾼다 */
     @VisibleForTesting
     internal var baseUrl = GITHUB
-    private const val PREFS = "updates"
+    internal const val PREFS = "updates"
     private const val KEY_OWNER = "owner"
     private const val KEY_LATEST = "latest"
     private const val KEY_LAST_CHECK = "last_check"

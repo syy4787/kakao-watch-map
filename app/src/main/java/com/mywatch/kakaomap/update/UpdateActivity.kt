@@ -137,7 +137,7 @@ class UpdateActivity : ComponentActivity() {
             rows += Row.Note("저장소 github.com/$repo")
             rows += Row.Action(ACTION_OWNER, R.drawable.ic_edit, "GitHub 아이디 바꾸기")
         }
-        val hash = runCatching { KakaoMapSdk.INSTANCE.hashKey }.getOrNull()
+        val hash = runCatching { com.mywatch.kakaomap.MapApp.ensureMapSdk(c); KakaoMapSdk.INSTANCE.hashKey }.getOrNull()
         if (hash != null) rows += Row.Note("카카오 키 해시\n$hash")
         // 무엇이 안 됐는지(검색·길찾기·실시간 버스·위치·지도·앱 멈춤) — 최근 것부터
         rows += Row.Header("최근 오류 기록")

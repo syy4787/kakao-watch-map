@@ -3,6 +3,7 @@ package com.mywatch.kakaomap
 import android.app.Activity
 import android.app.Application
 import android.content.ComponentCallbacks2
+import android.content.Context
 import android.content.res.Configuration
 import android.os.Bundle
 import android.os.Handler
@@ -58,20 +59,10 @@ class MapApp : Application() {
         // 안내를 시작한 목적지를 기기에 적어 둔다 (앱이 꺼져 안내가 끊기면 다음에 다시 찾아 주려고)
         RouteRepository.init(this)
         ErrorLog.installCrashHandler()
-        Thread { ErrorLog.recordExitReasons(this) }.start()
-        try {
-            // 카카오 권장: Application 에서 한 번만 초기화
-            KakaoMapSdk.init(this, AppConfig.KAKAO_NATIVE_APP_KEY)
-            // SDK가 인증에 실제로 쓰는 키 해시 → Logcat 에서 'KakaoWatchMap' 으로 검색
-            Log.i(TAG, "패키지명=$packageName  키 해시=${KakaoMapSdk.INSTANCE.hashKey}")
-        } catch (t: Throwable) {
-            // 카카오맵 SDK는 ARM 전용이라 x86 에뮬레이터에선 여기서 실패한다
-            initError = t
-            Log.e(TAG, "KakaoMapSdk.init 실패", t)
-            ErrorLog.record("지도 엔진", t)
-        }
-        // 업데이트 저장소가 정해져 있으면 주기적으로 새 버전 확인
-        if (UpdateManager.repo(this) != null) UpdateWorker.schedule(this)
+        // 지도 엔진(16MB 네이티브)은 여기서 읽지 않는다 — 이 프로세스는 15분 배터리 기록·타일·업데이트 확인으로도 뒤에서 자주 뜬다.
+        // 지도 화면이 열릴 때 [ensureMapSdk] 가 한 번 읽는다
+        // 업데이트 저장소가 정해져 있으면 주기적으로 새 버전 확인 (이미 예약돼 있으면 그대로)
+        if (UpdateManager.repo(this) != null) runCatching { UpdateWorker.schedule(this) }
         // 배터리 표본 15분마다 (배터리 화면·PC 툴킷의 재료) — 이미 예약돼 있으면 그대로
         BatterySampleWorker.schedule(this)
         // 화면이 하나라도 떠 있는지 센다 — 쓰는 도중에 업데이트 설치로 앱이 꺼지지 않게,
@@ -79,6 +70,8 @@ class MapApp : Application() {
         registerActivityLifecycleCallbacks(object : ActivityLifecycleCallbacks {
             override fun onActivityStarted(activity: Activity) {
                 startedActivities++
+                // 지난번에 앱이 자바 예외 밖의 이유로 끝났던 기록 — 화면을 처음 열 때 한 번만 (뒤에서 뜰 때마다 읽지 않게)
+                if (!exitReasonsRead) { exitReasonsRead = true; Thread { ErrorLog.recordExitReasons(this@MapApp) }.start() }
             }
 
             override fun onActivityStopped(activity: Activity) {
@@ -162,5 +155,34 @@ class MapApp : Application() {
         @Volatile
         var initError: Throwable? = null
             @VisibleForTesting internal set
+
+        /** 지도 엔진을 읽어 보았나 (이 프로세스에서 한 번만) */
+        @Volatile
+        var mapSdkTried = false
+            private set
+
+        @Volatile
+        private var exitReasonsRead = false
+
+        /**
+         * 지도 엔진(카카오맵 SDK) 초기화 — 지도 화면이 처음 열릴 때 한 번. 실패 원인(정상이면 null)을 돌려주고 [initError] 에도 둔다.
+         * (카카오는 Application 에서 초기화하라고 권하지만, 뒤에서만 뜨는 프로세스가 엔진을 읽지 않게 화면을 만들기 직전으로 미룸)
+         */
+        @Synchronized
+        fun ensureMapSdk(context: Context): Throwable? {
+            if (mapSdkTried) return initError
+            mapSdkTried = true
+            try {
+                KakaoMapSdk.init(context.applicationContext, AppConfig.KAKAO_NATIVE_APP_KEY)
+                // SDK가 인증에 실제로 쓰는 키 해시 → Logcat 에서 'KakaoWatchMap' 으로 검색
+                Log.i(TAG, "패키지명=${context.packageName}  키 해시=${KakaoMapSdk.INSTANCE.hashKey}")
+            } catch (t: Throwable) {
+                // 카카오맵 SDK는 ARM 전용이라 x86 에뮬레이터에선 여기서 실패한다
+                initError = t
+                Log.e(TAG, "KakaoMapSdk.init 실패", t)
+                ErrorLog.record("지도 엔진", t)
+            }
+            return initError
+        }
     }
 }

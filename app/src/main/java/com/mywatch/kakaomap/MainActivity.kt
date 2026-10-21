@@ -250,6 +250,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // 지도 엔진은 지도 화면을 만들기 직전에 (앱이 뒤에서만 뜰 땐 읽지 않음)
+        MapApp.ensureMapSdk(this)
         setContentView(R.layout.activity_main)
         if (AppConfig.KEEP_SCREEN_ON) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
