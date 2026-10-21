@@ -256,4 +256,5 @@
     <string name="player_opened_on_phone">폰에서 열었어요</string>
     <string name="player_no_phone">폰과 연결되지 않았어요</string>
     <string name="player_phone_failed">폰에서 열지 못했어요</string>
+    <string name="tube_paused_idle">45분 동안 손대지 않아 멈췄어요 (배터리) — 누르면 다시 재생</string>
 </resources>

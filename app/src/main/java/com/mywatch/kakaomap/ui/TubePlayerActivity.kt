@@ -30,6 +30,7 @@ import com.mywatch.kakaomap.tube.PlayerAudio
 import com.mywatch.kakaomap.tube.PlayerGuard
 import com.mywatch.kakaomap.tube.PlayerPresence
 import com.mywatch.kakaomap.tube.PlayerRecovery
+import com.mywatch.kakaomap.tube.PlayerWatchdog
 import com.mywatch.kakaomap.tube.TubeInbox
 import com.mywatch.kakaomap.tube.WatchPlayer
 import kotlinx.coroutines.Dispatchers
@@ -52,7 +53,8 @@ import org.mozilla.geckoview.WebRequestError
  * 재생은 그 화면 안의 유튜브 공식 플레이어(임베드)가 한다. 우리 것은 플레이어 위에 겹치지 않는다.
  *  · 따로 된 프로세스(:player) — 엔진이 죽어도 앱 본체(길 안내 등)는 산다. 엔진이 죽으면 [PlayerGuard] 에 남기고 인터넷 앱으로 이어서
  *  · 화면이 꺼지거나 다른 앱으로 가면 setActive(false) → 재생 화면이 '숨김'을 보고 멈춘다 (보이지 않는 재생 금지)
- *  · 재생 중엔 화면을 켜 둔다 (엔진의 미디어 알림). 소리 자동 재생만 허용 — 방금 고른 동영상을 바로 틀려고
+ *  · 재생 중엔 화면을 켜 둔다 (엔진의 미디어 알림). 소리 자동 재생만 허용 — 방금 고른 동영상을 바로 틀려고.
+ *    손대지 않고 2분이면 화면을 어둡게, 45분이면 멈춘다 ([PlayerWatchdog] — 배터리)
  *  · 링크는 [PlayerNav] 가 정한다: 목록으로·폰에서 이어 보기·채널은 앱이, 바깥 링크는 폰에서.
  *    재생 화면이 알린 유튜브 믹스 추천·본 Shorts 는 앱의 받은 편지([TubeInbox])에 남긴다 (앱 본체가 다음에 열 때 읽음)
  *  · 베젤·크라운 → 재생 화면 스크롤 (Shorts 화면은 한 칸 = 한 장)
@@ -77,6 +79,9 @@ class TubePlayerActivity : ComponentActivity() {
     private var reopenOnStart = false
     /** Shorts 화면의 베젤 한 칸 = 한 장 */
     private val pager = RotaryPager()
+    /** 재생 중 오래 손대지 않으면 어둡게·멈춤 ([PlayerWatchdog]) — Shorts 는 보는 것이라 어둡게 하지 않는다 */
+    private var watchdog = PlayerWatchdog(dim = true)
+    private val watchTick = Runnable { act(watchdog.check(SystemClock.elapsedRealtime())); scheduleWatch() }
 
     private val visible: Boolean get() = lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
 
@@ -103,6 +108,7 @@ class TubePlayerActivity : ComponentActivity() {
         }
         pageBase = base
         url = target
+        watchdog = PlayerWatchdog(dim = !isShorts())
         guard.starting()
         val runtime = try {
             engine(applicationContext)
@@ -155,6 +161,9 @@ class TubePlayerActivity : ComponentActivity() {
         if (pageBase.isEmpty() || !target.startsWith(pageBase)) return
         url = target
         hideError()
+        // 화면 종류(Shorts·일반)가 바뀔 수 있으니 지킴이는 새로 (어둡게 해 둔 화면은 밝게)
+        act(watchdog.pause())
+        watchdog = PlayerWatchdog(dim = !isShorts())
         // 같은 재생 화면에 주소의 # 만 바뀜 → 화면이 새 동영상을 연다 (방금 고른 것이라 바로 틂)
         session?.loadUri(target)
     }
@@ -179,9 +188,51 @@ class TubePlayerActivity : ComponentActivity() {
         session?.setFocused(false)
         session?.setActive(false)
         keepScreenOn(false)
+        act(watchdog.pause())
+        handler.removeCallbacks(watchTick)
         audio.stopped()
         super.onStop()
     }
+
+    /** 손댐(터치·버튼) — 재생 지킴이가 처음부터 센다 */
+    override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        if (ev.actionMasked == MotionEvent.ACTION_DOWN) onInput()
+        return super.dispatchTouchEvent(ev)
+    }
+
+    override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean {
+        if (event.action == android.view.KeyEvent.ACTION_DOWN) onInput()
+        return super.dispatchKeyEvent(event)
+    }
+
+    private fun onInput() {
+        act(watchdog.input(SystemClock.elapsedRealtime()))
+        scheduleWatch()
+    }
+
+    private fun scheduleWatch() {
+        handler.removeCallbacks(watchTick)
+        val at = watchdog.nextCheckAt() ?: return
+        handler.postDelayed(watchTick, (at - SystemClock.elapsedRealtime()).coerceAtLeast(0L))
+    }
+
+    /** 지킴이가 정한 일: 어둡게(화면 밝기만 — 플레이어 위에 아무것도 덮지 않는다)·밝게·멈춤 */
+    private fun act(acts: List<PlayerWatchdog.Act>) {
+        for (a in acts) when (a) {
+            PlayerWatchdog.Act.DIM -> brightness(PlayerWatchdog.DIM_BRIGHTNESS)
+            PlayerWatchdog.Act.BRIGHT -> brightness(WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE)
+            PlayerWatchdog.Act.PAUSE -> {
+                mediaNow?.pause()
+                Toast.makeText(this, R.string.tube_paused_idle, Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    private fun brightness(level: Float) {
+        window.attributes = window.attributes.also { it.screenBrightness = level }
+    }
+
+    private fun isShorts() = url.startsWith(pageBase + SHORTS_PAGE)
 
     override fun onDestroy() {
         handler.removeCallbacksAndMessages(null)
@@ -198,7 +249,8 @@ class TubePlayerActivity : ComponentActivity() {
      */
     private fun rotary(e: MotionEvent): Boolean {
         if (e.action != MotionEvent.ACTION_SCROLL || !e.isFromSource(InputDevice.SOURCE_ROTARY_ENCODER)) return false
-        if (url.startsWith(pageBase + SHORTS_PAGE)) {
+        onInput()
+        if (isShorts()) {
             val n = pager.step(e.getAxisValue(MotionEvent.AXIS_SCROLL), SystemClock.uptimeMillis())
             if (n != 0) {
                 view?.panZoomController?.scrollBy(ScreenLength.zero(), ScreenLength.fromVisualViewportHeight(n.toDouble()), PanZoomController.SCROLL_BEHAVIOR_AUTO)
@@ -422,6 +474,8 @@ class TubePlayerActivity : ComponentActivity() {
             mediaNow = mediaSession
             keepScreenOn(true)
             audio.playing()
+            watchdog.play(SystemClock.elapsedRealtime())
+            scheduleWatch()
         }
 
         override fun onPause(session: GeckoSession, mediaSession: MediaSession) = idle()
@@ -434,6 +488,8 @@ class TubePlayerActivity : ComponentActivity() {
         private fun idle() {
             keepScreenOn(false)
             audio.stopped()
+            act(watchdog.pause())
+            handler.removeCallbacks(watchTick)
         }
     }
 
