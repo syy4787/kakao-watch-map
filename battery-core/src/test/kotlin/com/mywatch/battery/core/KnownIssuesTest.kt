@@ -76,6 +76,11 @@ class KnownIssuesTest {
             KnownIssues.detect(AppDrain.rank(uses.map { it + it }, h), face, h).map { it.id }.toSet(),
         )
         assertEquals(KnownIssues.PLAY_SERVICES_LOOP, KnownIssues.detect(AppDrain.rank(uses, short)).first().id)
+        // 경계는 50분 — 앱별 통계는 55분마다라 재시작 뒤 기준값 다음의 첫 한 줄(55~65분)로 볼 수 있게
+        val min = KnownIssues.MIN_WINDOW_MS
+        assertEquals(50 * 60_000L, min)
+        assertTrue(KnownIssues.detect(AppDrain.rank(uses, min - 60_000L), face, min - 60_000L).isEmpty())
+        assertTrue(KnownIssues.detect(AppDrain.rank(uses, min), face, min).isNotEmpty())
     }
 
     /**

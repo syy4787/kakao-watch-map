@@ -464,8 +464,8 @@ class GuardianTest {
         val t = at(10, 0)
         f.writeText(
             "{\"t\":${t - 5 * 3_600_000L},\"ms\":900000,\"d\":[{\"p\":\"old\",\"wl\":5 BROKEN\n" +
-                "{\"t\":${t - q},\"ms\":900000,\"d\":[{\"p\":\"a\",\"wl\":1000}]}\n" +
-                "{\"ms\":900000,\"t\":$t,\"d\":[{\"p\":\"a\",\"wl\":500}]}\n"
+                "{\"t\":${t - q},\"ms\":900000,\"b\":0,\"d\":[{\"p\":\"a\",\"wl\":1000}]}\n" +
+                "{\"ms\":900000,\"t\":$t,\"b\":0,\"d\":[{\"p\":\"a\",\"wl\":500}]}\n"
         )
         val (sum, covered) = store.recent(2, t)
         assertEquals(1_500L, sum.single { it.pkg == "a" }.wakelockMs)
@@ -617,6 +617,88 @@ class GuardianTest {
         Guardian.tick(context, log, at(14, 0), stats = UidStatsSource { mapOf(home to com.mywatch.battery.core.UidUse(home, cpuMs = 191 * 60_000L), gms to com.mywatch.battery.core.UidUse(gms, cpuMs = 281 * 60_000L)) }, zone = zone)
         assertEquals(null, Guardian.tileIssue(context, at(14, 0)))
         assertEquals(null, shadowOf(nm).getNotification(Guardian.N_ISSUE))
+    }
+
+    /**
+     * 이 버전으로 업데이트한 직후(예전 형식의 마지막 스냅샷 — 부팅을 안 적음) 강제 재시작하면: 다음 스냅샷은 재시작 여부를 모르니 기준값만,
+     * 예전 버전이 쓴 줄(부팅 차례 없음 — 재시작을 걸친 엉뚱한 줄일 수 있다)은 어느 창에도 넣지 않는다 (2차 리뷰에서 찾음)
+     */
+    @Test
+    fun theFirstSnapshotAfterUpdatingIsABaseline() {
+        val dir = BatteryLog(context).dir.apply { mkdirs() }
+        val t0 = at(10, 0)
+        java.io.File(dir, "health_last.json").writeText("""{"t":$t0,"u":[{"p":"a","cpu":18000000}]}""")
+        java.io.File(dir, "health_deltas.jsonl").writeText("""{"t":$t0,"ms":3600000,"d":[{"p":"a","cpu":16800000}]}""" + "\n")
+        val store = HealthStore(context)
+        // 강제 재시작으로 누적값이 줄었다 (300분 → 280분) — 예전 규칙이면 280분이 한 구간 사용
+        assertTrue(store.record(t0 + q, mapOf("a" to UidUse("a", cpuMs = 16_800_000)), HealthStore.Boot(3, 600_000)).isEmpty())
+        assertTrue(store.windows(24, t0 + q).isEmpty())
+        assertTrue(store.recentWindow(2, t0 + q, HealthStore.Boot(3, 600_000)).uses.isEmpty())
+        // 그 뒤는 평소대로
+        assertEquals(60_000L, store.record(t0 + 2 * q, mapOf("a" to UidUse("a", cpuMs = 16_860_000)), HealthStore.Boot(3, 1_500_000)).single().cpuMs)
+        assertEquals(1, store.windows(24, t0 + 2 * q).size)
+    }
+
+    /**
+     * 부팅 번호를 못 읽는 워치에서도: 켜진 때(벽시계 − 켜진 뒤 시간)가 옮겨졌으면 재시작 — 재시작 뒤 첫 스냅샷의 켜진 시간이 재시작 전보다
+     * 길어도 (한 시간 안에 두 번 재시작 등). 같은 부팅의 두 스냅샷이 엇갈려 적혀 켜진 시간이 몇 초 줄어든 것은 재시작이 아니다 (2차 리뷰)
+     */
+    @Test
+    fun rebootsAreSeenWithoutABootCountAndSkewIsForgiven() {
+        val m = 60_000L
+        val t = at(12, 0)
+        val before = HealthStore.Boot(null, 5 * m, wallMs = t)
+        assertTrue("12:10 재시작, 12:30 에 켜진 지 20분", HealthStore.Boot(null, 20 * m, wallMs = t + 30 * m).rebootedSince(before))
+        assertFalse("같은 부팅 30분 뒤", HealthStore.Boot(null, 35 * m, wallMs = t + 30 * m).rebootedSince(before))
+        assertFalse("엇갈려 적힌 몇 초", HealthStore.Boot(7, 100_000).rebootedSince(HealthStore.Boot(7, 103_000)))
+        assertTrue("번호가 바뀜", HealthStore.Boot(8, 900_000).rebootedSince(HealthStore.Boot(7, 100_000)))
+        assertTrue("켜진 시간이 크게 줄어듦", HealthStore.Boot(null, 30_000).rebootedSince(HealthStore.Boot(null, 900_000)))
+    }
+
+    /** 재시작한 뒤 첫 15분 기록에서 바로 기준값을 남긴다 — 1시간을 기다리면 다시 짚는 데 2시간 가까이 걸렸다 (2차 리뷰) */
+    @Test
+    fun aRestartTakesTheBaselineAtTheNextTick() {
+        val home = com.mywatch.battery.core.KnownIssues.HOME
+        bootCount(1)
+        homeHogUntilNoon()
+        bootCount(2)
+        fill(at(12, 15), 9, 78.0, 1.0)
+        Guardian.tick(context, log, at(12, 15), stats = UidStatsSource { mapOf(home to UidUse(home, cpuMs = 31 * 60_000L)) }, zone = zone)
+        assertEquals(at(12, 15), HealthStore(context).lastAt())
+    }
+
+    /** 재시작 뒤 짧은 창(30분)에선 Play 서비스가 바쁘게 돌아도(재시작 뒤 동기화) 짚지 않고, 1시간쯤 쌓이면 본다 */
+    @Test
+    fun aShortWindowAfterARestartIsNotJudged() {
+        grant()
+        val gms = "com.google.android.gms"
+        bootCount(1)
+        fill(at(12, 0), 9, 80.0, 4.0)
+        Guardian.tick(context, log, at(12, 0), stats = UidStatsSource { mapOf(gms to UidUse(gms, cpuMs = 100 * 60_000L)) }, zone = zone)
+        bootCount(2)
+        fill(at(13, 0), 9, 76.0, 4.0)
+        Guardian.tick(context, log, at(13, 0), stats = UidStatsSource { mapOf(gms to UidUse(gms, cpuMs = 101 * 60_000L)) }, zone = zone)
+        fill(at(13, 30), 9, 74.0, 4.0)
+        Guardian.tick(context, log, at(13, 30), stats = UidStatsSource { mapOf(gms to UidUse(gms, cpuMs = 121 * 60_000L)) }, zone = zone)
+        assertEquals(at(13, 30), HealthStore(context).lastAt())
+        assertEquals(null, Guardian.tileIssue(context, at(13, 30)))
+        assertEquals(null, shadowOf(nm).getNotification(Guardian.N_ISSUE))
+        fill(at(14, 0), 9, 72.0, 4.0)
+        Guardian.tick(context, log, at(14, 0), stats = UidStatsSource { mapOf(gms to UidUse(gms, cpuMs = 141 * 60_000L)) }, zone = zone)
+        assertEquals("Play 서비스 과소모 — 캐시 지우기", Guardian.tileIssue(context, at(14, 0)))
+    }
+
+    /** 이전 버전이 적어 둔 타일 줄(부팅을 안 적음)도 그 뒤에 재시작했으면 내린다 (2차 리뷰) */
+    @Test
+    fun anOldTileLineIsDroppedAfterARestart() {
+        org.robolectric.shadows.ShadowSystemClock.advanceBy(java.time.Duration.ofHours(1))   // 켜진 지 1시간
+        val now = at(12, 0)
+        fun seed(at: Long) = context.getSharedPreferences(BatteryLog.PREFS, Context.MODE_PRIVATE).edit()
+            .putString("gs_tile_issue", "One UI Watch 홈 과소모 — 강제 재시작").putString("gs_tile_issue_grade", "ABNORMAL").putLong("gs_tile_issue_at", at).commit()
+        seed(now - 10 * 60_000L)
+        assertEquals("켜진 뒤에 적은 줄", "One UI Watch 홈 과소모 — 강제 재시작", Guardian.tileIssue(context, now))
+        seed(now - 2 * 3_600_000L)
+        assertEquals("켜지기 전에 적은 줄", null, Guardian.tileIssue(context, now))
     }
 
     /** 재시작 뒤에도 또 멈춰 돌면 재시작 뒤 기록이 1시간 쌓인 때 다시 짚는다 */

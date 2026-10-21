@@ -68,7 +68,7 @@ data class BatteryStats(
 
     /**
      * uid 의 대표 패키지 — 여럿이면 알려진 문제를 보는 패키지(Play 서비스·One UI Watch 홈)를 앞에, 시스템 uid('android' 가 낀 것)는
-     * 그대로 첫 패키지 (워치 앱의 HealthReader.groupKey 와 같은 규칙)
+     * 목록 순서와 상관없이 'android' (워치 앱의 HealthReader.groupKey 와 같은 규칙)
      */
     fun packageOf(uid: Int?): String? = uid?.let { u ->
         val names = uidPackages[u] ?: return@let null

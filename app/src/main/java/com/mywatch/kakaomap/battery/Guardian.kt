@@ -258,10 +258,15 @@ object Guardian {
     /** 앱별 통계 스냅샷 간격 (15분 기록 넷에 한 번, 시각이 조금 밀려도) */
     const val SNAPSHOT_EVERY_MS = 55L * 60_000L
 
-    /** 앱별 통계를 지금 남길 때인가: 1시간이 지났거나, 최근 2시간 대기 소모가 대기 기준(시간당 3.2%)을 넘을 때 */
+    /**
+     * 앱별 통계를 지금 남길 때인가: 1시간이 지났거나, 그 뒤 재시작했거나(바로 기준값을 남겨 1시간 뒤 다시 볼 수 있게), 최근 2시간 대기
+     * 소모가 대기 기준(시간당 3.2%)을 넘을 때
+     */
     private fun snapshotDue(c: Context, now: Long, samples: List<com.mywatch.battery.core.BatterySample>): Boolean {
-        val last = HealthStore(c).lastAt()
+        val store = HealthStore(c)
+        val last = store.lastAt()
         if (last <= 0L || now < last || now - last >= SNAPSHOT_EVERY_MS) return true
+        if (store.rebootedSinceLast(HealthStore.Boot.now(c))) return true
         val idle = com.mywatch.battery.core.Rates.idleWindow(samples, now, 2).percentPerHour
         return idle != null && idle >= com.mywatch.battery.core.Thresholds.IDLE_NORMAL
     }
@@ -289,8 +294,12 @@ object Guardian {
         val p = prefs(c)
         val at = p.getLong(K_TILE_ISSUE_AT, 0L)
         if (at <= 0L || now - at > TILE_ISSUE_MAX_AGE_MS || now < at) return null
-        // 그 뒤에 재시작했으면(할 일대로 강제 재시작) 앞의 판단은 바로 내린다 — 재시작 뒤 기록이 1시간 쌓이면 다시 본다
-        val seen = p.getLong(K_TILE_ISSUE_ELAPSED, -1L).takeIf { it >= 0 }?.let { HealthStore.Boot(p.getInt(K_TILE_ISSUE_BOOT, -1).takeIf { n -> n >= 0 }, it) }
+        // 그 뒤에 재시작했으면(할 일대로 강제 재시작) 앞의 판단은 바로 내린다 — 재시작 뒤 기록이 1시간쯤 쌓이면 다시 본다.
+        // 이전 버전이 적은 줄(부팅을 안 적음)은 켜진 때(벽시계 − 켜진 뒤 시간)보다 앞이면
+        val seen = p.getLong(K_TILE_ISSUE_ELAPSED, -1L).takeIf { it >= 0 }?.let {
+            HealthStore.Boot(p.getInt(K_TILE_ISSUE_BOOT, -1).takeIf { n -> n >= 0 }, it, p.getLong(K_TILE_ISSUE_WALL, -1L).takeIf { w -> w >= 0 })
+        }
+        if (seen == null && at < now - android.os.SystemClock.elapsedRealtime()) return null
         if (seen != null && HealthStore.Boot.now(c).rebootedSince(seen)) return null
         val line = p.getString(K_TILE_ISSUE, null) ?: return null
         val grade = runCatching { Grade.valueOf(p.getString(K_TILE_ISSUE_GRADE, null) ?: "CAUTION") }.getOrDefault(Grade.CAUTION)
@@ -310,7 +319,8 @@ object Guardian {
         // 타일은 이 결과를 읽는다 (타일이 통계 파일을 읽고 분석하지 않게) — 문제마다 그 할 일로, 비정상 먼저. 어느 부팅에서 본 것인지도
         val top = found.firstOrNull { it.grade == Grade.ABNORMAL } ?: found.firstOrNull()
         prefs(c).edit().putString(K_TILE_ISSUE, top?.let { it.tile ?: it.title }).putString(K_TILE_ISSUE_GRADE, top?.grade?.name)
-            .putLong(K_TILE_ISSUE_AT, now).putInt(K_TILE_ISSUE_BOOT, boot.count ?: -1).putLong(K_TILE_ISSUE_ELAPSED, boot.elapsedMs).apply()
+            .putLong(K_TILE_ISSUE_AT, now).putInt(K_TILE_ISSUE_BOOT, boot.count ?: -1).putLong(K_TILE_ISSUE_ELAPSED, boot.elapsedMs)
+            .putLong(K_TILE_ISSUE_WALL, boot.wallMs ?: -1L).apply()
         return found
     }
 
@@ -333,6 +343,7 @@ object Guardian {
     private const val K_TILE_ISSUE_AT = "gs_tile_issue_at"
     private const val K_TILE_ISSUE_BOOT = "gs_tile_issue_boot"
     private const val K_TILE_ISSUE_ELAPSED = "gs_tile_issue_elapsed"
+    private const val K_TILE_ISSUE_WALL = "gs_tile_issue_wall"
     private const val TILE_ISSUE_MAX_AGE_MS = 3L * 3_600_000L
 
     /** 화면 켜짐 구간으로 본 '지금까지 꺼져 있던 시간' — 지금 켜져 있으면 0, 창 안에 켜진 적이 없으면 창 길이 */
