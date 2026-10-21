@@ -140,7 +140,7 @@ class HealthStore(context: Context) {
         writeLast(now, snapshot, boot, seq)
         // 15분 기록이 재시작을 파일을 열지 않고 알아채게 — 그때 바로 기준값을 남긴다 ([rebootedSinceLast])
         prefs.edit().putLong(K_LAST_AT, now).putInt(K_LAST_BOOT_COUNT, boot?.count ?: -1).putLong(K_LAST_BOOT_ELAPSED, boot?.elapsedMs ?: -1L)
-            .putLong(K_LAST_BOOT_WALL, boot?.wallMs ?: -1L).apply()
+            .putLong(K_LAST_BOOT_WALL, boot?.wallMs ?: -1L).putInt(K_LAST_BOOT_SEQ, seq).apply()
         if (prev != null && d.isNotEmpty()) {
             val top = d.sortedByDescending { it.wakelockMs + it.cpuMs * 2 + it.sensorMs / 2 + it.gpsMs * 3 }.take(MAX_PER_ROW)
             val row = JSONObject().put("t", now).put("ms", now - prev.t).put("b", seq).put("d", JSONArray(top.map { toJson(it) }))
@@ -152,6 +152,9 @@ class HealthStore(context: Context) {
 
     /** 마지막으로 스냅샷을 남긴 때 (없으면 0) — 파일을 열지 않고 */
     fun lastAt(): Long = prefs.getLong(K_LAST_AT, 0L)
+
+    /** 지금 부팅 차례 (재시작을 알아챌 때마다 1씩 — 줄의 "b") — 파일을 열지 않고 */
+    fun bootSeq(): Int = prefs.getInt(K_LAST_BOOT_SEQ, 0)
 
     /**
      * 마지막 스냅샷 뒤에 재시작했나 (파일을 열지 않고). 스냅샷이 아직 없으면 false, 그 스냅샷이 부팅을 안 적었으면(예전 버전) true —
@@ -271,6 +274,7 @@ class HealthStore(context: Context) {
         private const val K_LAST_BOOT_COUNT = "health_last_boot"
         private const val K_LAST_BOOT_ELAPSED = "health_last_elapsed"
         private const val K_LAST_BOOT_WALL = "health_last_wall"
+        private const val K_LAST_BOOT_SEQ = "health_last_seq"
         private const val PRUNE_BYTES = 120_000L
         private val T_PREFIX = Regex("^\\{\"t\":(-?\\d+)[,}]")
 

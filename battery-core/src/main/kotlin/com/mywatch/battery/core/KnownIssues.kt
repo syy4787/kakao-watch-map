@@ -16,6 +16,8 @@ data class KnownIssue(
     val todo: Pair<String, String>? = null,
     /** 타일 한 줄 (문제와 그 할 일) — 없으면 제목 */
     val tile: String? = null,
+    /** 재시작해도 그대로라 다음 단계를 주는 것 ([KnownIssues.detect] 의 cameBack) */
+    val cameBack: Boolean = false,
 )
 
 /**
@@ -44,11 +46,12 @@ object KnownIssues {
 
     /**
      * [watchFace] = 지금 시계 화면의 패키지 (모르면 null), [windowMs] = 순위를 모은 시간 — 시계 화면은 늘 '보이는' 상태라
-     * 화면 밖 CPU 표시가 붙지 않으므로 CPU 를 시간당으로 따로 본다
+     * 화면 밖 CPU 표시가 붙지 않으므로 CPU 를 시간당으로 따로 본다. [cameBack] = 재시작한 뒤에도 다시 나타난 문제(id) — 시킨 대로
+     * 재시작했는데 그대로면 같은 '재시작'을 되풀이하지 않고 다음 단계로
      */
     fun detect(
         ranks: List<AppDrainRank>, watchFace: String? = null, windowMs: Long? = null, screenOnMs: Long? = null,
-        notifications: Int = 0, label: (String) -> String? = { null },
+        notifications: Int = 0, label: (String) -> String? = { null }, cameBack: Set<String> = emptySet(),
     ): List<KnownIssue> {
         if (ranks.isEmpty()) return emptyList()
         // 창이 1시간쯤(55분)은 돼야 — 짧으면(첫 스냅샷·재시작 직후·폰에서 알림 다시 받기) 잠깐의 일이 시간당으로 부풀려진다.
@@ -58,15 +61,23 @@ object KnownIssues {
         val out = ArrayList<KnownIssue>()
         ranks.withIndex().firstOrNull { (_, r) -> r.use.pkg.substringBefore('+') == GMS }?.let { (i, r) ->
             if (r.grade != Grade.NORMAL && (i == 0 || r.score >= total * SHARE)) {
-                out += KnownIssue(
+                val cache = "Play 서비스 앱 정보 > 저장공간 > 캐시 지우기 (데이터 지우기는 하지 마세요 — 계정이 다시 동기화됩니다)"
+                val pc = "PC 툴킷 메뉴 8(자동 치료) — 모든 앱 캐시 정리와 Play 서비스 다시 시작을 대신 합니다. 워치 Play 스토어의 업데이트도 확인하세요"
+                val why = (r.flags.filter { it != "이 앱" } + r.summary).joinToString(" · ")
+                out += if (PLAY_SERVICES_LOOP in cameBack) KnownIssue(
+                    PLAY_SERVICES_LOOP, GMS,
+                    "Google Play 서비스 과소모 — 재시작해도 그대로",
+                    why,
+                    listOf("$cache — 아직 안 했으면", "그래도 그대로면 $pc", "고쳐질 때까지 밤엔 지킴이 밤 모드"),
+                    r.grade,
+                    todo = "재시작해도 Play 서비스 과소모" to "캐시만 지우기(아직이면) → 그대로면 PC 툴킷 메뉴 8(자동 치료)",
+                    tile = "Play 서비스 과소모 — 캐시·PC 치료",
+                    cameBack = true,
+                ) else KnownIssue(
                     PLAY_SERVICES_LOOP, GMS,
                     "Google Play 서비스 과소모 — 2026년 갤럭시워치에 되풀이된 문제",
-                    (r.flags.filter { it != "이 앱" } + r.summary).joinToString(" · "),
-                    listOf(
-                        "Play 서비스 앱 정보 > 저장공간 > 캐시 지우기 (데이터 지우기는 하지 마세요 — 계정이 다시 동기화됩니다)",
-                        "30분 뒤에도 그대로면 홈 + 뒤로 버튼을 꺼질 때까지(7초 이상) 눌러 강제 재시작",
-                        "또 돌아오면 PC 툴킷 메뉴 8(자동 치료) — 모든 앱 캐시 정리와 Play 서비스 다시 시작을 대신 합니다. 워치 Play 스토어의 업데이트도 확인하세요",
-                    ),
+                    why,
+                    listOf(cache, "30분 뒤에도 그대로면 홈 + 뒤로 버튼을 꺼질 때까지(7초 이상) 눌러 강제 재시작", "또 돌아오면 $pc"),
                     r.grade,
                     // 줄에 맞게 — '캐시만'(데이터는 지우지 않음)이 잘려 '데이터 지…'로 읽히지 않게
                     todo = "Play 서비스 과소모" to "앱 정보 › 저장공간 › 캐시만 지우기 → 30분 뒤 그대로면 강제 재시작",
@@ -119,15 +130,27 @@ object KnownIssues {
                     val cpuNote = "화면이 거의 꺼져 있던 ${fmtHours(hours)} 동안 CPU ${(r.use.cpuMs / 60_000).toInt()}분 (화면 켜짐 ${(screenOnMs / 60_000).toInt()}분" +
                         (if (notifications > 0) " · 알림 ${notifications}개" else "") + ")"
                     val name = label(HOME) ?: "One UI Watch 홈"
-                    out += KnownIssue(
+                    val why = (listOf(cpuNote) + r.flags.filter { it != "이 앱" }).joinToString(" · ")
+                    val cache = "설정 › 애플리케이션 › $name › 저장공간 › 캐시 지우기 (데이터 지우기는 하지 마세요 — 홈 화면 배치가 초기화됩니다)"
+                    val report = "계속되면 Samsung Members 앱으로 오류 보고(삼성 안내) — 고쳐질 때까지 밤엔 지킴이 밤 모드"
+                    out += if (HOME_HOG in cameBack) KnownIssue(
+                        HOME_HOG, HOME,
+                        "One UI Watch 홈이 화면 꺼진 채 많이 씀 — 재시작해도 그대로",
+                        why,
+                        listOf(cache, "캐시를 지운 뒤 한 번 더 강제 재시작(홈 + 뒤로 7초 이상)", report),
+                        grade,
+                        todo = "재시작해도 홈 과소모 그대로" to "앱 정보 › 저장공간 › 캐시만 지우기 → 그대로면 Samsung Members 오류 보고",
+                        tile = "One UI Watch 홈 과소모 — 홈 캐시 지우기",
+                        cameBack = true,
+                    ) else KnownIssue(
                         HOME_HOG, HOME,
                         "One UI Watch 홈이 화면 꺼진 채 많이 씀 — 2026년 업데이트 뒤 보고된 문제",
-                        (listOf(cpuNote) + r.flags.filter { it != "이 앱" }).joinToString(" · "),
+                        why,
                         listOf(
                             "홈 + 뒤로 버튼을 꺼질 때까지(7초 이상) 눌러 강제 재시작 — 보통 재시작으론 안 풀리고 강제 재시작으로 나아졌다는 보고가 있습니다",
                             "업데이트한 지 며칠 안 됐으면 적응 기간일 수 있습니다 — 충전기 위에서 하룻밤 지나도 그대로면 다음 단계",
-                            "설정 › 애플리케이션 › $name › 저장공간 › 캐시 지우기 (데이터 지우기는 하지 마세요 — 홈 화면 배치가 초기화됩니다)",
-                            "계속되면 Samsung Members 앱으로 오류 보고(삼성 안내) — 고쳐질 때까지 밤엔 지킴이 밤 모드",
+                            cache,
+                            report,
                         ),
                         grade,
                         todo = "One UI Watch 홈 과소모" to "홈+뒤로 버튼 7초 넘게 눌러 강제 재시작 → 그대로면 홈 앱 캐시만 지우기",

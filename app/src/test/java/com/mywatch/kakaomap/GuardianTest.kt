@@ -685,10 +685,10 @@ class GuardianTest {
         fill(at(12, 30), 9, 78.0, 1.0)
         Guardian.tick(context, log, at(12, 30), stats = UidStatsSource { mapOf(home to UidUse(home, cpuMs = 32 * 60_000L)) }, zone = zone)
         assertEquals("켜진 지 15분 — 기준값", at(12, 30), HealthStore(context).lastAt())
-        // 그 뒤 1시간 동안 홈이 또 돌면 다시 짚는다
+        // 그 뒤 1시간 동안 홈이 또 돌면 다시 짚는다 (재시작해도 그대로 — 다음 단계로)
         fill(at(13, 30), 9, 77.0, 1.0)
         Guardian.tick(context, log, at(13, 30), stats = UidStatsSource { mapOf(home to UidUse(home, cpuMs = 52 * 60_000L)) }, zone = zone)
-        assertEquals("One UI Watch 홈 과소모 — 강제 재시작", Guardian.tileIssue(context, at(13, 30)))
+        assertEquals("One UI Watch 홈 과소모 — 홈 캐시 지우기", Guardian.tileIssue(context, at(13, 30)))
     }
 
     /** 업데이트 직후(예전 버전의 스냅샷 — 부팅을 안 적음)엔 1시간을 기다리지 않고 다음 15분 기록에서 기준값 (3차 리뷰) */
@@ -738,18 +738,55 @@ class GuardianTest {
         assertEquals("켜지기 전에 적은 줄", null, Guardian.tileIssue(context, now))
     }
 
-    /** 재시작 뒤에도 또 멈춰 돌면 재시작 뒤 기록이 1시간 쌓인 때 다시 짚는다 */
+    /**
+     * 재시작 뒤에도 또 멈춰 돌면 재시작 뒤 기록이 1시간쯤 쌓인 때 다시 짚는다 — 이번엔 같은 '강제 재시작'이 아니라 다음 단계(홈 캐시
+     * 지우기)로, 12시간 쉬는 중이어도 그 알림은 한 번 (시킨 대로 했는데 그대로라는 소식이라)
+     */
     @Test
-    fun aHogThatComesBackAfterARestartIsCaughtAgain() {
+    fun aHogThatComesBackAfterARestartGetsTheNextStep() {
         val home = com.mywatch.battery.core.KnownIssues.HOME
         bootCount(1)
         homeHogUntilNoon()
+        fun issueTitle() = shadowOf(nm).getNotification(Guardian.N_ISSUE)?.extras?.getString(android.app.Notification.EXTRA_TITLE).orEmpty()
+        assertTrue(issueTitle(), issueTitle().contains("One UI Watch 홈") && !issueTitle().contains("재시작해도"))
+        nm.cancel(Guardian.N_ISSUE)
         restartAndSettle(2)
         fill(at(13, 0), 9, 77.0, 1.0)
         Guardian.tick(context, log, at(13, 0), stats = UidStatsSource { mapOf(home to com.mywatch.battery.core.UidUse(home, cpuMs = 36 * 60_000L)) }, zone = zone)
         fill(at(14, 0), 9, 76.0, 1.0)
         Guardian.tick(context, log, at(14, 0), stats = UidStatsSource { mapOf(home to com.mywatch.battery.core.UidUse(home, cpuMs = 56 * 60_000L)) }, zone = zone)
-        assertEquals("One UI Watch 홈 과소모 — 강제 재시작", Guardian.tileIssue(context, at(14, 0)))
+        assertEquals("One UI Watch 홈 과소모 — 홈 캐시 지우기", Guardian.tileIssue(context, at(14, 0)))
+        assertTrue(issueTitle(), issueTitle().contains("재시작해도 그대로"))
+        // 배터리 화면도 같은 판단
+        val issue = com.mywatch.kakaomap.battery.BatteryInsights.compute(context, log.readAll(), at(14, 0), zone).issues.single()
+        assertTrue(issue.cameBack)
+        // 그 알림도 12시간에 한 번
+        nm.cancel(Guardian.N_ISSUE)
+        fill(at(15, 0), 9, 75.0, 1.0)
+        Guardian.tick(context, log, at(15, 0), stats = UidStatsSource { mapOf(home to com.mywatch.battery.core.UidUse(home, cpuMs = 76 * 60_000L)) }, zone = zone)
+        assertEquals("One UI Watch 홈 과소모 — 홈 캐시 지우기", Guardian.tileIssue(context, at(15, 0)))
+        assertEquals(null, shadowOf(nm).getNotification(Guardian.N_ISSUE))
+    }
+
+    /** 며칠 전(이틀 넘게) 다른 부팅에서 본 문제가 다시 나타난 것은 '재시작해도 그대로'가 아니다 — 처음부터 (강제 재시작) */
+    @Test
+    fun anIssueSeenDaysAgoStartsOver() {
+        val home = com.mywatch.battery.core.KnownIssues.HOME
+        grant()
+        event("android", at(10, 30), android.app.usage.UsageEvents.Event.SCREEN_INTERACTIVE)
+        event("android", at(10, 36), android.app.usage.UsageEvents.Event.SCREEN_NON_INTERACTIVE)
+        bootCount(1)
+        fill(at(9, 0), 9, 80.0, 1.0)
+        Guardian.tick(context, log, at(9, 0), stats = UidStatsSource { mapOf(home to UidUse(home)) }, zone = zone)
+        restartAndSettle(2)
+        fill(at(10, 0), 9, 79.0, 1.0)
+        Guardian.tick(context, log, at(10, 0), stats = UidStatsSource { mapOf(home to UidUse(home)) }, zone = zone)
+        // 사흘 전 첫 부팅에서 본 것으로
+        context.getSharedPreferences(BatteryLog.PREFS, Context.MODE_PRIVATE).edit()
+            .putInt("gs_issue_seen_seq_watch-home-hog", 0).putLong("gs_issue_seen_at_watch-home-hog", at(12, 0, d = 17)).commit()
+        fill(at(11, 0), 9, 78.0, 1.0)
+        Guardian.tick(context, log, at(11, 0), stats = UidStatsSource { mapOf(home to UidUse(home, cpuMs = 20 * 60_000L)) }, zone = zone)
+        assertEquals("One UI Watch 홈 과소모 — 강제 재시작", Guardian.tileIssue(context, at(11, 0)))
     }
 
     /**

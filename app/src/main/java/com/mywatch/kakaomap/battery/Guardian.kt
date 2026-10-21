@@ -327,7 +327,8 @@ object Guardian {
         val w = culpritWindow(c, now, boot)
         val face = runCatching { BatteryInsights.watchFace(c) }.getOrNull()
         // 화면 켜짐·알림은 6시간치만 읽었다 — 창이 그보다 앞서면 화면 켜짐을 모른다
-        val found = issuesIn(w, face, screen, notifications, now - SCREEN_LOOKBACK_MS, BatteryInsights.appName(c))
+        val found = issuesIn(w, face, screen, notifications, now - SCREEN_LOOKBACK_MS, cameBack(c, now), BatteryInsights.appName(c))
+        noteSeen(c, now, found)
         // 타일은 이 결과를 읽는다 (타일이 통계 파일을 읽고 분석하지 않게) — 문제마다 그 할 일로, 비정상 먼저. 어느 부팅에서 본 것인지도
         val top = found.firstOrNull { it.grade == Grade.ABNORMAL } ?: found.firstOrNull()
         prefs(c).edit().putString(K_TILE_ISSUE, top?.let { it.tile ?: it.title }).putString(K_TILE_ISSUE_GRADE, top?.grade?.name)
@@ -342,13 +343,51 @@ object Guardian {
      * 15분 기록과 배터리 화면이 같은 판단을 쓴다
      */
     internal fun issuesIn(
-        w: CulpritWindow, face: String?, screen: List<Span>?, notifications: List<Long>?, recordedFrom: Long, label: (String) -> String?,
+        w: CulpritWindow, face: String?, screen: List<Span>?, notifications: List<Long>?, recordedFrom: Long,
+        cameBack: Set<String> = emptySet(), label: (String) -> String?,
     ): List<com.mywatch.battery.core.KnownIssue> {
         val known = w.spans.isNotEmpty() && w.spans.all { it.first >= recordedFrom }
         val screenOn = screen?.takeIf { known }?.sumOf { s -> w.spans.sumOf { (a, b) -> s.overlap(a, b) } }
         val notes = notifications?.count { t -> w.spans.any { (a, b) -> t >= a && t < b } } ?: 0
-        return KnownIssues.detect(w.ranks, face, w.windowMs.takeIf { it > 0 }, screenOn, notes, label)
+        return KnownIssues.detect(w.ranks, face, w.windowMs.takeIf { it > 0 }, screenOn, notes, label, cameBack)
     }
+
+    /** 재시작해도 그대로인지 보려고 기억하는 문제 — 첫 단계가 재시작인 것들 */
+    private val RESTART_FIRST = listOf(KnownIssues.HOME_HOG, KnownIssues.PLAY_SERVICES_LOOP)
+
+    /** 이틀이 넘게 안 보였던 문제가 다시 나타나면 새 일로 (처음 단계부터) */
+    const val ISSUE_RECALL_MS = 48L * 3_600_000L
+
+    /**
+     * 재시작한 뒤에도 다시 나타난 문제(id) — 이번 일(이틀 안에 계속 보임)에서 처음 본 부팅 차례가 지금보다 앞이면. 시킨 대로 재시작했는데
+     * 그대로면 같은 '재시작'을 되풀이하지 않고 다음 단계를 주려고 (15분 기록·배터리 화면이 같이 씀)
+     */
+    fun cameBack(c: Context, now: Long): Set<String> {
+        val p = prefs(c)
+        val seq = HealthStore(c).bootSeq()
+        return RESTART_FIRST.filter { id ->
+            val at = p.getLong("$K_SEEN_AT$id", 0L)
+            val first = p.getInt("$K_SEEN_SEQ$id", -1)
+            at > 0 && now - at in 0 until ISSUE_RECALL_MS && first in 0 until seq
+        }.toSet()
+    }
+
+    /** 이번에 본 문제를 적는다 — 이번 일의 첫 부팅 차례는 그대로 두고(이틀 넘게 안 보였으면 새로) 본 때만 새로 */
+    private fun noteSeen(c: Context, now: Long, found: List<com.mywatch.battery.core.KnownIssue>) {
+        val p = prefs(c)
+        val seq = HealthStore(c).bootSeq()
+        val e = p.edit()
+        for (i in found.filter { it.id in RESTART_FIRST }) {
+            val at = p.getLong("$K_SEEN_AT${i.id}", 0L)
+            val ongoing = at > 0 && now - at in 0 until ISSUE_RECALL_MS && p.getInt("$K_SEEN_SEQ${i.id}", -1) >= 0
+            if (!ongoing) e.putInt("$K_SEEN_SEQ${i.id}", seq)
+            e.putLong("$K_SEEN_AT${i.id}", now)
+        }
+        e.apply()
+    }
+
+    private const val K_SEEN_SEQ = "gs_issue_seen_seq_"
+    private const val K_SEEN_AT = "gs_issue_seen_at_"
 
     private const val K_TILE_ISSUE = "gs_tile_issue"
     private const val K_TILE_ISSUE_GRADE = "gs_tile_issue_grade"
@@ -374,8 +413,10 @@ object Guardian {
         // 예전(문제 구분 없는) 시각은 업데이트 뒤 12시간까지만 같이 본다 — 따로 따져서, 시계가 바뀌어 미래가 된 예전 시각이 문제별 쉼을 가리지 않게
         val legacy = p.getLong(K_S_ISSUE_AT, 0L)
         fun cooling(at: Long) = at > 0 && now - at in 0 until ISSUE_COOLDOWN_MS
-        fun resting(id: String): Boolean = cooling(p.getLong("${K_S_ISSUE_AT}_$id", 0L)) || cooling(legacy)
-        val issue = knownIssues(c, now, screen, notifications).firstOrNull { it.grade == Grade.ABNORMAL && !resting(it.id) } ?: return
+        // 재시작해도 그대로라는 다음 단계 알림은 따로 쉰다 — 12시간 안에 시킨 대로 재시작했어도 그 소식은 한 번 간다
+        fun key(i: com.mywatch.battery.core.KnownIssue) = "${K_S_ISSUE_AT}_${i.id}" + if (i.cameBack) "_back" else ""
+        fun resting(i: com.mywatch.battery.core.KnownIssue): Boolean = cooling(p.getLong(key(i), 0L)) || cooling(legacy)
+        val issue = knownIssues(c, now, screen, notifications).firstOrNull { it.grade == Grade.ABNORMAL && !resting(it) } ?: return
         val (nm, channel) = BatteryAlerts.manager(c, BatteryAlerts.quiet(now, zone)) ?: return
         val text = "${issue.why}. 해결: " + issue.steps.mapIndexed { i, s -> "${i + 1}) $s" }.joinToString(" ")
         val info = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${issue.pkg}")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -390,7 +431,7 @@ object Guardian {
                 PendingIntent.getActivity(c, 4, info, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT))
             .build()
         nm.notify(N_ISSUE, n)
-        p.edit().putLong("${K_S_ISSUE_AT}_${issue.id}", now).apply()
+        p.edit().putLong(key(issue), now).apply()
         noteAction(c, "알려진 문제 알림: ${issue.title}")
     }
 

@@ -183,6 +183,33 @@ class KnownIssuesTest {
     }
 
     /** 해결 단계의 앱 이름은 이 워치에 보이는 이름으로 (모르면 'One UI Watch 홈') */
+    /**
+     * 시킨 대로 재시작했는데 그 뒤에도 또 짚이면(재시작 뒤 다시 나타남) 같은 '강제 재시작'을 되풀이하지 않고 다음 단계로 — 홈은 홈 캐시
+     * 지우기(앱 정보 단추로), Play 서비스는 캐시(아직이면) → PC 툴킷 자동 치료. 시계 화면은 재시작과 상관없어 그대로
+     */
+    @Test
+    fun anIssueThatCameBackAfterARestartMovesToTheNextStep() {
+        val home = AppDrain.rank(listOf(UidUse(KnownIssues.HOME, cpuMs = 30 * 60_000L)), 2 * h)
+        val first = KnownIssues.detect(home, windowMs = 2 * h, screenOnMs = 0).single()
+        assertEquals("One UI Watch 홈 과소모 — 강제 재시작", first.tile)
+        val again = KnownIssues.detect(home, windowMs = 2 * h, screenOnMs = 0, cameBack = setOf(KnownIssues.HOME_HOG)).single()
+        assertEquals(KnownIssues.HOME_HOG, again.id)
+        assertTrue(again.cameBack && !first.cameBack)
+        assertEquals("One UI Watch 홈 과소모 — 홈 캐시 지우기", again.tile)
+        assertTrue(again.title, again.title.contains("재시작해도 그대로"))
+        assertTrue(again.steps.first(), again.steps.first().contains("캐시 지우기") && again.steps.first().contains("데이터"))
+        assertTrue(again.steps.toString(), again.steps.none { it.startsWith("홈 + 뒤로") })
+        assertEquals("재시작해도 홈 과소모 그대로", again.todo!!.first)
+
+        val gms = AppDrain.rank(listOf(UidUse(KnownIssues.GMS, cpuMs = 30 * 60_000L, wakelockMs = 40 * 60_000L)), 2 * h)
+        val gmsAgain = KnownIssues.detect(gms, windowMs = 2 * h, cameBack = setOf(KnownIssues.PLAY_SERVICES_LOOP)).single()
+        assertTrue(gmsAgain.title, gmsAgain.title.contains("재시작해도 그대로"))
+        assertTrue(gmsAgain.todo!!.second, gmsAgain.todo!!.second.contains("PC 툴킷"))
+        assertEquals("Play 서비스 과소모 — 캐시·PC 치료", gmsAgain.tile)
+        // 다른 문제가 다시 나타났다고 이 문제가 바뀌지는 않는다
+        assertEquals(first, KnownIssues.detect(home, windowMs = 2 * h, screenOnMs = 0, cameBack = setOf(KnownIssues.PLAY_SERVICES_LOOP)).single())
+    }
+
     @Test
     fun theHomeStepsUseTheWatchsOwnAppName() {
         val ranks = AppDrain.rank(listOf(UidUse(KnownIssues.HOME, cpuMs = 24 * 60_000L)), 2 * h)

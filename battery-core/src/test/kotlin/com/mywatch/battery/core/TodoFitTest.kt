@@ -23,6 +23,10 @@ class TodoFitTest {
         val home = AppDrainRank(UidUse(KnownIssues.HOME, cpuMs = 40 * 60_000L, fgMs = 2 * 3_600_000L), 1e8, emptyList(), Grade.NORMAL)
         val homeIssue = KnownIssues.detect(listOf(home), windowMs = 2 * 3_600_000L, screenOnMs = 60_000L).single()
         fits(homeIssue.todo)
+        // 재시작 뒤 다시 나타난 문제의 다음 단계 줄도
+        val all = setOf(KnownIssues.HOME_HOG, KnownIssues.PLAY_SERVICES_LOOP)
+        fits(KnownIssues.detect(listOf(home), windowMs = 2 * 3_600_000L, screenOnMs = 60_000L, cameBack = all).single().todo)
+        KnownIssues.detect(listOf(gms, face), "com.example.face", 2 * 3_600_000L, cameBack = all).forEach { fits(it.todo) }
     }
 
     @Test
