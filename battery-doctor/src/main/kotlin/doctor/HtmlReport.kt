@@ -15,9 +15,9 @@ import java.util.Locale
 object HtmlReport {
     private const val RAW_LIMIT = 200_000
 
-    fun write(snapshot: Snapshot, f: Facts, findings: List<Finding>, v: DoctorVerdict, zone: ZoneId = ZoneId.systemDefault()): File {
+    fun write(snapshot: Snapshot, f: Facts, findings: List<Finding>, v: DoctorVerdict, zone: ZoneId = ZoneId.systemDefault(), comparison: Comparison? = null): File {
         val file = File(snapshot.dir, "report.html")
-        file.writeText(render(f, findings, v, rawSections(snapshot), zone), Charsets.UTF_8)
+        file.writeText(render(f, findings, v, rawSections(snapshot), zone, comparison), Charsets.UTF_8)
         return file
     }
 
@@ -41,7 +41,10 @@ object HtmlReport {
         else { java.awt.Desktop.getDesktop().browse(file.toURI()); true }
     } catch (_: Throwable) { false }
 
-    fun render(f: Facts, findings: List<Finding>, v: DoctorVerdict, raw: Map<String, String> = emptyMap(), zone: ZoneId = ZoneId.systemDefault()): String {
+    fun render(
+        f: Facts, findings: List<Finding>, v: DoctorVerdict, raw: Map<String, String> = emptyMap(), zone: ZoneId = ZoneId.systemDefault(),
+        comparison: Comparison? = null,
+    ): String {
         val sb = StringBuilder(64 * 1024)
         val when_ = f.collectedAt?.let { stamp(it, zone) } ?: "?"
         sb.append("<!doctype html>\n<html lang=\"ko\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n")
@@ -60,6 +63,20 @@ object HtmlReport {
         sb.append("<section class=\"card\"><h2>지금 할 일 3가지</h2><ol class=\"todo\">")
         v.todo.forEach { sb.append("<li>${esc(it)}</li>") }
         sb.append("</ol></section>\n")
+
+        // 2-1. 치료 전후 비교 (지난 수집이 있을 때)
+        comparison?.let { c ->
+            sb.append("<section class=\"card\"><h2>치료 전후 비교</h2>")
+            sb.append("<p class=\"headline\">${esc(c.headline)}</p>")
+            sb.append("<p class=\"meta\">지난 수집 ${esc(stamp(c.beforeAt, zone))} → 이번 수집 ${esc(stamp(c.afterAt, zone))}")
+            if (c.actions.isNotEmpty()) sb.append(" · 사이에 한 조치: ${c.actions.joinToString(", ") { "<code>${esc(it)}</code>" }}")
+            sb.append("</p><table><tr><th>항목</th><th>전</th><th>후</th><th>변화</th></tr>")
+            for (r in c.rows) {
+                val cls = when (r.change) { Change.BETTER -> "good"; Change.WORSE -> "bad"; Change.SAME -> "" }
+                sb.append("<tr><td>${esc(r.label)}</td><td>${esc(r.before)}</td><td>${esc(r.after)}</td><td class=\"$cls\">${esc(r.change.label)}</td></tr>")
+            }
+            sb.append("</table><p class=\"legend\">15% 넘게(항목마다 정한 만큼 넘게) 달라져야 변화로 봅니다. 사용 습관이 같은 날끼리 비교해야 정확합니다.</p></section>\n")
+        }
 
         // 3. 수치 요약
         sb.append("<section class=\"card\"><h2>수치 요약</h2>")
@@ -330,7 +347,7 @@ table.kv th{width:38%}
 .sev-ABNORMAL{border-left-color:#e53935}.sev-CAUTION{border-left-color:#fb8c00}.sev-INFO{border-left-color:#9e9e9e}
 .badge{display:inline-block;font-size:.75rem;padding:1px 6px;border-radius:4px;background:#9e9e9e;color:#fff;margin-right:4px}.finding.sev-ABNORMAL .badge,.badge.sev-ABNORMAL{background:#e53935}.finding.sev-CAUTION .badge,.badge.sev-CAUTION{background:#fb8c00}
 .fhead{font-weight:600}.source{font-size:.8rem;color:#666;margin:4px 0 0}.pkgs{margin:4px 0 0}code{background:#f1f1f1;padding:0 4px;border-radius:3px;font-size:.88em}
-.bad{color:#c62828;font-weight:600}.legend{font-size:.85rem;color:#555}
+.bad{color:#c62828;font-weight:600}.good{color:#2e7d32;font-weight:600}.legend{font-size:.85rem;color:#555}
 details{margin:6px 0}summary{cursor:pointer;font-weight:600}pre{background:#f4f4f4;padding:8px;overflow:auto;font-size:.78rem;max-height:60vh;white-space:pre-wrap;word-break:break-all}
 footer{color:#555;font-size:.85rem;padding:8px 4px}footer ul{padding-left:18px}
 svg text{font-family:inherit}

@@ -140,6 +140,10 @@ object Collect {
     fun latest(root: File): Snapshot? =
         File(root, "snapshots").listFiles()?.filter { it.isDirectory }?.maxByOrNull { it.name }?.let { Snapshot(it) }
 
+    /** [snap] 바로 앞의 수집 (치료 전후 비교용) — 없으면 null */
+    fun before(root: File, snap: Snapshot): Snapshot? =
+        File(root, "snapshots").listFiles()?.filter { it.isDirectory && it.name < snap.dir.name }?.maxByOrNull { it.name }?.let { Snapshot(it) }
+
     /** `[key]: [value]` 형태의 getprop 출력에서 값 */
     fun propOf(getprop: String, key: String): String? {
         val m = Regex("\\[" + Regex.escape(key) + "\\]: \\[([^\\]]*)\\]").find(getprop) ?: return null

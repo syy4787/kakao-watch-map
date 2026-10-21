@@ -100,6 +100,22 @@ object Main {
         }
     }
 
+    /**
+     * 이 수집 바로 앞의 수집과 비교해 콘솔에 보이고 돌려준다 (보고서에도 싣는다) — 처음 수집이거나 비교할 값이 없으면 null.
+     * collect / analyze / treat 가 같이 쓴다
+     */
+    fun compareWithPrevious(io: Console, dataDir: File, snap: Snapshot, after: Facts, journal: Journal, zone: ZoneId): Comparison? {
+        val prev = Collect.before(dataDir, snap) ?: return null
+        val c = runCatching { Compare.of(Analyzer.facts(prev, zone), after, journal.entries()) }.getOrNull() ?: return null
+        val fmt = DateTimeFormatter.ofPattern("M/d HH:mm")
+        io.println()
+        io.println("━━ 지난 수집과 비교 (${Instant.ofEpochMilli(c.beforeAt).atZone(zone).format(fmt)} → ${Instant.ofEpochMilli(c.afterAt).atZone(zone).format(fmt)})" +
+            (if (c.actions.isNotEmpty()) " — 사이에 한 조치: ${c.actions.joinToString(", ")}" else ""))
+        io.println("   ${c.headline}")
+        c.rows.forEach { r -> io.println(String.format("    - %s: %s → %s (%s)", r.label, r.before, r.after, r.change.label)) }
+        return c
+    }
+
     /** 판정 요약을 콘솔에 — collect / analyze / treat 가 같이 쓴다. [opened] 가 null 이면 브라우저 안내를 생략 */
     fun printVerdict(io: Console, findings: List<Finding>, v: DoctorVerdict, report: File, opened: Boolean?) {
         io.println()
@@ -202,7 +218,8 @@ object Main {
             val f = Analyzer.facts(snap, zone)
             val findings = Analyzer.findings(f)
             val v = Analyzer.verdict(f, findings)
-            val report = HtmlReport.write(snap, f, findings, v, zone)
+            val cmp = compareWithPrevious(io, dataDir, snap, f, journal, zone)
+            val report = HtmlReport.write(snap, f, findings, v, zone, cmp)
             printVerdict(io, findings, v, report, open(report))
             return 0
         }

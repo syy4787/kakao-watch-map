@@ -123,7 +123,8 @@ object Treat {
         val f = Analyzer.facts(snap, zone)
         val findings = Analyzer.findings(f)
         val v = Analyzer.verdict(f, findings)
-        val report = HtmlReport.write(snap, f, findings, v, zone)
+        val cmp = Main.compareWithPrevious(io, dataDir, snap, f, journal, zone)
+        val report = HtmlReport.write(snap, f, findings, v, zone, cmp)
         Main.printVerdict(io, findings, v, report, opened = null)
 
         // (d) 조치

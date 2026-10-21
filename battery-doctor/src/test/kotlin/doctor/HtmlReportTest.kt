@@ -118,6 +118,21 @@ class HtmlReportTest {
     }
 
     @Test
+    fun theBeforeAfterComparisonIsASectionAfterTheTodoList() {
+        val (f, fs, _) = sampleReport()
+        val c = Comparison(0L, 1L, listOf("trim-caches"), listOf(CompareRow(Compare.SCREEN_OFF, "시간당 3.0%", "시간당 1.0%", Change.BETTER)),
+            "조치 뒤 좋아졌습니다: 화면 꺼짐 소모 시간당 3.0% → 1.0% (66% 줄어듦)")
+        val html = HtmlReport.render(f, fs, Analyzer.verdict(f, fs), emptyMap(), zone, comparison = c)
+        val todo = html.indexOf("<h2>지금 할 일")
+        val cmp = html.indexOf("<h2>치료 전후 비교")
+        assertTrue(cmp > todo)
+        assertTrue(cmp < html.indexOf("<h2>수치 요약"))
+        assertTrue(html.contains("trim-caches"))
+        assertTrue(html.contains("좋아짐"))
+        assertFalse(HtmlReport.render(f, fs, Analyzer.verdict(f, fs), emptyMap(), zone).contains("치료 전후 비교"))
+    }
+
+    @Test
     fun escapesHtmlAndShowsSources() {
         val f = Facts(model = "SM-L350 <test> & co")
         val fs = listOf(Finding("x", Severity.ABNORMAL, "태그 <script>alert(1)</script> & 끝", listOf("근거 <b>"), listOf("com.example.<evil>"), source = Thresholds.SOURCE_IDLE, category = "drain"))

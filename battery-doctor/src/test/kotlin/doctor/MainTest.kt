@@ -84,6 +84,27 @@ class MainTest {
         assertTrue(out.contains("지금 할 일"))
     }
 
+    /** 두 번째 수집부터는 지난 수집과 나란히 — 사이에 한 조치와 함께 (같은 기록이면 '차이가 크지 않음') */
+    @Test
+    fun analyzeComparesWithThePreviousCollection() {
+        val data = tmp.newFolder("data")
+        val first = sampleSnapshot(data)
+        val second = File(data, "snapshots/20261021-090000").apply { mkdirs() }
+        first.dir.listFiles()!!.filter { it.isFile && it.name != "report.html" }.forEach { it.copyTo(File(second, it.name), overwrite = true) }
+        val t1 = Snapshot(first.dir).time
+        File(second, "date.txt").writeText(((t1 + 35 * 3_600_000L) / 1000).toString())
+        Journal(File(data, "journal.jsonl")).append(doctor.fix.JournalEntry(t1 + 3_600_000L, "trim-caches", null, emptyList(), null, false))
+        val (code, out) = run(fakeAdb(), data, "analyze")
+        assertEquals(out, 0, code)
+        assertTrue(out, out.contains("지난 수집과 비교"))
+        assertTrue(out, out.contains("trim-caches"))
+        assertTrue(out, out.contains("차이가 크지 않"))
+        assertTrue(File(second, "report.html").readText().contains("치료 전후 비교"))
+        // 처음 수집이면 비교 없음
+        val (_, firstOut) = run(fakeAdb(), data, "analyze", first.dir.path)
+        assertFalse(firstOut.contains("지난 수집과 비교"))
+    }
+
     @Test
     fun analyzeWithoutSnapshotExplains() {
         val (code, out) = run(fakeAdb(), tmp.newFolder("data"), "analyze")
