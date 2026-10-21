@@ -512,7 +512,7 @@ class BatteryActivity : ComponentActivity() {
                 t.advice(names)?.let { (title, detail) -> rows += Row.Note("할 일: $title — $detail") }
             }
             valid.size >= MIN_TREND_DAYS -> rows += Row.Note("큰 변화 없음 — 날마다 대기 시간당 ${DrainAnalyzer.fmt(valid.min())}~${DrainAnalyzer.fmt(valid.max())}%")
-            else -> rows += Row.Note("날마다 견주려면 대기 기록이 ${DrainAnalyzer.fmt(com.mywatch.battery.core.DayTrend.MIN_HOURS)}시간 넘는 날이 ${MIN_TREND_DAYS}일 필요합니다 (지금 ${valid.size}일)")
+            else -> rows += Row.Note("날마다 견주려면 대기 기록이 ${com.mywatch.battery.core.DayTrend.MIN_HOURS.toInt()}시간 넘는 날이 ${MIN_TREND_DAYS}일 필요합니다 (지금 ${valid.size}일)")
         }
         val others = t.recent.filter { it !in near }.take(TREND_RECENT)
         if (others.isNotEmpty()) rows += Row.Note("최근 바뀐 것:\n" + others.joinToString("\n", transform = ::line))

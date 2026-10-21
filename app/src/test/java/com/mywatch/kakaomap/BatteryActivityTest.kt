@@ -87,6 +87,9 @@ class BatteryActivityTest {
         // 맨 위 '지금 할 일': 권한이 없으면 PC 툴킷 자동 치료부터
         val todo = steps.first { it.key == "todo:0" }
         assertTrue(todo.sub ?: "", (todo.sub ?: "").contains("메뉴 8"))
+        // 12시간 기록 = 날마다 견줄 날이 모자람 — 몇 시간 넘는 날이 며칠 필요한지 (6.0시간이 아니라 6시간)
+        val need = rows(adapter).filterIsInstance<Row.Note>().first { it.text.startsWith("날마다 견주려면") }
+        assertTrue(need.text, need.text.contains("6시간 넘는 날이 4일"))
     }
 
     @Test
