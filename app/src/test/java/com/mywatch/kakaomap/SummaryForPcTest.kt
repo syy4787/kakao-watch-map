@@ -85,6 +85,12 @@ class SummaryForPcTest {
         val now2 = SummaryMetrics.parse(BatterySummary.metricsLine(a, ins.copy(issues = listOf(home), appWindowMs = 2 * 3_600_000L), now))
         assertNull("지금 짚은 문제", now2["seen_home_h"])
         assertEquals(2.0, now2["issue_home"])
+        // 이번 일을 처음 짚은 때 — 지금 짚었든 안 보이든 (PC 신고문의 '처음 짚은 때')
+        val first = now - 26 * 3_600_000L
+        val withFirst = SummaryMetrics.parse(BatterySummary.metricsLine(a, ins.copy(issues = listOf(home), appWindowMs = 2 * 3_600_000L,
+            firstSeen = mapOf(KnownIssues.HOME_HOG to first)), now))
+        assertEquals(first.toDouble(), withFirst["first_home_at"])
+        assertNull(withFirst["first_gms_at"])
     }
 
     /** 셸이 '지금 요약'을 부르면(PC 수집 직전) 하루 한 번을 기다리지 않고 새로 쓴다 */

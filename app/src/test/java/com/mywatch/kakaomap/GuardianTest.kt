@@ -856,6 +856,27 @@ class GuardianTest {
         assertEquals("One UI Watch 홈 과소모 계속 — 오류 보내기", Guardian.tileIssue(context, at(17, 15)))
     }
 
+    /**
+     * 이번 일을 처음 짚은 때를 기억한다 — 단계가 넘어가도 그대로, 이틀 넘게 안 보이면 잊는다 (PC 신고문의 '처음 짚은 때' — 증상이 얼마나
+     * 이어졌는지)
+     */
+    @Test
+    fun theFirstSightingOfAnEpisodeIsRemembered() {
+        bootCount(1)
+        homeHogUntilNoon()                                 // 12:00 처음 짚음
+        val home = com.mywatch.battery.core.KnownIssues.HOME_HOG
+        assertEquals(at(12, 0), Guardian.firstSeen(context, at(12, 0))[home])
+        restartAndSettle(2)
+        tickHome(at(13, 0), 36, 77.0)
+        tickHome(at(14, 0), 56, 76.0)                      // 다음 단계 — 처음 짚은 때는 그대로
+        assertEquals("One UI Watch 홈 과소모 — 홈 캐시 지우고 재시작", Guardian.tileIssue(context, at(14, 0)))
+        assertEquals(at(12, 0), Guardian.firstSeen(context, at(14, 0))[home])
+        // 배터리 화면·요약이 쓰는 분석 묶음에도 (PC 요약의 first_home_at)
+        assertEquals(at(12, 0), com.mywatch.kakaomap.battery.BatteryInsights.compute(context, log.readAll(), at(14, 0), zone).firstSeen[home])
+        assertTrue("이틀 넘게 안 보이면 잊는다", Guardian.firstSeen(context, at(14, 1, d = 22)).isEmpty())
+        assertTrue("시계가 뒤로 가 처음 짚은 때가 미래면 모름", Guardian.firstSeen(context, at(11, 0)).isEmpty())
+    }
+
     /** 시계가 뒤로 갔다 — 마지막으로 본 때가 미래가 돼도 이번 일은 이어진다 (처음 단계로 돌아가 같은 '강제 재시작'을 되풀이하지 않게 · 리뷰) */
     @Test
     fun aClockGoingBackKeepsTheEpisode() {

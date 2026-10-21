@@ -155,6 +155,9 @@ object BatterySummary {
         }
         seen(com.mywatch.battery.core.KnownIssues.PLAY_SERVICES_LOOP, "seen_gms_h")
         seen(com.mywatch.battery.core.KnownIssues.HOME_HOG, "seen_home_h")
+        // 이번 일을 처음 짚은 때 (epoch ms) — 지금 짚었든 재시작·치료 뒤 다시 보는 중이든. PC 신고문이 '언제부터'를 적는다
+        insights?.firstSeen?.get(com.mywatch.battery.core.KnownIssues.PLAY_SERVICES_LOOP)?.let { put("first_gms_at", it.toDouble()) }
+        insights?.firstSeen?.get(com.mywatch.battery.core.KnownIssues.HOME_HOG)?.let { put("first_home_at", it.toDouble()) }
         val ins = insights?.takeIf { it.appWindowMs >= com.mywatch.battery.core.KnownIssues.MIN_WINDOW_MS } ?: return@apply
         put("issue_gms", issueCode(ins, com.mywatch.battery.core.KnownIssues.PLAY_SERVICES_LOOP))
         put("issue_home", issueCode(ins, com.mywatch.battery.core.KnownIssues.HOME_HOG))

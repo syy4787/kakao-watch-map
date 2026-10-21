@@ -1,6 +1,8 @@
 package doctor
 
+import com.mywatch.battery.core.ChangeFinder
 import com.mywatch.battery.core.Event
+import com.mywatch.battery.core.Gauge
 import com.mywatch.battery.core.GaugeDriftRule
 import com.mywatch.battery.core.RestartEffects
 import com.mywatch.battery.core.Thresholds
@@ -157,9 +159,11 @@ object Evidence {
         val mainRate = mainRate(f)
         val anomalies = f.watch?.anomalies?.takeIf { it.isNotEmpty() }?.let { list -> "${list.size}회 (" + list.groupBy { it.kind }.entries.joinToString(", ") { "${it.value.first().label} ${it.value.size}회" } + ")" } ?: (if (f.watch != null) "없음" else BLANK)
         val health = listOfNotNull(f.now?.asoc?.let { "삼성 기록 건강도(ASOC) $it%" }, f.watch?.capacity?.let { c -> "충전 곡선 추정 용량 ${fmt1(c.estimatedMah)} mAh${c.percentOfNominal?.let { p -> " (공칭의 ${fmt1(p)}%)" } ?: ""}" }).joinToString(", ").ifEmpty { BLANK }
-        // 워치 앱이 본 단계(재시작한 뒤에도 다시 나타남 등)는 따로 풀어 적으니 주요 소견에선 뺀다
-        val stages = watchStages(f, findings)
-        val keyFindings = findings.filter { it.severity != Severity.INFO && it.id !in stages.keys }.take(6).map { "- [${it.severity.label}] ${it.title}" }.ifEmpty { listOf("- $BLANK") }
+        // 워치 앱이 본 단계(재시작한 뒤에도 다시 나타남 등)·대기 소모가 늘어난 때는 따로 풀어 적으니 주요 소견에선 뺀다
+        val stages = watchStages(f, findings, zone)
+        val since = listOfNotNull(trendLine(f, findings, zone))
+        val told = stages.keys + if (since.isNotEmpty()) setOf("watch-shift") else emptySet()
+        val keyFindings = findings.filter { it.severity != Severity.INFO && it.id !in told }.take(6).map { "- [${it.severity.label}] ${it.title}" }.ifEmpty { listOf("- $BLANK") }
         val actions = journal.map { e ->
             if (e.id == doctor.fix.Fixer.UNDO_ALL) "- ${stamp(e.time, zone)} 모두 되돌리기 — ${e.note ?: "되돌림"}${if (!e.ok) " (일부 실패)" else ""}"
             else "- ${stamp(e.time, zone)} ${describeLever(e.id)} (${e.id})${if (e.undone) " — 되돌림" else ""}${if (!e.ok) " — 실패" else ""}"
@@ -185,6 +189,7 @@ object Evidence {
             appendLine("- 모델: $model$size, 펌웨어: $firmware, Google Play 서비스: ${f.gmsVersion ?: BLANK}")
             appendLine("- 구입일: $purchaseText$elapsed, 수집 시각: $collected")
             measures.forEach { appendLine("- $it") }
+            since.forEach { appendLine(it) }
             appendLine("- 잔량 표시 이상(워치 15분 기록): $anomalies")
             watchFacts.forEach { appendLine(it) }
             appendLine("- 배터리 건강도: $health")
@@ -214,6 +219,7 @@ object Evidence {
             appendLine()
             appendLine("측정 요약 (PC 툴킷 battery-doctor, 수집 $collected):")
             measures.forEach { appendLine("- $it") }
+            since.forEach { appendLine(it) }
             appendLine("- 잔량 표시 이상: $anomalies")
             watchFacts.forEach { appendLine(it) }
             appendLine("- 배터리 건강도: $health")
@@ -251,6 +257,7 @@ object Evidence {
             appendLine("1. 하자 내용")
             appendLine("정상적인 사용 상태에서 배터리가 $mainRate 소모되어 하루를 쓰지 못합니다 (공식 사용시간 최대 30~40시간).")
             measures.forEach { appendLine("- $it") }
+            since.forEach { appendLine(it) }
             appendLine("- 잔량 표시 이상: $anomalies / 배터리 건강도: $health")
             stages.values.forEach { appendLine(it) }
             appendLine("- 측정 근거: 첨부 report.html, 워치 15분 기록(watch_log.csv), dumpsys batterystats 원본")
@@ -354,12 +361,22 @@ object Evidence {
         val marks = samples.filter { isMark(it) && it.t in from..now }.map { it.t }
         fun label(b: com.mywatch.battery.core.BatterySample): String {
             val prev = samples.lastOrNull { it.t < b.t && it.event != Event.BOOT }
-            val tag = when {
-                marks.any { m -> b.t - m in 0..MARK_BEFORE_BOOT_MS || m - b.t in 0..GaugeDriftRule.MARKER_WINDOW_MS } -> "(강제 재시작 표시)"
-                b.plugged && prev != null && !prev.plugged && prev.level <= 3 -> "(직전 기록 ${prev.level}% · 충전기에서 켜짐)"
-                else -> ""
+            val tags = ArrayList<String>()
+            if (marks.any { m -> b.t - m in 0..MARK_BEFORE_BOOT_MS || m - b.t in 0..GaugeDriftRule.MARKER_WINDOW_MS }) tags += "강제 재시작 표시"
+            if (prev != null) {
+                val gained = b.level - prev.level
+                val high = gained >= Gauge.REBOOT_JUMP_MIN
+                when {
+                    // 방전 뒤 충전기에서 켜짐 — 크게 올라 있으면 마지막 기록이 얼마나 앞이었는지와 켜진 뒤 잔량도 (충전기에 둔 시간은 모름)
+                    b.plugged && !prev.plugged && prev.level <= 3 ->
+                        tags += if (high) "직전 기록 ${prev.level}%(${Analyzer.ago(b.t - prev.t, minutes = true)}) · 충전기에서 켜짐 · 켜진 뒤 ${b.level}%"
+                        else "직전 기록 ${prev.level}% · 충전기에서 켜짐"
+                    // 충전으로 그만큼 오를 수 없었다 — 게이지 점프와 같은 판단([Gauge.anomalies])
+                    high && !(b.plugged && Gauge.couldCharge(b.t - prev.t, gained)) ->
+                        tags += "직전 기록 ${prev.level}% → 켜진 뒤 ${b.level}%" + if (b.plugged) " · 충전기에서 켜짐" else ""
+                }
             }
-            return day(b.t, zone) + tag
+            return day(b.t, zone) + if (tags.isEmpty()) "" else tags.joinToString(" · ", "(", ")")
         }
         val shown = boots.takeLast(MAX_RESTARTS)
         val out = arrayListOf("- 워치 켜짐(부팅) 기록, 최근 ${RESTART_DAYS}일 ${boots.size}번: " + shown.joinToString(", ") { label(it) } +
@@ -387,27 +404,56 @@ object Evidence {
     }
 
     /**
-     * 워치 앱 지킴이가 앱별 통계로 본 단계 — 처음 짚은 뒤 워치가 다시 켜졌는데도(Play 서비스는 PC 치료 뒤에도) 또 나타났거나 계속인 알려진
-     * 문제 (소견 id → 한 줄). 워치가 아는 말로만: 다시 켜진 횟수는 알지만 사용자가 재시작했는지(방전 뒤 켜짐일 수도), 캐시를 지웠는지는
-     * 모른다 (리뷰)
+     * 워치 앱 지킴이가 앱별 통계로 본 단계 — 처음 짚은 때(워치가 알면)와, 그 뒤 워치가 다시 켜졌는데도(Play 서비스는 PC 치료 뒤에도) 또
+     * 나타났거나 계속인 알려진 문제 (소견 id → 한 줄). 워치가 아는 말로만: 다시 켜진 횟수는 알지만 사용자가 재시작했는지(방전 뒤 켜짐일
+     * 수도), 캐시를 지웠는지는 모른다 (리뷰)
      */
-    internal fun watchStages(f: Facts, findings: List<Finding>): Map<String, String> {
+    internal fun watchStages(f: Facts, findings: List<Finding>, zone: ZoneId): Map<String, String> {
         val out = LinkedHashMap<String, String>()
-        fun add(id: String, key: String, name: String) {
+        fun add(id: String, key: String, firstKey: String, name: String) {
             if (findings.none { it.id == id }) return
             val stage = f.watchMetrics[key] ?: 0.0
+            val after = when {
+                stage >= 2.0 && id == "watch-gms" -> "워치가 두 번 이상 다시 켜졌거나 PC 치료(캐시 정리·Play 서비스 다시 시작)를 한 뒤에도 계속"
+                stage >= 2.0 -> "워치가 두 번 이상 다시 켜진 뒤에도 계속"
+                stage >= 1.0 -> "워치가 다시 켜진 뒤에도 또 나타남"
+                else -> null
+            }
+            // 처음 짚은 때 — 수집보다 늦으면(시계가 뒤로 감) 모르는 것으로
+            val first = f.watchMetrics[firstKey]?.toLong()?.takeIf { t -> t > 0 && f.collectedAt?.let { t <= it } != false }
             val how = when {
-                stage >= 2.0 && id == "watch-gms" -> "처음 짚은 뒤 워치가 두 번 이상 다시 켜졌거나 PC 치료(캐시 정리·Play 서비스 다시 시작)를 한 뒤에도 계속"
-                stage >= 2.0 -> "처음 짚은 뒤 워치가 두 번 이상 다시 켜진 뒤에도 계속"
-                stage >= 1.0 -> "처음 짚은 뒤 워치가 다시 켜진 뒤에도 또 나타남"
+                first != null && after != null -> "처음 짚은 때 ${day(first, zone)}, 그 뒤 $after"
+                first != null -> "처음 짚은 때 ${day(first, zone)}"
+                after != null -> "처음 짚은 뒤 $after"
                 else -> return
             }
             out[id] = "- 워치 앱 지킴이(앱별 통계, 최근 2시간): $name — $how"
         }
-        add("watch-home", "back_home", "One UI Watch 홈이 화면 꺼진 채 CPU 를 많이 씀")
-        add("watch-gms", "back_gms", "Google Play 서비스 과소모")
+        add("watch-home", "back_home", "first_home_at", "One UI Watch 홈이 화면 꺼진 채 CPU 를 많이 씀")
+        add("watch-gms", "back_gms", "first_gms_at", "Google Play 서비스 과소모")
         return out
     }
+
+    /**
+     * 증상 쪽 사실 — 워치 15분 기록으로 대기 소모가 늘어난 때와 그 무렵 바뀐 것(워치 앱이 남긴 표시: 소프트웨어·앱 업데이트, 시계 화면,
+     * 주요 설정). 'watch-shift' 소견이 있을 때만(같은 조건 — 최근 7일 안에 늘어 꺾임). 업데이트 뒤 과소모라는 것이 날짜로 남게 — 그 무렵
+     * 바뀐 것을 원인으로 단정하지는 않는다
+     */
+    internal fun trendLine(f: Facts, findings: List<Finding>, zone: ZoneId): String? {
+        if (findings.none { it.id == "watch-shift" }) return null
+        val t = f.watchTrend ?: return null
+        val shift = t.shift?.takeIf { it.worse } ?: return null
+        val around = when {
+            t.suspects.isNotEmpty() -> "그 무렵 바뀐 것: " + t.suspects.take(MAX_SUSPECTS).joinToString(", ") { "${day(it.t, zone)} ${ChangeFinder.label(it) { null }}" } +
+                (if (t.suspects.size > MAX_SUSPECTS) " 외 ${t.suspects.size - MAX_SUSPECTS}개" else "")
+            !t.known -> "그 무렵 바뀐 것은 모름(워치 앱이 아직 적기 전)"
+            else -> "그 무렵 워치 앱이 아는 변화(소프트웨어·앱·시계 화면·주요 설정)는 없음"
+        }
+        return "- 대기 소모가 늘어난 때(워치 15분 기록): ${ChangeFinder.since(shift)} 시간당 ${fmt1(shift.before)}% → ${fmt1(shift.after)}% — $around"
+    }
+
+    /** 신고문에 적는 '그 무렵 바뀐 것' 개수 */
+    private const val MAX_SUSPECTS = 3
 
     private val dayFmt = DateTimeFormatter.ofPattern("M/d HH:mm")
     private fun day(t: Long, zone: ZoneId) = Instant.ofEpochMilli(t).atZone(zone).format(dayFmt)
