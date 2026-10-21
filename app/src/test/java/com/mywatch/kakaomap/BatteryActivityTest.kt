@@ -112,6 +112,25 @@ class BatteryActivityTest {
         view.draw(android.graphics.Canvas(android.graphics.Bitmap.createBitmap(view.measuredWidth, view.measuredHeight, android.graphics.Bitmap.Config.ARGB_8888)))
     }
 
+    /** 충전 습관: 밤마다 충전기에 100%로 몇 시간씩 있으면 '배터리 보호(90%)'를 권한다 */
+    @Test
+    fun chargingHabitsSuggestBatteryProtection() {
+        val now = System.currentTimeMillis()
+        var t = now - 3 * 24 * 3_600_000L
+        var level = 90
+        while (t < now) {
+            val hour = java.time.Instant.ofEpochMilli(t).atZone(java.time.ZoneId.systemDefault()).hour
+            val plugged = hour >= 22 || hour < 7
+            level = if (plugged) minOf(100, level + 10) else maxOf(20, level - 1)
+            log.append(BatterySample(t = t, level = level, plugged = plugged, tempDeciC = 320))
+            t += q
+        }
+        val (_, adapter) = open()
+        assertTrue(rows(adapter).any { it is Row.Header && it.title == "충전 습관" })
+        val step = rows(adapter).filterIsInstance<Row.Step>().first { it.key.startsWith("charge:") }
+        assertTrue(step.title + step.sub, (step.title + (step.sub ?: "")).contains("배터리 보호"))
+    }
+
     @Test
     fun startingAndEndingAnExperimentWritesMarkers() {
         val (a, adapter) = open()

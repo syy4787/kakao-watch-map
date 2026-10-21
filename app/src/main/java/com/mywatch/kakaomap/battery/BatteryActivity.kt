@@ -140,6 +140,14 @@ class BatteryActivity : ComponentActivity() {
         rows += Row.Header("용량 추정")
         rows += Row.Note(BatterySummary.capacityLine(a, live?.chargeUah != null))
 
+        insights?.charging?.let { ch ->
+            rows += Row.Header("충전 습관")
+            rows += Row.Note(BatterySummary.chargingLine(ch))
+            ch.advice.forEachIndexed { i, adv ->
+                rows += Row.Step(color(Grade.CAUTION), R.drawable.ic_battery, "할 일", adv.substringBefore(" — "), adv.substringAfter(" — ", ""), key = "charge:$i")
+            }
+        }
+
         rows += Row.Header("실험")
         val running = a.experiments.firstOrNull { it.end == null }
         if (running != null) {

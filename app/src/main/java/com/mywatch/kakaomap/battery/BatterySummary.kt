@@ -78,6 +78,13 @@ object BatterySummary {
         return "추정 ${DrainAnalyzer.fmt(c.estimatedMah)} mAh$pct — 충전 세션 ${c.sessions}회"
     }
 
+    /** "최근 7일 충전 7번 · 100%로 충전기에 하루 7.3시간 · 충전 중 최고 33℃ · 배터리 보호 켜진 것으로 보임" */
+    fun chargingLine(ch: com.mywatch.battery.core.ChargeHabits): String = listOfNotNull(
+        "최근 ${DrainAnalyzer.fmt(ch.days)}일 충전 ${ch.sessions}번",
+        if (ch.protectLikely) "배터리 보호(90%) 켜진 것으로 보임" else "100%로 충전기에 하루 ${DrainAnalyzer.fmt(ch.hoursAtFullPerDay)}시간",
+        ch.maxChargeTempC?.let { "충전 중 최고 ${DrainAnalyzer.fmt(it)}℃" },
+    ).joinToString(" · ")
+
     fun experimentLines(a: Analysis, now: Long): List<String> = a.experiments.map { e ->
         val span = ((e.end ?: now) - e.start) / 60_000
         val state = if (e.end == null) "진행 중" else "끝"
@@ -141,6 +148,10 @@ object BatterySummary {
         a.drift?.advice?.let { appendLine(" · $it") }
         a.recoveries.take(5).forEach { appendLine(" · 재시작 ${time(it.t)}: ${it.before}% → ${it.after}% (${if (it.gained >= 0) "+" else ""}${it.gained})" + (if (it.userMarked) " (직접 표시)" else "")) }
         appendLine("[용량 추정] ${capacityLine(a, live?.chargeUah != null)}")
+        insights?.charging?.let { ch ->
+            appendLine("[충전 습관] ${chargingLine(ch)}")
+            ch.advice.forEach { appendLine(" · $it") }
+        }
         val ex = experimentLines(a, now)
         appendLine("[실험] " + if (ex.isEmpty()) "없음" else "")
         ex.forEach { appendLine(" · $it") }

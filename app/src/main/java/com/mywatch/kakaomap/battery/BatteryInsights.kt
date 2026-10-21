@@ -5,6 +5,7 @@ import android.os.Build
 import com.mywatch.battery.core.Analysis
 import com.mywatch.battery.core.AppDrainRank
 import com.mywatch.battery.core.BatterySample
+import com.mywatch.battery.core.ChargeHabits
 import com.mywatch.battery.core.DrainAnalyzer
 import com.mywatch.battery.core.DrainChart
 import com.mywatch.battery.core.DrainChartModel
@@ -42,6 +43,8 @@ data class Insights(
     val chart: DrainChartModel? = null,
     /** 지금 시계 화면의 패키지 (모르면 null) */
     val watchFace: String? = null,
+    /** 충전 습관 (최근 7일, 충전 기록이 있을 때) */
+    val charging: ChargeHabits? = null,
 )
 
 object BatteryInsights {
@@ -75,6 +78,7 @@ object BatteryInsights {
         val chart = runCatching {
             DrainChart.buildOrNull(samples, now, zone, screen = usage?.screen, hot = breakdown?.steepest.orEmpty().map { it.start to it.end })
         }.onFailure { ErrorLog.record("배터리·그래프", it) }.getOrNull()
-        return Insights(analysis, breakdown, culprits, issues, effect, wakes, night, levers, chart, face)
+        val charging = runCatching { ChargeHabits.analyze(samples, now) }.getOrNull()
+        return Insights(analysis, breakdown, culprits, issues, effect, wakes, night, levers, chart, face, charging)
     }
 }
