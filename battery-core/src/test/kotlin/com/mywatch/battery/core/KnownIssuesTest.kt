@@ -121,10 +121,10 @@ class KnownIssuesTest {
         assertTrue(KnownIssues.detect(ranks, windowMs = 2 * h, screenOnMs = 40 * 60_000L).isEmpty())
         // 화면 켜진 시간을 모르면(사용 통계 권한 없음) 짚지 않는다
         assertTrue(KnownIssues.detect(ranks, windowMs = 2 * h).isEmpty())
-        // 시간당 4분이면 주의, 1분이면 그대로
-        val warm = AppDrain.rank(listOf(UidUse(home, cpuMs = 10 * 60_000L, fgMs = 2 * h)), 2 * h)
+        // 시간당 6분이면 주의, 4분(AOD·알림 표시로 있을 법함)이면 그대로
+        val warm = AppDrain.rank(listOf(UidUse(home, cpuMs = 14 * 60_000L, fgMs = 2 * h)), 2 * h)
         assertEquals(Grade.CAUTION, KnownIssues.detect(warm, windowMs = 2 * h, screenOnMs = 4 * 60_000L).single().grade)
-        val light = AppDrain.rank(listOf(UidUse(home, cpuMs = 4 * 60_000L, fgMs = 2 * h)), 2 * h)
+        val light = AppDrain.rank(listOf(UidUse(home, cpuMs = 10 * 60_000L, fgMs = 2 * h)), 2 * h)
         assertTrue(KnownIssues.detect(light, windowMs = 2 * h, screenOnMs = 4 * 60_000L).isEmpty())
         // 다른 앱이 훨씬 많이 쓰면 홈 탓을 하지 않는다
         val behind = AppDrain.rank(listOf(UidUse(home, cpuMs = 10 * 60_000L, fgMs = 2 * h), UidUse("com.example.drain", wakelockMs = 110 * 60_000L, cpuMs = 40 * 60_000L)), 2 * h)

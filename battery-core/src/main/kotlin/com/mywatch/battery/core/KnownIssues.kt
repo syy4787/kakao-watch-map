@@ -100,7 +100,7 @@ object KnownIssues {
                 val perH = idleCpuMs / hours
                 val cpuGrade = when {
                     perH > AppDrain.CPU_ABNORMAL_MS_PER_H -> Grade.ABNORMAL
-                    perH > AppDrain.CPU_CAUTION_MS_PER_H -> Grade.CAUTION
+                    perH > HOME_CAUTION_MS_PER_H -> Grade.CAUTION
                     else -> Grade.NORMAL
                 }
                 val grade = Grade.worst(listOf(cpuGrade, r.grade))
@@ -131,6 +131,12 @@ object KnownIssues {
 
     /** 창의 이만큼 넘게 화면이 켜져 있었으면 홈을 짚지 않는다 (홈을 쓴 것) */
     const val HOME_MAX_SCREEN_SHARE = 0.3
+
+    /**
+     * 홈의 '주의'는 다른 앱(시간당 3분)보다 높게 5분 — AOD 갱신·알림 표시처럼 화면이 꺼져 있어도 홈이 조금 하는 일이 있어서.
+     * (배터리 사용량 화면에서 홈이 1위인 것 자체는 흔하다 — 화면을 켜 둔 시간의 몫이 앞에 떠 있던 홈에 잡히므로. CPU 로만 본다)
+     */
+    const val HOME_CAUTION_MS_PER_H = 5L * 60_000L
 
     private fun fmtHours(h: Double): String = if (h >= 1.0) "${DrainAnalyzer.fmt(h)}시간".replace(".0시간", "시간") else "${(h * 60).toInt()}분"
 }
