@@ -10,6 +10,8 @@ import com.mywatch.battery.core.KnownIssue
 import com.mywatch.battery.core.KnownIssues
 import com.mywatch.battery.core.LeverEffect
 import com.mywatch.battery.core.LeverEffects
+import com.mywatch.battery.core.NightCulprits
+import com.mywatch.battery.core.NightReport
 import com.mywatch.battery.core.UsageBreakdown
 import com.mywatch.battery.core.UsageSplit
 import com.mywatch.battery.core.WakeStats
@@ -30,6 +32,8 @@ data class Insights(
     val nightEffect: LeverEffect,
     /** 화면이 켜진 횟수·알림이 켠 횟수 (사용 통계가 있을 때) */
     val wakes: WakeStats? = null,
+    /** 밤사이 뒤에서 쓴 앱 (앱별 통계가 있을 때) */
+    val night: NightReport? = null,
 )
 
 object BatteryInsights {
@@ -45,9 +49,10 @@ object BatteryInsights {
         }.onFailure { ErrorLog.record("배터리·사용 내역", it) }.getOrNull()
         val wakes = usage?.let { u -> runCatching { Wakes.analyze(u.screen, u.notifications, now - 24 * 3_600_000L, now, breakdown?.screenPph) }.getOrNull() }
         val culprits = runCatching { Guardian.culprits(c, now) }.getOrDefault(emptyList())
+        val night = runCatching { NightCulprits.lastNight(HealthStore(c).windows(24, now), now, zone, c.packageName) }.getOrNull()
         val issues = KnownIssues.detect(culprits)
         val effect = runCatching { LeverEffects.nightMode(samples, GuardianJournal(c).nightSessions(now), now, zone) }
             .getOrDefault(LeverEffect(emptyList(), emptyList()))
-        return Insights(analysis, breakdown, culprits, issues, effect, wakes)
+        return Insights(analysis, breakdown, culprits, issues, effect, wakes, night)
     }
 }

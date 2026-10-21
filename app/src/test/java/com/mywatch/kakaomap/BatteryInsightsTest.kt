@@ -234,4 +234,32 @@ class BatteryInsightsTest {
         assertTrue(todo[0].sub ?: "", (todo[0].sub ?: "").contains("손목 올려 화면 켜기"))
         assertTrue(todo[1].title, todo[1].title.contains("알림이 화면을 60번"))
     }
+
+    /** 밤사이 뒤에서 쓴 앱과, 삼성 헬스가 밤새 센서를 켜 두면 측정 설정 할 일 */
+    @Test
+    fun lastNightShowsWhoWorkedInTheBackgroundAndHealthSensorAdvice() {
+        shadowOf(context as Application).grantPermissions("android.permission.BATTERY_STATS")
+        val now = System.currentTimeMillis()
+        val today0 = java.time.LocalDate.now(ZoneId.systemDefault()).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
+        val end = minOf(now, today0 + 7 * 3_600_000L)
+        org.junit.Assume.assumeTrue("자정 직후 2시간 안에는 밤 기록이 모자라 건너뜀", end - today0 >= 2 * 3_600_000L)
+        val store = HealthStore(context)
+        var t = today0
+        var sensor = 0L
+        store.record(t, mapOf("com.samsung.android.wear.shealth" to UidUse("com.samsung.android.wear.shealth")))
+        while (t + q <= end) {
+            t += q
+            sensor += 30 * 60_000L
+            store.record(t, mapOf("com.samsung.android.wear.shealth" to UidUse("com.samsung.android.wear.shealth", sensorMs = sensor)))
+        }
+        var level = 90.0
+        var s = now - 10 * 3_600_000L
+        while (s <= now) { log.append(BatterySample(s, level.toInt())); level -= 0.5; s += q }
+        val (_, adapter) = open()
+        val rows = adapter.rows
+        assertTrue(rows.filterIsInstance<Row.Note>().any { it.text.startsWith("밤사이 뒤에서") && it.text.contains("com.samsung.android.wear.shealth") })
+        val todo = rows.filterIsInstance<Row.Step>().first { it.key == "night:0" }
+        assertTrue(todo.title, todo.title.contains("삼성 헬스"))
+        assertTrue(todo.sub ?: "", (todo.sub ?: "").contains("혈중 산소"))
+    }
 }

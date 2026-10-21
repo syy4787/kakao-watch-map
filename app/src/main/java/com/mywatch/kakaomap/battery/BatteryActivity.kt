@@ -116,6 +116,13 @@ class BatteryActivity : ComponentActivity() {
 
         rows += Row.Header("밤사이")
         rows += Row.Note(BatterySummary.overnightLine(a))
+        insights?.night?.let { n ->
+            val top = n.ranks.filter { it.score > 0 }.take(3).joinToString("\n") { "${HealthStore.label(this, it.use.pkg)}: ${it.summary}" }
+            if (top.isNotEmpty()) rows += Row.Note("밤사이 뒤에서 (${BatterySummary.time(n.start)}~):\n$top")
+            n.advice.forEachIndexed { i, adv ->
+                rows += Row.Step(color(Grade.CAUTION), R.drawable.ic_warning, "할 일", adv.substringBefore(" — "), adv.substringAfter(" — ", ""), key = "night:$i")
+            }
+        }
 
         rows += Row.Header("잔량 표시 이상 (최근)")
         if (a.anomalies.isEmpty()) rows += Row.Note("없음") else a.anomalies.takeLast(5).reversed().forEach {
@@ -418,9 +425,12 @@ class BatteryActivity : ComponentActivity() {
         val MODES = listOf("비행기 모드", "절전 모드", "시계만 사용", "평소대로")
         const val HELP = "• 잔량 표시 점검: '17%에서 꺼졌는데 켜니 47%'는 배터리가 아니라 잔량 게이지가 낮게 센 것. 쉬는 전압으로 그 오차를 잡아 알려 주고, 강제 재시작·보정 루틴으로 다시 맞춥니다.\n" +
             "• 강제 재시작: 홈 + 뒤로 버튼을 꺼질 때까지(7초 이상) 누르기. 효과 없으면 30초.\n" +
+            "• Play 서비스가 1위면: 설정 > 애플리케이션 > Google Play 서비스 > 저장공간 > 캐시 지우기 → 재시작 (2026년에 되풀이된 문제의 알려진 해결)\n" +
+            "• 설정 > 디스플레이: Always On Display 끄기, '손목 올려 화면 켜기' 끄기, 화면 자동 꺼짐 짧게\n" +
+            "• Galaxy Wearable 앱 > 워치 설정 > 알림 > 고급 알림 설정: '화면 켜기' 끄기, 필요 없는 앱 알림 끄기\n" +
+            "• \"Hey Google\"·빅스비 음성 호출 끄기, 설정 > 버튼 및 제스처 > 손목 올려 말하기 끄기\n" +
+            "• 삼성 헬스: 자동 심박 측정 '10분마다', 스트레스 상시 측정 끄기, 수면 중 혈중 산소·피부 온도 끄기(필요한 것만)\n" +
             "• 설정 > 배터리 > 헬스 기능 제한 / 대기 중인 앱\n" +
-            "• 설정 > 버튼 및 제스처 > 손목 올려 말하기 끄기\n" +
-            "• 설정 > 디스플레이 > Always On Display 끄기\n" +
-            "• PC 툴킷(battery-doctor) 메뉴 8(자동 치료): 권한 주기 → 범인 앱 백그라운드 제한 → 통계 초기화를 한 번에"
+            "• PC 툴킷(battery-doctor) 메뉴 8(자동 치료): 권한 주기 → 범인 앱 백그라운드 제한 → 캐시 정리 → 통계 초기화를 한 번에"
     }
 }

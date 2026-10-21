@@ -94,6 +94,10 @@ object BatterySummary {
             i.steps.forEachIndexed { n, st -> appendLine("  ${n + 1}) $st") }
         }
         insights?.nightEffect?.headline?.let { appendLine("[밤 모드 효과] $it") }
+        insights?.night?.let { n ->
+            appendLine("[밤사이 뒤에서] " + n.ranks.take(5).joinToString(" / ") { "${it.use.pkg}: ${it.summary}" })
+            n.advice.forEach { appendLine(" · $it") }
+        }
         appendLine("[소모율] 1시간 ${rateLine(a.w1)} / 8시간 ${rateLine(a.w8)} / 24시간 ${rateLine(a.w24)}")
         appendLine("[대기(화면 꺼짐) 24시간] ${rateLine(a.idle24)} — ${Thresholds.idle(a.idle24.percentPerHour).label}")
         appendLine("[밤사이] ${overnightLine(a)}")
