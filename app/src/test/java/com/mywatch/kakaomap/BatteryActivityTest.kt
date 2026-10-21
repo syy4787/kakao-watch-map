@@ -85,6 +85,31 @@ class BatteryActivityTest {
         val (_, adapter) = open()
         val verdict = rows(adapter).filterIsInstance<Row.Step>().first { it.key == "verdict" }
         assertTrue(verdict.title, verdict.title.contains("모으는 중"))
+        assertTrue(rows(adapter).none { it is Row.Chart })
+    }
+
+    /** 24시간 그래프: 기록이 있으면 맨 위 쪽에, 충전 구간과 설명(화면 낭독기용)과 함께 */
+    @Test
+    fun theDayGraphShowsUpWithChargingAndADescription() {
+        val now = System.currentTimeMillis()
+        for (i in 0..40) log.append(BatterySample(t = now - (60 - i) * q, level = 90 - i, interactive = false))
+        for (i in 41..44) log.append(BatterySample(t = now - (60 - i) * q, level = 50 + (i - 40) * 8, plugged = true))
+        for (i in 45..60) log.append(BatterySample(t = now - (60 - i) * q, level = 85 - (i - 45) / 2, interactive = false))
+        val (_, adapter) = open()
+        val all = rows(adapter)
+        val chart = all.filterIsInstance<Row.Chart>().single()
+        assertEquals(1, chart.model.charging.size)
+        assertTrue(chart.model.description, chart.model.description.contains("충전 1번"))
+        // 소모율 표보다 위 (한눈에 먼저)
+        val rateHeader = all.indexOfFirst { it is Row.Header && it.title == "소모율" }
+        assertTrue(all.indexOf(chart) < rateHeader)
+        // 그래프 뷰가 실제로 그려진다 (빈 화면이 아니게)
+        val view = com.mywatch.kakaomap.ui.DrainChartView(context).apply { model = chart.model }
+        view.measure(android.view.View.MeasureSpec.makeMeasureSpec(400, android.view.View.MeasureSpec.EXACTLY), android.view.View.MeasureSpec.makeMeasureSpec(200, android.view.View.MeasureSpec.AT_MOST))
+        view.layout(0, 0, view.measuredWidth, view.measuredHeight)
+        assertTrue(view.measuredHeight > 60)
+        assertEquals(chart.model.description, view.contentDescription)
+        view.draw(android.graphics.Canvas(android.graphics.Bitmap.createBitmap(view.measuredWidth, view.measuredHeight, android.graphics.Bitmap.Config.ARGB_8888)))
     }
 
     @Test

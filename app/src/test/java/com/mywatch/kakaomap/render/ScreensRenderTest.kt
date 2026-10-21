@@ -584,6 +584,41 @@ class ScreensRenderTest {
         shadowOf(Looper.getMainLooper()).idle()
     }
 
+    /** 배터리 화면 맨 위: 지금 줄·남은 시간·24시간 그래프(충전·가장 많이 닳은 시간·화면 켜짐 띠)·소모율 */
+    @Test
+    fun batteryChart() {
+        val zone = java.time.ZoneId.of("Asia/Seoul")
+        val now = java.time.LocalDateTime.of(2026, 10, 21, 22, 0).atZone(zone).toInstant().toEpochMilli()
+        val q = 15 * 60_000L
+        val samples = ArrayList<com.mywatch.battery.core.BatterySample>()
+        var level = 96.0
+        for (i in 0..96) {
+            val t = now - (96 - i) * q
+            val hour = java.time.Instant.ofEpochMilli(t).atZone(zone).hour
+            val plugged = hour == 7
+            level = when {
+                plugged -> minOf(100.0, level + 9.0)
+                hour in 12..13 -> level - 2.5          // 점심때 많이 씀
+                hour in 0..6 -> level - 0.3
+                else -> level - 0.9
+            }.coerceIn(3.0, 100.0)
+            if (i in 50..52) continue                  // 기록이 빠진 곳 (선이 끊김)
+            samples += com.mywatch.battery.core.BatterySample(t = t, level = level.toInt(), plugged = plugged)
+        }
+        val screen = (0 until 40).map { k -> val st = now - 20 * 3_600_000L + k * 27 * 60_000L; com.mywatch.battery.core.Span(st, st + 60_000L * (1 + k % 4)) }
+        val noon = java.time.LocalDateTime.of(2026, 10, 21, 12, 0).atZone(zone).toInstant().toEpochMilli()
+        val model = com.mywatch.battery.core.DrainChart.build(samples, now, zone, screen = screen, hot = listOf(noon to noon + 3_600_000L))
+        val rows = listOf(
+            Row.Header("배터리", "${samples.last().level}% · 3.91V · 33.1℃ · -84mA · 방전 중"),
+            Row.Note("지금 페이스(시간당 0.9%)면 내일 오전 7:40에 15%"),
+            Row.Chart("day", model),
+            Row.Header("소모율"),
+            Row.Step(0xFF5AD17A.toInt(), R.drawable.ic_battery, "정상", "1시간: 시간당 0.9% (실측 4 mAh/h)", null, key = "rate:1"),
+            Row.Step(0xFFFFC107.toInt(), R.drawable.ic_battery, "주의", "24시간: 시간당 2.1%", null, key = "rate:24"),
+        )
+        shoot("battery_chart", rows, pages = 2)
+    }
+
     /** 실제 화면(액티비티)을 둥근 워치 크기로 — [shoot] 와 같은 모양 */
     private fun capture(activity: android.app.Activity, name: String, pages: Int) {
         val list = activity.findViewById<androidx.recyclerview.widget.RecyclerView>(R.id.list)

@@ -6,6 +6,8 @@ import com.mywatch.battery.core.Analysis
 import com.mywatch.battery.core.AppDrainRank
 import com.mywatch.battery.core.BatterySample
 import com.mywatch.battery.core.DrainAnalyzer
+import com.mywatch.battery.core.DrainChart
+import com.mywatch.battery.core.DrainChartModel
 import com.mywatch.battery.core.KnownIssue
 import com.mywatch.battery.core.KnownIssues
 import com.mywatch.battery.core.LeverEffect
@@ -36,6 +38,8 @@ data class Insights(
     val night: NightReport? = null,
     /** 레버 점검 한 줄 ([Levers.checkLine]) — 요약 파일에 */
     val levers: String? = null,
+    /** 24시간 그래프 (표본이 2개 이상일 때) */
+    val chart: DrainChartModel? = null,
 )
 
 object BatteryInsights {
@@ -56,6 +60,9 @@ object BatteryInsights {
         val effect = runCatching { LeverEffects.nightMode(samples, GuardianJournal(c).nightSessions(now), now, zone) }
             .getOrDefault(LeverEffect(emptyList(), emptyList()))
         val levers = runCatching { Levers(c).checkLine(Guardian.state(c).saverBroken) }.getOrNull()
-        return Insights(analysis, breakdown, culprits, issues, effect, wakes, night, levers)
+        val chart = runCatching {
+            DrainChart.buildOrNull(samples, now, zone, screen = usage?.screen, hot = breakdown?.steepest.orEmpty().map { it.start to it.end })
+        }.onFailure { ErrorLog.record("배터리·그래프", it) }.getOrNull()
+        return Insights(analysis, breakdown, culprits, issues, effect, wakes, night, levers, chart)
     }
 }

@@ -100,6 +100,7 @@ class BatteryActivity : ComponentActivity() {
         rows += Row.Header("배터리", BatterySummary.nowLine(live ?: lastSample(a), a.drift))
         notice?.let { rows += Row.Note(it) }
         forecast?.let { rows += Row.Note(it) }
+        insights?.chart?.let { rows += Row.Chart("day", it) }
 
         rows += Row.Header("소모율")
         rows += rateRow("1시간", a.w1, Thresholds.mixed24h(a.w1.percentPerHour))
