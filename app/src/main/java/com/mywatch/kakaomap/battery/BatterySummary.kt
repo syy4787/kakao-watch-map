@@ -91,11 +91,13 @@ object BatterySummary {
         return "추정 ${DrainAnalyzer.fmt(c.estimatedMah)} mAh$pct — 충전 세션 ${c.sessions}회"
     }
 
-    /** "최근 7일 충전 7번 · 100%로 충전기에 하루 7.3시간 · 충전 중 최고 33℃ · 배터리 보호 켜진 것으로 보임" */
+    /** "최근 7일 충전 7번 · 100%로 충전기에 하루 7.3시간 · 충전 중 최고 33℃ · 배터리 보호 켜진 것으로 보임 · 충전 느림(완충 2시간 47분+ · 공식 90분)" */
     fun chargingLine(ch: com.mywatch.battery.core.ChargeHabits): String = listOfNotNull(
         "최근 ${DrainAnalyzer.fmt(ch.days)}일 충전 ${ch.sessions}번",
         if (ch.protectLikely) "배터리 보호(90%) 켜진 것으로 보임" else "100%로 충전기에 하루 ${DrainAnalyzer.fmt(ch.hoursAtFullPerDay)}시간",
         ch.maxChargeTempC?.let { "충전 중 최고 ${DrainAnalyzer.fmt(it)}℃" },
+        // 빠른 충전 구간으로 어림한 값이라 실제 완충은 더 걸린다 — 느릴 때만 ('공식보다 빠름'으로 읽히지 않게)
+        ch.speed?.takeIf { it.slow }?.let { "충전 느림(완충 ${com.mywatch.battery.core.ChargeHabits.duration(it.minutesPerFull)}+ · 공식 ${it.specMinutes}분)" },
     ).joinToString(" · ")
 
     fun experimentLines(a: Analysis, now: Long): List<String> = a.experiments.map { e ->

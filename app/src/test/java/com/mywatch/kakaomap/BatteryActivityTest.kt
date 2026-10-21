@@ -144,6 +144,32 @@ class BatteryActivityTest {
     }
 
     /**
+     * 워치9 충전이 공식(44mm 90분)보다 한참 느리고 충전 중 뜨거우면 — 충전 습관에 '충전이 느림'과 식히는 길(선풍기 바람, 얼음은 쓰지
+     * 않기)을, 열 때문이면 '뜨거운 충전' 줄을 따로 두지 않는다
+     */
+    @Test
+    fun aSlowHotChargeOnAWatch9ShowsHowToCoolIt() {
+        org.robolectric.shadows.ShadowBuild.setModel("SM-L350")
+        val now = System.currentTimeMillis()
+        var t = now - 3 * 24 * 3_600_000L
+        repeat(3) {
+            val dayStart = t
+            while (t < dayStart + 12 * 3_600_000L) { log.append(BatterySample(t = t, level = 95 - ((t - dayStart) / q).toInt() * 80 / 48)); t += q }
+            var lv = 15.0
+            while (lv < 100.0) { log.append(BatterySample(t = t, level = lv.toInt(), plugged = true, tempDeciC = 440)); t += q; lv += 0.6 * 15 }
+            log.append(BatterySample(t = t, level = 100, plugged = true, tempDeciC = 400))
+            t = dayStart + 24 * 3_600_000L
+        }
+        val (_, adapter) = open()
+        val steps = rows(adapter).filterIsInstance<Row.Step>().filter { it.key.startsWith("charge:") }
+        val slow = steps.single { it.title.contains("충전이 느림") }
+        assertTrue(slow.title + slow.sub, slow.title.contains("44℃") && (slow.sub ?: "").contains("선풍기"))
+        assertTrue(steps.toString(), steps.none { it.title.startsWith("충전 중 최고") })
+        val note = rows(adapter).filterIsInstance<Row.Note>().first { it.text.startsWith("최근") && it.text.contains("충전") }
+        assertTrue(note.text, note.text.contains("충전 느림(완충 2시간 47분+ · 공식 90분)"))
+    }
+
+    /**
      * '최근 며칠': 일주일 기록 — 사흘 전 새벽 소프트웨어 업데이트 뒤로 대기 소모가 1.0 → 2.5%/h 로 늘었으면 막대 그래프·꺾인 날·그 무렵 바뀐 것,
      * 맨 위 '지금 할 일'에도 (업데이트 뒤 며칠 기다림 → 캐시·재시작)
      */
