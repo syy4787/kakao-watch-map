@@ -1,9 +1,12 @@
 package com.mywatch.kakaomap.battery
 
+import android.content.Intent
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.lifecycle.lifecycleScope
@@ -45,6 +48,8 @@ class BatteryActivity : ComponentActivity() {
     private var live: BatterySample? = null
     private var picking = false
     private var notice: String? = null
+    /** 지금 보이는 '지금 할 일'마다 바로 여는 화면 (버튼 번호 = 할 일 번호) */
+    private var todoActions: List<BatteryTodo.Action?> = emptyList()
     private val handler = Handler(Looper.getMainLooper())
     private val tick = object : Runnable {
         override fun run() {
@@ -110,7 +115,10 @@ class BatteryActivity : ComponentActivity() {
                 rows += Row.Header("지금 할 일")
                 todo.forEachIndexed { i, t ->
                     rows += Row.Step(color(if (t.grade == Grade.UNKNOWN) Grade.CAUTION else t.grade), R.drawable.ic_warning, "${i + 1}", t.title, t.detail, key = "todo:$i")
+                    // 그 할 일을 바로 할 수 있는 화면이 있으면 버튼 하나 (워치 설정을 찾아 들어가지 않게)
+                    t.action?.let { act -> rows += Row.Action("$A_TODO$i", R.drawable.ic_edit, act.label) }
                 }
+                todoActions = todo.map { it.action }
             }
         }
 
@@ -401,6 +409,10 @@ class BatteryActivity : ComponentActivity() {
                 }.isSuccess
                 if (!opened) { notice = "이 워치에는 그 설정 화면이 없어요 — PC 툴킷 메뉴 7(권한 주기)이 함께 허용합니다"; render() }
             }
+            row.id.startsWith(A_TODO) -> {
+                val act = row.id.removePrefix(A_TODO).toIntOrNull()?.let { todoActions.getOrNull(it) } ?: return
+                if (!openAction(act)) { notice = "이 워치에선 그 화면을 바로 열 수 없어요 — 워치 설정에서 찾아 주세요"; render() }
+            }
             row.id.startsWith(A_APP_INFO) -> {
                 val pkg = row.id.removePrefix(A_APP_INFO)
                 runCatching {
@@ -496,6 +508,20 @@ class BatteryActivity : ComponentActivity() {
         return rows
     }
 
+    /**
+     * 할 일 버튼: 그 화면을 연다 — 기기마다 받는 화면이 달라, 안 열리면 다음 후보, 끝으로 워치 설정 첫 화면.
+     * 하나라도 열렸으면 true
+     */
+    private fun openAction(act: BatteryTodo.Action): Boolean {
+        val first = when (act) {
+            is BatteryTodo.Action.AppInfo -> listOf(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${act.pkg}")))
+            BatteryTodo.Action.Display -> listOf(Intent(Settings.ACTION_DISPLAY_SETTINGS))
+            BatteryTodo.Action.Location -> listOf(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS))
+            BatteryTodo.Action.Battery -> listOf(Intent(Intent.ACTION_POWER_USAGE_SUMMARY), Intent(Settings.ACTION_BATTERY_SAVER_SETTINGS))
+        }
+        return (first + Intent(Settings.ACTION_SETTINGS)).any { i -> runCatching { startActivity(i) }.isSuccess }
+    }
+
     private fun color(g: Grade): Int = getColor(
         when (g) {
             Grade.NORMAL -> R.color.grade_normal
@@ -516,6 +542,8 @@ class BatteryActivity : ComponentActivity() {
         const val A_TOGGLE = "g:toggle:"
         const val A_FORCED_RESTART = "drift:restart"
         const val A_APP_INFO = "appinfo:"
+        /** '지금 할 일' 버튼 — 뒤에 할 일 번호 */
+        const val A_TODO = "todo:act:"
         const val A_USAGE_ACCESS = "usage:access"
         const val A_CAL_START = "cal:start"
         const val A_CAL_STOP = "cal:stop"

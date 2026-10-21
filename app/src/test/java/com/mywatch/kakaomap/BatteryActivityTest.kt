@@ -161,7 +161,7 @@ class BatteryActivityTest {
             t = start + 20 * 3_600_000L + q
             while (t < start + 24 * 3_600_000L) { log.append(BatterySample(t = t, level = 100, plugged = true)); t += q }
         }
-        val (_, adapter) = open()
+        val (a, adapter) = open()
         val all = rows(adapter)
         val header = all.indexOfFirst { it is Row.Header && it.title == "최근 며칠" }
         assertTrue("최근 며칠 칸", header >= 0)
@@ -173,6 +173,11 @@ class BatteryActivityTest {
         assertTrue(all.filterIsInstance<Row.Note>().any { it.text.startsWith("그 무렵 바뀐 것:") && it.text.contains("워치 소프트웨어 업데이트 (L350XXU1AZI1)") })
         val todo = all.filterIsInstance<Row.Step>().first { it.key == "todo:0" }
         assertTrue(todo.title, todo.title.contains("소프트웨어 업데이트 뒤 더 닳음"))
+        // 할 일 아래 버튼: 그 뒤 할 일(Play 서비스 캐시)을 위한 앱 정보 화면
+        click(a, adapter, BatteryActivity.A_TODO + "0")
+        val started = shadowOf(a).nextStartedActivity
+        assertEquals(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, started.action)
+        assertEquals("package:com.google.android.gms", started.dataString)
     }
 
     @Test

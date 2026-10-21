@@ -25,18 +25,19 @@ data class WakeStats(
         get() = notificationWakes * (Wakes.NOTIF_SCREEN_MS / 3_600_000.0 * (screenPph ?: Wakes.DEFAULT_SCREEN_PPH) + Wakes.WAKE_OVERHEAD_PERCENT)
 
     /** 많을 때만: 무엇을 끄면 되는지. [label] = 패키지 이름 → 보일 이름 */
-    fun advice(label: (String) -> String = { it }): List<String> {
-        val out = ArrayList<String>()
-        if (gestureLikeWakes >= Wakes.GESTURE_ADVICE) {
-            out += "알림 없이 5초 안에 꺼진 화면 ${gestureLikeWakes}번 — 손목을 들 때 저절로 켜진 것으로 보입니다. " +
-                "설정 > 디스플레이에서 '손목 올려 켜기'(화면 켜기 제스처)를 끄면 하루 약 ${DrainAnalyzer.fmt(gestureCostPercent)}% 아낍니다"
-        }
-        if (notificationWakes >= Wakes.NOTIF_ADVICE) {
-            val top = topNotifiers.take(2).joinToString(", ") { "${label(it.first)} ${it.second}번" }
-            out += "알림이 화면을 ${notificationWakes}번 켬 (많이 보낸 앱: $top) — Galaxy Wearable 앱 > 워치 설정 > 알림 > 고급 알림 설정에서 " +
-                "'화면 켜기'를 끄거나 그 앱의 워치 알림을 끄면 하루 약 ${DrainAnalyzer.fmt(notificationCostPercent)}% 아낍니다"
-        }
-        return out
+    fun advice(label: (String) -> String = { it }): List<String> = listOfNotNull(gestureAdvice(), notificationAdvice(label))
+
+    /** 손목 올림으로 저절로 켜진 화면이 많을 때 (설정 > 디스플레이) */
+    fun gestureAdvice(): String? = if (gestureLikeWakes < Wakes.GESTURE_ADVICE) null else
+        "알림 없이 5초 안에 꺼진 화면 ${gestureLikeWakes}번 — 손목을 들 때 저절로 켜진 것으로 보입니다. " +
+            "설정 > 디스플레이에서 '손목 올려 켜기'(화면 켜기 제스처)를 끄면 하루 약 ${DrainAnalyzer.fmt(gestureCostPercent)}% 아낍니다"
+
+    /** 알림이 화면을 켠 일이 많을 때 (폰의 Galaxy Wearable 앱) */
+    fun notificationAdvice(label: (String) -> String = { it }): String? {
+        if (notificationWakes < Wakes.NOTIF_ADVICE) return null
+        val top = topNotifiers.take(2).joinToString(", ") { "${label(it.first)} ${it.second}번" }
+        return "알림이 화면을 ${notificationWakes}번 켬 (많이 보낸 앱: $top) — Galaxy Wearable 앱 > 워치 설정 > 알림 > 고급 알림 설정에서 " +
+            "'화면 켜기'를 끄거나 그 앱의 워치 알림을 끄면 하루 약 ${DrainAnalyzer.fmt(notificationCostPercent)}% 아낍니다"
     }
 }
 

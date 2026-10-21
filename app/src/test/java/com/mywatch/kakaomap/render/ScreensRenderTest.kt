@@ -659,6 +659,7 @@ class ScreensRenderTest {
             // 맨 위 '지금 할 일' 줄 — 세 줄 안에 할 일이 다 들어가는지
             Row.Header("지금 할 일"),
             Row.Step(0xFFFFC107.toInt(), R.drawable.ic_warning, "1", todoTitle, todoDetail, key = "todo:0"),
+            Row.Action("todo:act:0", R.drawable.ic_edit, "Play 서비스 앱 정보"),
             Row.Header("최근 며칠", "대기(화면 꺼짐) 시간당 %"),
             Row.Trend("days", t.bars!!),
             Row.Step(0xFFFFC107.toInt(), R.drawable.ic_warning, null, com.mywatch.battery.core.ChangeFinder.title(shift), com.mywatch.battery.core.ChangeFinder.numbers(shift), key = "trend"),

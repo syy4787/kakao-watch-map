@@ -14,6 +14,9 @@ data class ChargeHabits(
     val maxChargeTempC: Double?,
     val advice: List<String>,
 ) {
+    /** 배터리 보호를 권하나 (그러면 [advice] 의 첫 줄) */
+    val protectAdvised: Boolean get() = !protectLikely && hoursAtFullPerDay >= FULL_ADVICE_HOURS
+
     companion object {
         const val FULL_LEVEL = 99
         /** 하루 이만큼 넘게 100% 로 충전기에 있으면 배터리 보호를 권한다 */

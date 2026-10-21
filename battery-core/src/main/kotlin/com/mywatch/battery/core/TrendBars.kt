@@ -64,6 +64,9 @@ data class TrendReport(
     /** 사용 통계의 화면 켜짐으로 센 날들인가 (아니면 15분 표본의 화면 상태로) */
     val exact: Boolean get() = days.any { it.exact }
 
+    /** 꺾인 쪽을 설명할 수 있는 첫 변화 (할 일을 정한 그것 — 없으면 null) */
+    val top: Change? get() = shift?.let { s -> suspects.firstOrNull { ChangeFinder.explains(it, s.worse) } }
+
     /** 늘어난 꺾임의 할 일 (제목, 설명) — 꺾임이 없거나 줄었으면 null */
     fun advice(names: (String) -> String?): Pair<String, String>? =
         shift?.takeIf { it.worse }?.let { ChangeFinder.advice(it, suspects, names, known) }
