@@ -79,12 +79,17 @@ object BatteryInsights {
             UsageSplit.analyze(samples, usage?.screen, usage?.apps.orEmpty(), HealthStore(c).windows(24, now), now, zone, ownPkg = c.packageName)
         }.onFailure { ErrorLog.record("배터리·사용 내역", it) }.getOrNull()
         val wakes = usage?.let { u -> runCatching { Wakes.analyze(u.screen, u.notifications, now - 24 * 3_600_000L, now, breakdown?.screenPph, zone) }.getOrNull() }
-        val (culprits, window) = runCatching { Guardian.culpritsInWindow(c, now) }.getOrDefault(emptyList<AppDrainRank>() to 0L)
+        val cw = runCatching { Guardian.culpritWindow(c, now) }.getOrDefault(Guardian.CulpritWindow(emptyList(), 0L, now))
+        val culprits = cw.ranks
+        val window = cw.windowMs
         val night = runCatching { NightCulprits.lastNight(HealthStore(c).windows(24, now), now, zone, c.packageName) }.getOrNull()
         val face = runCatching { watchFace(c) }.getOrNull()
-        // 화면이 켜져 있던 시간(사용 통계)을 같이 — One UI Watch 홈은 늘 '보이는' 프로세스라 그 시간만큼 빼고 본다
-        val screenOn = usage?.screen?.takeIf { window > 0 }?.sumOf { it.overlap(now - window, now) }
-        val issues = KnownIssues.detect(culprits, face, window.takeIf { it > 0 }, screenOn)
+        // 화면이 켜져 있던 시간·받은 알림(사용 통계)을 같이 — One UI Watch 홈은 화면을 그리고 알림을 보여 주는 몫을 빼고 본다.
+        // 앱별 통계 창과 같은 때로 (창 끝 = 마지막 스냅샷)
+        val start = cw.endAt - window
+        val screenOn = usage?.screen?.takeIf { window > 0 }?.sumOf { it.overlap(start, cw.endAt) }
+        val notes = usage?.notifications?.count { it.second in start until cw.endAt } ?: 0
+        val issues = KnownIssues.detect(culprits, face, window.takeIf { it > 0 }, screenOn, notes) { pkg -> appName(c)(pkg) }
         val effect = runCatching { LeverEffects.nightMode(samples, GuardianJournal(c).nightSessions(now), now, zone) }
             .getOrDefault(LeverEffect(emptyList(), emptyList()))
         val levers = runCatching { Levers(c).checkLine(Guardian.state(c).saverBroken) }.getOrNull()

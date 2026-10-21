@@ -415,7 +415,8 @@ class GuardianTest {
         store.record(t0 + 2 * q, mapOf("a" to UidUse("a", wakelockMs = 9_000), "b" to UidUse("b", syncs = 3)))
         val (sum, covered) = store.recent(2, t0 + 2 * q)
         assertEquals(8_000L, sum.first { it.pkg == "a" }.wakelockMs)
-        assertEquals(3, sum.first { it.pkg == "b" }.syncs)
+        // 처음 보인 이름(b)은 그 구간엔 기준값만 — 공유 uid 묶음 이름이 바뀌어 누적값이 한 구간에 잡히지 않게
+        assertEquals(1, sum.first { it.pkg == "b" }.syncs)
         assertEquals(2 * q, covered)
         // 창 밖(3시간 전)은 빠진다
         assertTrue(store.recent(2, t0 + 5 * 3_600_000L).first.isEmpty())
@@ -527,6 +528,120 @@ class GuardianTest {
         val n = shadowOf(nm).allNotifications.firstOrNull { it.extras.getString(android.app.Notification.EXTRA_TITLE).orEmpty().contains("One UI Watch 홈") }
         assertTrue(shadowOf(nm).allNotifications.map { it.extras.getString(android.app.Notification.EXTRA_TITLE) }.toString(), n != null)
         assertTrue(n!!.extras.getCharSequence(android.app.Notification.EXTRA_BIG_TEXT).toString().contains("강제 재시작"))
+    }
+
+    /** 홈 과소모가 보이는 2시간을 만든다 (10시 기준값 → 12시 CPU 30분, 화면은 10:30~10:36) */
+    private fun homeHogUntilNoon() {
+        grant()
+        val home = com.mywatch.battery.core.KnownIssues.HOME
+        event("android", at(10, 30), android.app.usage.UsageEvents.Event.SCREEN_INTERACTIVE)
+        event("android", at(10, 36), android.app.usage.UsageEvents.Event.SCREEN_NON_INTERACTIVE)
+        var use = com.mywatch.battery.core.UidUse(home)
+        val stats = UidStatsSource { mapOf(home to use) }
+        fill(at(10, 0), 9, 80.0, 1.0)
+        Guardian.tick(context, log, at(10, 0), stats = stats, zone = zone)
+        use = com.mywatch.battery.core.UidUse(home, cpuMs = 30 * 60_000L, fgMs = 2 * 3_600_000L)
+        fill(at(12, 0), 9, 78.0, 1.0)
+        Guardian.tick(context, log, at(12, 0), stats = stats, zone = zone)
+    }
+
+    /**
+     * 시킨 대로 강제 재시작하면 그 앞의 기록은 보지 않는다 — 재시작했는데 타일이 계속 '강제 재시작'이라 하면 재시작이 안 들은 줄 안다
+     * (리뷰에서 찾음). 재시작 뒤 1시간이 안 되면 판단하지 않고, 쌓이면 다시 본다
+     */
+    @Test
+    fun aRestartClearsTheHomeIssueUntilThereIsNewData() {
+        val home = com.mywatch.battery.core.KnownIssues.HOME
+        homeHogUntilNoon()
+        assertEquals("One UI Watch 홈 과소모 — 강제 재시작", Guardian.tileIssue(context, at(12, 0)))
+        Guardian.bootClock = { at(12, 10) }
+        try {
+            assertEquals("재시작 앞의 판단은 바로 내린다", null, Guardian.tileIssue(context, at(12, 20)))
+            // 재시작 뒤 통계는 0 부터 — 13시엔 재시작 뒤 50분뿐이라 아직 판단하지 않는다
+            fill(at(13, 0), 9, 77.0, 1.0)
+            Guardian.tick(context, log, at(13, 0), stats = UidStatsSource { mapOf(home to com.mywatch.battery.core.UidUse(home, cpuMs = 2 * 60_000L, fgMs = 50 * 60_000L)) }, zone = zone)
+            assertEquals("재시작 뒤 50분", null, Guardian.tileIssue(context, at(13, 0)))
+            // 또 멈춰 돌면(재시작 뒤 1시간 50분 동안 CPU 32분) 다시 짚는다
+            fill(at(14, 0), 9, 76.0, 1.0)
+            Guardian.tick(context, log, at(14, 0), stats = UidStatsSource { mapOf(home to com.mywatch.battery.core.UidUse(home, cpuMs = 32 * 60_000L, fgMs = 110 * 60_000L)) }, zone = zone)
+            assertEquals("One UI Watch 홈 과소모 — 강제 재시작", Guardian.tileIssue(context, at(14, 0)))
+        } finally {
+            Guardian.bootClock = Guardian.DEFAULT_BOOT_CLOCK
+        }
+    }
+
+    /**
+     * 밤새 화면을 안 켜서 최근 6시간에 화면 기록이 없어도(하루 안엔 있으면 '켜진 적 없음'으로) 홈 과소모를 본다 — 아침 타일에서
+     * 사라지지 않게 (리뷰에서 찾음)
+     */
+    @Test
+    fun overnightWithoutScreenEventsStillChecksTheHome() {
+        grant()
+        val home = com.mywatch.battery.core.KnownIssues.HOME
+        event("android", at(0, 30), android.app.usage.UsageEvents.Event.SCREEN_INTERACTIVE)
+        event("android", at(0, 35), android.app.usage.UsageEvents.Event.SCREEN_NON_INTERACTIVE)
+        var use = com.mywatch.battery.core.UidUse(home)
+        val stats = UidStatsSource { mapOf(home to use) }
+        fill(at(7, 0), 9, 80.0, 1.0)
+        Guardian.tick(context, log, at(7, 0), stats = stats, zone = zone)
+        use = com.mywatch.battery.core.UidUse(home, cpuMs = 30 * 60_000L)
+        fill(at(9, 0), 9, 78.0, 1.0)
+        Guardian.tick(context, log, at(9, 0), stats = stats, zone = zone)
+        assertEquals("One UI Watch 홈 과소모 — 강제 재시작", Guardian.tileIssue(context, at(9, 0)))
+    }
+
+    /** 배터리 화면을 열 때 남기는 스냅샷 길에서도 화면 켜짐 시간을 같이 본다 (그 연결이 빠지면 못 짚는다) */
+    @Test
+    fun openingTheScreenAlsoChecksTheHomeWithScreenTime() {
+        grant()
+        val home = com.mywatch.battery.core.KnownIssues.HOME
+        event("android", at(10, 30), android.app.usage.UsageEvents.Event.SCREEN_INTERACTIVE)
+        event("android", at(10, 36), android.app.usage.UsageEvents.Event.SCREEN_NON_INTERACTIVE)
+        var use = com.mywatch.battery.core.UidUse(home)
+        val stats = UidStatsSource { mapOf(home to use) }
+        Guardian.snapshotIfStale(context, at(10, 0), source = stats)
+        use = com.mywatch.battery.core.UidUse(home, cpuMs = 30 * 60_000L, fgMs = 2 * 3_600_000L)
+        Guardian.snapshotIfStale(context, at(12, 0), source = stats)
+        assertEquals("One UI Watch 홈 과소모 — 강제 재시작", Guardian.tileIssue(context, at(12, 0)))
+    }
+
+    /** 알림 쉬는 시간(12시간)은 문제마다 — 홈 과소모 알림이 그 뒤의 Play 서비스 알림을 막지 않게 (리뷰에서 찾음) */
+    @Test
+    fun eachKnownIssueHasItsOwnNotificationCooldown() {
+        val home = com.mywatch.battery.core.KnownIssues.HOME
+        val gms = "com.google.android.gms"
+        homeHogUntilNoon()
+        fun issueTitle() = shadowOf(nm).getNotification(Guardian.N_ISSUE)?.extras?.getString(android.app.Notification.EXTRA_TITLE).orEmpty()
+        assertTrue(issueTitle(), issueTitle().contains("One UI Watch 홈"))
+        nm.cancel(Guardian.N_ISSUE)
+        val homeUse = com.mywatch.battery.core.UidUse(home, cpuMs = 30 * 60_000L, fgMs = 2 * 3_600_000L)
+        fill(at(13, 0), 9, 77.0, 1.0)
+        Guardian.tick(context, log, at(13, 0), stats = UidStatsSource { mapOf(home to homeUse, gms to com.mywatch.battery.core.UidUse(gms)) }, zone = zone)
+        fill(at(15, 0), 9, 75.0, 1.0)
+        Guardian.tick(context, log, at(15, 0), stats = UidStatsSource { mapOf(home to homeUse, gms to com.mywatch.battery.core.UidUse(gms, cpuMs = 40 * 60_000L, wakelockMs = 40 * 60_000L)) }, zone = zone)
+        assertTrue(issueTitle(), issueTitle().contains("Play 서비스"))
+    }
+
+    /** 타일 줄은 '비정상' 문제 먼저 — 앞에 찾은 '주의' 문제에 가려지지 않게 (리뷰에서 찾음) */
+    @Test
+    fun theTileShowsTheAbnormalIssueFirst() {
+        grant()
+        val home = com.mywatch.battery.core.KnownIssues.HOME
+        val gms = "com.google.android.gms"
+        event("android", at(10, 30), android.app.usage.UsageEvents.Event.SCREEN_INTERACTIVE)
+        event("android", at(10, 32), android.app.usage.UsageEvents.Event.SCREEN_NON_INTERACTIVE)
+        var uses = mapOf(home to com.mywatch.battery.core.UidUse(home), gms to com.mywatch.battery.core.UidUse(gms))
+        val stats = UidStatsSource { uses }
+        fill(at(10, 0), 9, 80.0, 1.0)
+        Guardian.tick(context, log, at(10, 0), stats = stats, zone = zone)
+        // Play 서비스는 시간당 8분(주의, 전체의 40%), 홈은 화면 2분을 빼고 시간당 11.5분(비정상)
+        uses = mapOf(
+            home to com.mywatch.battery.core.UidUse(home, cpuMs = 24 * 60_000L, fgMs = 2 * 3_600_000L),
+            gms to com.mywatch.battery.core.UidUse(gms, cpuMs = 16 * 60_000L),
+        )
+        fill(at(12, 0), 9, 78.0, 1.0)
+        Guardian.tick(context, log, at(12, 0), stats = stats, zone = zone)
+        assertEquals("One UI Watch 홈 과소모 — 강제 재시작", Guardian.tileIssue(context, at(12, 0)))
     }
 
     /** 화면을 오래 켜고 썼으면(2시간 중 50분) 홈의 CPU(40분)는 홈 화면·알림·타일을 그린 것 — 짚지 않는다 */

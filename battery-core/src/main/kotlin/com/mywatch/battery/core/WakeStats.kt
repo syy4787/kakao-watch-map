@@ -67,8 +67,9 @@ data class WakeStats(
     /** [notificationAdvice] 의 '지금 할 일' 줄 — 알림은 그대로 받고 화면만 안 켜지게 (앱 알림을 끄라고 하지 않는다) */
     fun notificationTodo(): Pair<String, String>? {
         if (notificationWakes < Wakes.NOTIF_ADVICE) return null
-        return "알림이 화면을 ${notificationWakes}번 켬" to
-            "웨어러블 앱 › 알림 › 고급 설정 › '알림 받으면 화면 켜기' 끄기 (하루 약 ${DrainAnalyzer.fmt(notificationCostPercent)}%)"
+        // 경로는 삼성 안내 그대로(워치 설정 › 포함) — 설명 세 줄을 넘지 않게 아끼는 양은 제목으로
+        return "알림 화면 켜짐 ${notificationWakes}번 · 하루 ${DrainAnalyzer.fmt(notificationCostPercent)}%" to
+            "웨어러블 앱 › 워치 설정 › 알림 › 고급 설정 › '알림 받으면 화면 켜기' 끄기"
     }
 }
 

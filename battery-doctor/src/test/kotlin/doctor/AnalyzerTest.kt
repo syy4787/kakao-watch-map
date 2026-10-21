@@ -343,7 +343,8 @@ class AnalyzerTest {
         val stats = quietStats().copy(powerItems = listOf(PowerItem("Uid 1000", home, 40.0, 40.0), PowerItem("Screen", null, 30.0, 30.0), PowerItem("Uid u0a45", "com.google.android.gms", 8.0, 8.0)))
         val fs = Analyzer.findings(facts(stats = stats))
         val top = fs.first { it.id == "power-top" }
-        assertTrue(top.evidence.toString(), top.evidence.any { it.contains("One UI Watch 홈") && it.contains("흔") })
+        // 1위라는 것만으로 고장이라 단정하지 않는다 — '흔하다'고 단정하지도 않는다 (리뷰에서 찾음: 근거 없는 안심)
+        assertTrue(top.evidence.toString(), top.evidence.any { it.contains("One UI Watch 홈") && it.contains("단정할 수 없") && !it.contains("흔") })
         assertFalse(fs.filter { it.blames }.flatMap { it.packages }.contains(home))
         // 홈이 위쪽이 아니면 설명도 없다
         assertFalse(Analyzer.findings(facts()).first { it.id == "power-top" }.evidence.any { it.contains("One UI Watch 홈") })
@@ -461,5 +462,14 @@ class AnalyzerTest {
         val fs = Analyzer.findings(f)
         assertTrue(fs.any { it.id == "collect-failed" })
         assertEquals(Cause.INSUFFICIENT, Analyzer.verdict(f, fs).cause)
+    }
+
+    /** uid 하나에 패키지가 여럿이면 알려진 문제를 보는 패키지(홈·Play 서비스)를 대표로 — 시스템 uid('android')는 그대로 (리뷰에서 찾음) */
+    @Test
+    fun aSharedUidIsNamedAfterTheKnownPackage() {
+        val home = "com.samsung.android.wearable.sysui"
+        val s = BatteryStats(uidPackages = mapOf(10020 to listOf("com.android.systemui", home), 1000 to listOf("android", home)))
+        assertEquals(home, s.packageOf(10020))
+        assertEquals("android", s.packageOf(1000))
     }
 }

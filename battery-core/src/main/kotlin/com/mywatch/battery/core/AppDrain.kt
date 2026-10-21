@@ -51,13 +51,16 @@ data class AppDrainRank(val use: UidUse, val score: Double, val flags: List<Stri
             use.gpsMs.takeIf { it >= 1000 }?.let { "GPS ${mins(it)}" },
             use.syncs.takeIf { it > 0 }?.let { "동기화 ${it}회" },
             use.jobs.takeIf { it > 0 }?.let { "작업 ${it}회" },
-            use.fgMs.takeIf { it >= 1000 }?.let { "화면 ${mins(it)}" },
+            use.fgMs.takeIf { it >= 1000 && !AppDrain.screenHost(use.pkg) }?.let { "화면 ${mins(it)}" },
         ).joinToString(" · ").ifEmpty { "거의 안 씀" }
 
     private fun mins(ms: Long): String = if (ms < 60_000) "${ms / 1000}초" else "${ms / 60_000}분"
 }
 
 object AppDrain {
+    /** 화면을 그리는 프로세스(One UI Watch 홈) — 화면에 떠 있던 시간으로 등급을 매기지 않는다 */
+    fun screenHost(pkg: String): Boolean = pkg.substringBefore('+') == KnownIssues.HOME
+
     /** Android vitals: 화면 꺼진 세션에서 partial wakelock 시간당 18.5초 넘으면 과소모 기여 */
     const val WAKELOCK_CAUTION_MS_PER_H = 18_500L
     /** 구간의 절반 넘게 웨이크락을 쥐면 '멈춘(stuck) 웨이크락'으로 본다 */
@@ -68,9 +71,12 @@ object AppDrain {
     const val CPU_ABNORMAL_MS_PER_H = 10L * 60_000L
     const val SENSOR_BG_CAUTION_MS_PER_H = 30L * 60_000L
 
-    /** 이전 스냅샷과 지금 스냅샷의 차. 이전에 없던 앱은 지금 값 전체가 이번 구간 사용량 */
+    /**
+     * 이전 스냅샷과 지금 스냅샷의 차. 이전에 없던 이름은 이번 구간엔 기준값만(차를 내지 않음) — 공유 uid 묶음에 앱이 늘거나(“+2” → “+3”)
+     * 이름이 바뀌면 부팅 뒤 누적값 전체가 한 구간 사용으로 잡혀 엉뚱한 과소모로 짚었다. 새로 깐 앱의 첫 구간만 빠진다
+     */
     fun delta(prev: Map<String, UidUse>, now: Map<String, UidUse>): List<UidUse> =
-        now.values.map { n -> prev[n.pkg]?.let { n - it } ?: n }.filter { !it.isEmpty }
+        now.values.mapNotNull { n -> prev[n.pkg]?.let { n - it } }.filter { !it.isEmpty }
 
     /** 여러 구간의 차를 앱별로 합친다 */
     fun sum(deltas: List<List<UidUse>>): List<UidUse> =
@@ -89,8 +95,9 @@ object AppDrain {
             val wlPerH = u.wakelockMs / hours
             if (u.wakelockMs >= windowMs * STUCK_RATIO) { flags += "웨이크락을 ${(u.wakelockMs * 100 / windowMs.coerceAtLeast(1))}% 시간 동안 쥐고 있음(stuck)"; grade = Grade.ABNORMAL }
             else if (wlPerH > WAKELOCK_CAUTION_MS_PER_H) { flags += "웨이크락 시간당 ${(wlPerH / 1000).toInt()}초 (기준 18.5초)"; grade = Grade.CAUTION }
-            // 화면에 거의 안 떠 있었는데 CPU 를 많이 씀 = 뒤에서 도는 중 (멈춘 채 도는 서비스의 전형)
-            if (u.fgMs < windowMs / 4) {
+            // 화면에 거의 안 떠 있었는데 CPU 를 많이 씀 = 뒤에서 도는 중 (멈춘 채 도는 서비스의 전형).
+            // 홈(시스템 UI)은 화면을 그리는 프로세스라 '떠 있던 시간'이 화면 켜짐과 맞지 않는다 — 화면 켜짐 몫을 빼고 보는 [KnownIssues] 가 맡는다
+            if (u.fgMs < windowMs / 4 && !screenHost(u.pkg)) {
                 val cpuPerH = u.cpuMs / hours
                 if (cpuPerH > CPU_ABNORMAL_MS_PER_H) { flags += "화면 밖에서 CPU 시간당 ${(cpuPerH / 60_000).toInt()}분 (멈춘 채 도는 중 의심)"; grade = Grade.ABNORMAL }
                 else if (cpuPerH > CPU_CAUTION_MS_PER_H) { flags += "화면 밖에서 CPU 시간당 ${(cpuPerH / 60_000).toInt()}분"; if (grade == Grade.NORMAL) grade = Grade.CAUTION }

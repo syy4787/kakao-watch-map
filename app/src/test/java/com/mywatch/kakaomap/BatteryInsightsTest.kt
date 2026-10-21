@@ -61,6 +61,13 @@ class BatteryInsightsTest {
         log.dir.deleteRecursively()
         context.getSharedPreferences(BatteryLog.PREFS, Context.MODE_PRIVATE).edit().clear().commit()
         Settings.Global.putInt(context.contentResolver, "low_power", 0)
+        // 시험 기기는 방금 켜진 것(SystemClock 이 0 근처)이라 실제 시각으로 남긴 통계가 '부팅 전'이 된다 — 부팅 시각은 모르는 것으로
+        Guardian.bootClock = { 0L }
+    }
+
+    @org.junit.After
+    fun restoreBootClock() {
+        Guardian.bootClock = Guardian.DEFAULT_BOOT_CLOCK
     }
 
     private fun allowUsage() = shadowOf(context.getSystemService(AppOpsManager::class.java))
@@ -326,7 +333,7 @@ class BatteryInsightsTest {
         // 낮의 짧은 켜짐(시계 보기)은 세지 않고 밤 것만 — 밤에만 끄는 길을 권한다
         assertTrue(todo[0].title, todo[0].title.startsWith("밤에 저절로 켜진 화면"))
         assertTrue(todo[0].sub ?: "", (todo[0].sub ?: "").contains("밤에만"))
-        assertTrue(todo[1].title, todo[1].title.contains("알림이 화면을 60번"))
+        assertTrue(todo[1].title, todo[1].title.contains("알림 화면 켜짐 60번"))
         // 알림은 그대로 받고 화면만 안 켜지게 — 삼성 안내 이름 그대로 (앱 알림을 통째로 끄라고 하지 않는다)
         assertTrue(todo[1].sub ?: "", (todo[1].sub ?: "").contains("'알림 받으면 화면 켜기' 끄기"))
     }

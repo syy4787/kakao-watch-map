@@ -46,7 +46,10 @@ object KnownIssues {
      * [watchFace] = 지금 시계 화면의 패키지 (모르면 null), [windowMs] = 순위를 모은 시간 — 시계 화면은 늘 '보이는' 상태라
      * 화면 밖 CPU 표시가 붙지 않으므로 CPU 를 시간당으로 따로 본다
      */
-    fun detect(ranks: List<AppDrainRank>, watchFace: String? = null, windowMs: Long? = null, screenOnMs: Long? = null): List<KnownIssue> {
+    fun detect(
+        ranks: List<AppDrainRank>, watchFace: String? = null, windowMs: Long? = null, screenOnMs: Long? = null,
+        notifications: Int = 0, label: (String) -> String? = { null },
+    ): List<KnownIssue> {
         if (ranks.isEmpty()) return emptyList()
         val total = ranks.sumOf { it.score }
         val out = ArrayList<KnownIssue>()
@@ -91,12 +94,16 @@ object KnownIssues {
                 }
             }
         }
-        // One UI Watch 홈(시스템 UI): 늘 '보이는' 프로세스라 화면 밖 CPU 표시가 안 붙는다 → 화면이 켜져 있던 동안 홈 화면·알림·타일을
-        // 그렸을 몫([HOME_SCREEN_CPU_SHARE])을 빼고 남은 CPU 를 시간당으로 본다. 화면 켜진 시간을 모르거나 오래 켜고 썼으면 짚지 않는다
-        if (windowMs != null && windowMs > 0 && screenOnMs != null && screenOnMs <= windowMs * HOME_MAX_SCREEN_SHARE) {
+        // One UI Watch 홈(시스템 UI): 화면을 그리는 프로세스라 '화면에 떠 있던 시간'이 화면 켜짐과 맞지 않아 앱별 등급([AppDrain])으로는
+        // 매기지 않는다 → 화면이 켜져 있던 동안 홈 화면·알림·타일을 그렸을 몫과 받은 알림을 보여 준 몫을 빼고 남은 CPU 를 시간당으로 본다.
+        // 화면 켜진 시간을 모르거나 오래 켜고 썼으면 짚지 않는다
+        // 창이 1시간은 넘어야 — 짧으면(첫 스냅샷·재시작 직후·폰에서 알림 다시 받기) 잠깐의 일이 시간당으로 부풀려진다
+        if (windowMs != null && windowMs >= HOME_MIN_WINDOW_MS && screenOnMs != null && screenOnMs <= windowMs * HOME_MAX_SCREEN_SHARE) {
             ranks.withIndex().firstOrNull { (_, r) -> r.use.pkg.substringBefore('+') == HOME }?.let { (i, r) ->
-                val hours = (windowMs / 3_600_000.0).coerceAtLeast(0.25)
-                val idleCpuMs = (r.use.cpuMs - screenOnMs * HOME_SCREEN_CPU_SHARE).coerceAtLeast(0.0)
+                val hours = windowMs / 3_600_000.0
+                // 다른 앱의 알림을 받아 보여 주는 일도 홈이 한다 — 알림 하나에 [HOME_CPU_PER_NOTIFICATION_MS] 씩은 빼고 본다
+                val allowance = screenOnMs * HOME_SCREEN_CPU_SHARE + notifications * HOME_CPU_PER_NOTIFICATION_MS
+                val idleCpuMs = (r.use.cpuMs - allowance).coerceAtLeast(0.0)
                 val perH = idleCpuMs / hours
                 val cpuGrade = when {
                     perH > AppDrain.CPU_ABNORMAL_MS_PER_H -> Grade.ABNORMAL
@@ -107,7 +114,9 @@ object KnownIssues {
                 val stuck = r.use.wakelockMs >= windowMs * AppDrain.STUCK_RATIO
                 val grade = Grade.worst(listOf(cpuGrade, if (stuck) Grade.ABNORMAL else Grade.NORMAL))
                 if (grade != Grade.NORMAL && (i == 0 || r.score >= total * SHARE)) {
-                    val cpuNote = "화면이 거의 꺼져 있던 ${fmtHours(hours)} 동안 CPU ${(r.use.cpuMs / 60_000).toInt()}분 (화면 켜짐 ${(screenOnMs / 60_000).toInt()}분)"
+                    val cpuNote = "화면이 거의 꺼져 있던 ${fmtHours(hours)} 동안 CPU ${(r.use.cpuMs / 60_000).toInt()}분 (화면 켜짐 ${(screenOnMs / 60_000).toInt()}분" +
+                        (if (notifications > 0) " · 알림 ${notifications}개" else "") + ")"
+                    val name = label(HOME) ?: "One UI Watch 홈"
                     out += KnownIssue(
                         HOME_HOG, HOME,
                         "One UI Watch 홈이 화면 꺼진 채 많이 씀 — 2026년 업데이트 뒤 보고된 문제",
@@ -115,7 +124,7 @@ object KnownIssues {
                         listOf(
                             "홈 + 뒤로 버튼을 꺼질 때까지(7초 이상) 눌러 강제 재시작 — 보통 재시작으론 안 풀리고 강제 재시작으로 나아졌다는 보고가 있습니다",
                             "업데이트한 지 며칠 안 됐으면 적응 기간일 수 있습니다 — 충전기 위에서 하룻밤 지나도 그대로면 다음 단계",
-                            "설정 › 애플리케이션 › One UI Watch 홈 › 저장공간 › 캐시 지우기 (데이터 지우기는 하지 마세요 — 홈 화면 배치가 초기화됩니다)",
+                            "설정 › 애플리케이션 › $name › 저장공간 › 캐시 지우기 (데이터 지우기는 하지 마세요 — 홈 화면 배치가 초기화됩니다)",
                             "계속되면 Samsung Members 앱으로 오류 보고(삼성 안내) — 고쳐질 때까지 밤엔 지킴이 밤 모드",
                         ),
                         grade,
@@ -135,10 +144,16 @@ object KnownIssues {
     const val HOME_MAX_SCREEN_SHARE = 0.3
 
     /**
-     * 홈의 '주의'는 다른 앱(시간당 3분)보다 높게 5분 — AOD 갱신·알림 표시처럼 화면이 꺼져 있어도 홈이 조금 하는 일이 있어서.
-     * (배터리 사용량 화면에서 홈이 1위인 것 자체는 흔하다 — 화면을 켜 둔 시간의 몫이 앞에 떠 있던 홈에 잡히므로. CPU 로만 본다)
+     * 홈의 '주의'는 다른 앱(시간당 3분)보다 높게 5분 — AOD 갱신처럼 화면이 꺼져 있어도 홈이 조금 하는 일이 있어서.
+     * (배터리 사용량 순위에서 홈이 위쪽이라는 것만으로는 고장이라 단정할 수 없다 — 그래서 순위가 아니라 화면 꺼진 동안의 CPU 로 본다)
      */
     const val HOME_CAUTION_MS_PER_H = 5L * 60_000L
 
-    private fun fmtHours(h: Double): String = if (h >= 1.0) "${DrainAnalyzer.fmt(h)}시간".replace(".0시간", "시간") else "${(h * 60).toInt()}분"
+    /** 홈을 판단하려면 창이 이만큼은 돼야 한다 */
+    const val HOME_MIN_WINDOW_MS = 3_600_000L
+
+    /** 알림 하나를 받아 보여 주는 데 홈이 쓸 만한 CPU (어림 — 진동·화면 표시·묶음 정리) */
+    const val HOME_CPU_PER_NOTIFICATION_MS = 2_000L
+
+    private fun fmtHours(h: Double): String = "${DrainAnalyzer.fmt(h)}시간".replace(".0시간", "시간")
 }

@@ -66,7 +66,18 @@ data class BatteryStats(
             return p / h
         }
 
-    fun packageOf(uid: Int?): String? = uid?.let { uidPackages[it]?.firstOrNull() }
+    /**
+     * uid 의 대표 패키지 — 여럿이면 알려진 문제를 보는 패키지(Play 서비스·One UI Watch 홈)를 앞에, 시스템 uid('android' 가 낀 것)는
+     * 그대로 첫 패키지 (워치 앱의 HealthReader.groupKey 와 같은 규칙)
+     */
+    fun packageOf(uid: Int?): String? = uid?.let { u ->
+        val names = uidPackages[u] ?: return@let null
+        if ("android" in names) names.firstOrNull() else NAMED.firstOrNull { it in names } ?: names.firstOrNull()
+    }
+
+    private companion object {
+        val NAMED = listOf("com.google.android.gms", "com.samsung.android.wearable.sysui")
+    }
 
     /** uid → 대표 패키지로 웨이크락에 이름을 붙인다 */
     fun named(w: WakeLock): WakeLock = if (w.pkg != null || w.uid == null) w else w.copy(pkg = packageOf(w.uid))

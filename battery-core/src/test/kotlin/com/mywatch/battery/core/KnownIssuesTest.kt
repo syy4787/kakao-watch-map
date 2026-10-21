@@ -136,4 +136,37 @@ class KnownIssuesTest {
         val behind = AppDrain.rank(listOf(UidUse(home, cpuMs = 10 * 60_000L, fgMs = 2 * h), UidUse("com.example.drain", wakelockMs = 110 * 60_000L, cpuMs = 40 * 60_000L)), 2 * h)
         assertTrue(KnownIssues.detect(behind, windowMs = 2 * h, screenOnMs = 4 * 60_000L).none { it.id == KnownIssues.HOME_HOG })
     }
+
+    /** 홈 판단의 경계 — 창이 1시간은 넘어야(짧으면 잠깐의 일이 시간당으로 부풀려짐), 화면이 창의 30% 까지면 본다 (리뷰에서 찾음) */
+    @Test
+    fun theWatchHomeNeedsAnHourAndAtMostThirtyPercentScreen() {
+        val home = KnownIssues.HOME
+        val busy = AppDrain.rank(listOf(UidUse(home, cpuMs = 8 * 60_000L)), 30 * 60_000L)
+        assertTrue("30분 창은 짧다", KnownIssues.detect(busy, windowMs = 30 * 60_000L, screenOnMs = 0).isEmpty())
+        val ranks = AppDrain.rank(listOf(UidUse(home, cpuMs = 40 * 60_000L)), 2 * h)
+        assertEquals(1, KnownIssues.detect(ranks, windowMs = 2 * h, screenOnMs = 36 * 60_000L).size)        // 딱 30%
+        assertTrue(KnownIssues.detect(ranks, windowMs = 2 * h, screenOnMs = 36 * 60_000L + 1).isEmpty())  // 넘음
+    }
+
+    /** 다른 앱의 알림을 받아 보여 주는 일도 홈이 한다 — 알림 하나에 2초씩은 홈 탓이 아니다 (채팅 폭주·운동 중 알림) */
+    @Test
+    fun notificationsTheHomeHadToShowAreNotBlamedOnIt() {
+        val home = KnownIssues.HOME
+        val ranks = AppDrain.rank(listOf(UidUse(home, cpuMs = 24 * 60_000L)), 2 * h)
+        assertEquals(Grade.ABNORMAL, KnownIssues.detect(ranks, windowMs = 2 * h, screenOnMs = 6 * 60_000L).single().grade)
+        // 알림 300개 × 2초 = 10분 → (24 − 3 − 10)분 ÷ 2시간 = 시간당 5.5분 → 주의
+        val withNotes = KnownIssues.detect(ranks, windowMs = 2 * h, screenOnMs = 6 * 60_000L, notifications = 300).single()
+        assertEquals(Grade.CAUTION, withNotes.grade)
+        assertTrue(withNotes.why, withNotes.why.contains("알림 300개"))
+    }
+
+    /** 해결 단계의 앱 이름은 이 워치에 보이는 이름으로 (모르면 'One UI Watch 홈') */
+    @Test
+    fun theHomeStepsUseTheWatchsOwnAppName() {
+        val ranks = AppDrain.rank(listOf(UidUse(KnownIssues.HOME, cpuMs = 24 * 60_000L)), 2 * h)
+        val named = KnownIssues.detect(ranks, windowMs = 2 * h, screenOnMs = 0, label = { if (it == KnownIssues.HOME) "One UI Watch Home" else null }).single()
+        assertTrue(named.steps.toString(), named.steps.any { it.contains("One UI Watch Home") })
+        val plain = KnownIssues.detect(ranks, windowMs = 2 * h, screenOnMs = 0).single()
+        assertTrue(plain.steps.toString(), plain.steps.any { it.contains("One UI Watch 홈") })
+    }
 }

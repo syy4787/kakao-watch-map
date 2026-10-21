@@ -181,9 +181,11 @@ object Analyzer {
         // 6. 추정 전력 순위 + Play 서비스 패턴 + 계산/실측 차이
         if (s != null && s.powerItems.isNotEmpty()) {
             val top = s.powerItems.sortedByDescending { it.mah }.take(10)
-            // One UI Watch 홈이 위쪽이면 흔한 일이라는 설명 — 화면 전력이 앞에 떠 있던 앱(시계 화면을 띄운 홈)의 시간 비율로 나뉘어 잡힌다
+            // One UI Watch 홈이 위쪽이면: 순위만으로는 고장이라 단정할 수 없다는 설명 (흔하다고 단정하지도 않는다 — 워치9 보고에선 그게
+            // 증상이었다). 화면 꺼진 동안의 CPU 는 워치 앱 지킴이가 화면 켜짐 몫을 빼고 본다
             val homeNote = top.take(3).firstOrNull { it.pkg == HOME }?.let {
-                "One UI Watch 홈이 위쪽인 것은 흔합니다 — 화면을 켜 둔 시간의 전력이 시계 화면을 띄운 홈 몫으로 잡힘. 화면이 꺼진 채 CPU 를 쓰는지는 워치 앱 지킴이가 봅니다"
+                "One UI Watch 홈이 위쪽 — 순위만으로는 고장이라 단정할 수 없습니다. 화면이 꺼진 채 CPU 를 많이 쓰는지는 워치 앱 지킴이가 " +
+                    "화면 켜짐 몫을 빼고 봅니다(알려진 문제 'One UI Watch 홈 과소모' → 강제 재시작)"
             }
             out += Finding("power-top", Severity.INFO, "추정 전력 사용 상위 ${top.size}개",
                 top.mapIndexed { i, p -> "${i + 1}. ${p.display}: ${fmt1(p.mah)} mAh${p.percent?.let { " (${pct(it)}%)" } ?: ""}" } + listOfNotNull(homeNote),
