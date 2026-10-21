@@ -58,6 +58,10 @@ object Rates {
     fun between(samples: List<BatterySample>, start: Long, end: Long): Rate =
         rateOfClips(clip(dischargeSegments(samples), start, end))
 
+    /** [start]~[end] 창 중 대기(화면 꺼짐) 구간만 */
+    fun idleBetween(samples: List<BatterySample>, start: Long, end: Long): Rate =
+        rateOfClips(clip(dischargeSegments(samples).filter { it.idle }, start, end))
+
     /** 구간과 창이 겹치는 비율 */
     private class Clip(val segment: Segment, val fraction: Double)
 

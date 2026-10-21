@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 배터리 화면 '최근 며칠' 막대 그래프 한 줄 ([com.mywatch.kakaomap.ui.TrendBarsView]) -->
+<com.mywatch.kakaomap.ui.TrendBarsView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:importantForAccessibility="yes"
+    android:paddingHorizontal="18dp"
+    android:paddingVertical="4dp" />

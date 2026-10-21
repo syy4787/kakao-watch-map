@@ -95,6 +95,19 @@ object Guardian {
         )
     }
 
+    /** 지킴이 설정 하나의 값 — [id] 는 [BatteryActivity.CONFIG_IDS] 의 이름 (모르면 null) */
+    fun flag(cfg: GuardianConfig, id: String): Boolean? = when (id) {
+        "night_saver" -> cfg.nightSaver
+        "night_aod" -> cfg.nightAodOff
+        "night_location" -> cfg.nightLocationOff
+        "night_sync" -> cfg.nightSyncOff
+        "night_wake" -> cfg.nightWakeOff
+        "night_hotword" -> cfg.nightHotwordOff
+        "abnormal" -> cfg.abnormalSaver
+        "reminder" -> cfg.chargeReminder
+        else -> null
+    }
+
     fun saveConfig(c: Context, cfg: GuardianConfig) = prefs(c).edit()
         .putBoolean(K_NIGHT_SAVER, cfg.nightSaver).putBoolean(K_NIGHT_AOD, cfg.nightAodOff)
         .putBoolean(K_NIGHT_LOCATION, cfg.nightLocationOff).putBoolean(K_NIGHT_SYNC, cfg.nightSyncOff)

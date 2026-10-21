@@ -140,6 +140,41 @@ class BatteryActivityTest {
         assertTrue(step.title + step.sub, (step.title + (step.sub ?: "")).contains("배터리 보호"))
     }
 
+    /**
+     * '최근 며칠': 일주일 기록 — 사흘 전 새벽 소프트웨어 업데이트 뒤로 대기 소모가 1.0 → 2.5%/h 로 늘었으면 막대 그래프·꺾인 날·그 무렵 바뀐 것,
+     * 맨 위 '지금 할 일'에도 (업데이트 뒤 며칠 기다림 → 캐시·재시작)
+     */
+    @Test
+    fun aRiseAfterASoftwareUpdateIsShownWithWhatChangedThen() {
+        val zone = java.time.ZoneId.systemDefault()
+        val today = java.time.LocalDate.now(zone)
+        val rates = listOf(1.0, 1.0, 1.1, 1.0, 2.6, 2.5, 2.4)
+        rates.forEachIndexed { i, r ->
+            val start = today.minusDays((7 - i).toLong()).atStartOfDay(zone).toInstant().toEpochMilli()
+            var t = start
+            while (t <= start + 20 * 3_600_000L) {
+                val note = if (i == 4 && t == start + 3 * 3_600_000L) com.mywatch.battery.core.ChangeNote.encode(listOf(
+                    com.mywatch.battery.core.ChangeNote.Item(com.mywatch.battery.core.ChangeKind.FIRMWARE, "fw", "L350XXU1AZH1", "L350XXU1AZI1"))) else ""
+                log.append(BatterySample(t = t, level = (100 - r * (t - start) / 3_600_000.0).toInt(), note = note))
+                t += q
+            }
+            t = start + 20 * 3_600_000L + q
+            while (t < start + 24 * 3_600_000L) { log.append(BatterySample(t = t, level = 100, plugged = true)); t += q }
+        }
+        val (_, adapter) = open()
+        val all = rows(adapter)
+        val header = all.indexOfFirst { it is Row.Header && it.title == "최근 며칠" }
+        assertTrue("최근 며칠 칸", header >= 0)
+        val bars = all.filterIsInstance<Row.Trend>().single()
+        assertTrue(bars.model.description, bars.model.description.contains("부터 늘어남"))
+        val step = all.filterIsInstance<Row.Step>().first { it.key == "trend" }
+        assertTrue(step.title, step.title.endsWith("부터 대기 소모가 늘었습니다"))
+        assertEquals("시간당 1.0% → 2.5%", step.sub)
+        assertTrue(all.filterIsInstance<Row.Note>().any { it.text.startsWith("그 무렵 바뀐 것:") && it.text.contains("워치 소프트웨어 업데이트 (L350XXU1AZI1)") })
+        val todo = all.filterIsInstance<Row.Step>().first { it.key == "todo:0" }
+        assertTrue(todo.title, todo.title.contains("소프트웨어 업데이트 뒤 더 닳음"))
+    }
+
     @Test
     fun startingAndEndingAnExperimentWritesMarkers() {
         val (a, adapter) = open()
@@ -213,6 +248,13 @@ class BatteryActivityTest {
         click(a, adapter, BatteryActivity.A_TOGGLE + BatteryActivity.T_NIGHT_SAVER)
         assertFalse(com.mywatch.kakaomap.battery.Guardian.config(context).nightSaver)
         assertTrue(rows(adapter).filterIsInstance<Row.Action>().any { it.id == BatteryActivity.A_TOGGLE + BatteryActivity.T_NIGHT_SAVER && it.text.endsWith("꺼짐") })
+        // 바꾼 것은 기록에 한 줄 — '최근 며칠'이 그 무렵 바뀐 것으로 보여 준다
+        val until = System.currentTimeMillis() + 5_000
+        while (System.currentTimeMillis() < until && log.readAll().none { it.event == Event.USER_NOTE }) { shadowOf(Looper.getMainLooper()).idle(); Thread.sleep(20) }
+        val cfgChange = com.mywatch.battery.core.ChangeNote.all(log.readAll()).single()
+        assertEquals(com.mywatch.battery.core.ChangeKind.CONFIG, cfgChange.kind)
+        assertEquals("night_saver", cfgChange.subject)
+        assertEquals("1" to "0", cfgChange.from to cfgChange.to)
         click(a, adapter, BatteryActivity.A_TOGGLE + BatteryActivity.T_NIGHT_LOCATION)
         assertTrue(com.mywatch.kakaomap.battery.Guardian.config(context).nightLocationOff)
         // 손목 올림·터치로 켜기 끄기(기본 켬)와 'Hey Google' 끄기(기본 끔)

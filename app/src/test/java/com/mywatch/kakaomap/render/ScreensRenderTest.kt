@@ -619,6 +619,51 @@ class ScreensRenderTest {
         shoot("battery_chart", rows, pages = 2)
     }
 
+    /** '최근 며칠': 열흘 기록 — 18일 새벽 소프트웨어 업데이트·Play 서비스 업데이트·AOD 켬 뒤로 대기 소모가 늘어난 막대·결론·바뀐 것 */
+    @Test
+    fun batteryTrend() {
+        val zone = java.time.ZoneId.of("Asia/Seoul")
+        fun at(d: Int, h: Int, m: Int = 0) = java.time.LocalDateTime.of(2026, 10, d, h, m).atZone(zone).toInstant().toEpochMilli()
+        val rates = listOf(1.0, 1.1, 0.9, 1.0, null, 1.1, 2.4, 2.6, 4.7, 2.3)
+        val samples = ArrayList<com.mywatch.battery.core.BatterySample>()
+        val q = 15 * 60_000L
+        rates.forEachIndexed { i, r ->
+            val d = 12 + i
+            var t = at(d, 0)
+            val end = if (d == 21) at(21, 18) else at(d, 20)
+            while (t <= end) {
+                val h = (t - at(d, 0)) / 3_600_000.0
+                samples += com.mywatch.battery.core.BatterySample(t, if (r == null) 100 else (100 - r * h).toInt().coerceAtLeast(1), plugged = r == null && h >= 2, status = if (r == null && h >= 2) com.mywatch.battery.core.Status.FULL else com.mywatch.battery.core.Status.DISCHARGING)
+                t += q
+            }
+            if (d != 21) { var c = at(d, 20) + q; while (c < at(d + 1, 0)) { samples += com.mywatch.battery.core.BatterySample(c, 100, plugged = true, status = com.mywatch.battery.core.Status.CHARGING); c += q } }
+        }
+        // 바뀐 것은 그 무렵의 15분 표본에 붙는다 (워치가 하는 그대로)
+        fun note(t: Long, vararg items: com.mywatch.battery.core.ChangeNote.Item) {
+            val i = samples.indices.minByOrNull { kotlin.math.abs(samples[it].t - t) }!!
+            samples[i] = samples[i].copy(note = com.mywatch.battery.core.ChangeNote.encode(items.toList()))
+        }
+        val I = com.mywatch.battery.core.ChangeNote::Item
+        note(at(18, 3, 12), I(com.mywatch.battery.core.ChangeKind.FIRMWARE, "fw", "L350XXU1AZH1", "L350XXU1AZI1"))
+        note(at(18, 10, 40), I(com.mywatch.battery.core.ChangeKind.APP, "com.google.android.gms", null, "26.40.31"))
+        note(at(18, 12, 5), I(com.mywatch.battery.core.ChangeKind.SETTING, "aod", "0", "1"))
+        note(at(20, 9, 12), I(com.mywatch.battery.core.ChangeKind.CONFIG, "night_aod", "0", "1"))
+        note(at(16, 15, 30), I(com.mywatch.battery.core.ChangeKind.APP, "com.samsung.android.wear.shealth", null, "6.30.5"))
+        val now = at(21, 18)
+        val t = com.mywatch.battery.core.TrendReport.of(samples.sortedBy { it.t }, now, zone)
+        val shift = t.shift!!
+        fun line(c: com.mywatch.battery.core.Change) = "· ${com.mywatch.kakaomap.battery.BatterySummary.time(c.t)} ${com.mywatch.battery.core.ChangeFinder.label(c) { null }}"
+        val near = t.suspects.take(3)
+        val rows = listOf(
+            Row.Header("최근 며칠", "대기(화면 꺼짐) 시간당 %"),
+            Row.Trend("days", t.bars!!),
+            Row.Step(0xFFFFC107.toInt(), R.drawable.ic_warning, null, com.mywatch.battery.core.ChangeFinder.title(shift), com.mywatch.battery.core.ChangeFinder.numbers(shift), key = "trend"),
+            Row.Note("그 무렵 바뀐 것:\n" + near.joinToString("\n", transform = ::line)),
+            Row.Note("최근 바뀐 것:\n" + t.recent.filter { it !in near }.take(5).joinToString("\n", transform = ::line)),
+        )
+        shoot("battery_trend", rows, pages = 3)
+    }
+
     /** 실제 배터리 화면: 하루 반 기록(밤 충전 포함)으로 맨 위 지금 줄·그래프·지금 할 일·소모율·지킴이 칸 */
     @Test
     fun batteryScreen() {

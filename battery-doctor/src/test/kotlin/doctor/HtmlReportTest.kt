@@ -50,6 +50,35 @@ class HtmlReportTest {
         assertTrue(table.contains("com.example.drain"))
     }
 
+    /** 워치 기록 칸에 날마다 대기 소모 표, 꺾인 날, 그 무렵 바뀐 것 */
+    @Test
+    fun theDailyTrendAndWhatChangedAreInTheWatchSection() {
+        val q = 15 * 60_000L
+        fun at(d: Int, h: Int) = java.time.LocalDateTime.of(2026, 10, d, h, 0).atZone(zone).toInstant().toEpochMilli()
+        val samples = ArrayList<com.mywatch.battery.core.BatterySample>()
+        listOf(1.0, 1.0, 1.1, 1.0, 2.6, 2.5, 2.4).forEachIndexed { i, r ->
+            val start = at(12 + i, 0)
+            var t = start
+            while (t <= start + 20 * 3_600_000L) {
+                val note = if (t == at(16, 3)) com.mywatch.battery.core.ChangeNote.encode(listOf(com.mywatch.battery.core.ChangeNote.Item(
+                    com.mywatch.battery.core.ChangeKind.APP, "com.google.android.gms", null, "26.40.31"))) else ""
+                samples += com.mywatch.battery.core.BatterySample(t = t, level = (100 - r * (t - start) / 3_600_000.0).toInt(), note = note); t += q
+            }
+        }
+        val now = at(19, 22)
+        val f = Facts(model = "SM-L350", nominalMah = 445, collectedAt = now, watchSamples = samples,
+            watch = com.mywatch.battery.core.DrainAnalyzer(445, zone).analyze(samples, now),
+            watchTrend = com.mywatch.battery.core.TrendReport.of(samples, now, zone))
+        val fs = Analyzer.findings(f)
+        val html = HtmlReport.render(f, fs, Analyzer.verdict(f, fs), emptyMap(), zone)
+        val section = Regex("<h2>워치 기록.*?</section>", RegexOption.DOT_MATCHES_ALL).find(html)!!.value
+        assertTrue(section.contains("날마다 대기 소모"))
+        assertTrue(section.contains("<th>10/12</th>") && section.contains("<td>1.0</td>") && section.contains("<td>2.6</td>"))
+        assertTrue(section.contains("10/16부터 대기 소모가 시간당 1.0% → 2.5%로 늘었습니다"))
+        assertTrue(section.contains("Google Play 서비스 업데이트 (26.40.31)"))
+        assertTrue(section, section.contains("캐시 지우기"))
+    }
+
     @Test
     fun watchChartOnlyWhenSamplesExist() {
         val (_, _, html) = sampleReport()

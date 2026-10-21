@@ -64,6 +64,39 @@ class AnalyzerTest {
 
     private fun verdict(f: Facts) = Analyzer.verdict(f, Analyzer.findings(f))
 
+    /** 10/12~10/18 날마다 0~20시 화면 꺼진 채 [rates]%/h, 20~24시 충전 — [notes] 는 (시각, 바뀐 것) */
+    private fun days(rates: List<Double>, vararg notes: Pair<Long, com.mywatch.battery.core.ChangeNote.Item>): List<BatterySample> {
+        val out = ArrayList<BatterySample>()
+        rates.forEachIndexed { i, r ->
+            val start = at(2026, 10, 12 + i, 0)
+            var t = start
+            while (t <= start + 20 * 3_600_000L) {
+                val note = notes.firstOrNull { it.first == t }?.let { com.mywatch.battery.core.ChangeNote.encode(listOf(it.second)) } ?: ""
+                out += BatterySample(t = t, level = (100 - r * (t - start) / 3_600_000.0).toInt(), note = note); t += q
+            }
+            t = start + 20 * 3_600_000L + q
+            while (t < start + 24 * 3_600_000L) { out += BatterySample(t = t, level = 100, plugged = true); t += q }
+        }
+        return out
+    }
+
+    /** 워치 기록으로 본 '언제부터': 최근 7일 안에 대기 소모가 늘어 꺾였으면 소견 — 그 무렵 바뀐 것과 할 일 */
+    @Test
+    fun aRecentRiseInIdleDrainIsAFindingWithWhatChangedThen() {
+        val fw = com.mywatch.battery.core.ChangeNote.Item(com.mywatch.battery.core.ChangeKind.FIRMWARE, "fw", "L350XXU1AZH1", "L350XXU1AZI1")
+        val samples = days(listOf(1.0, 1.0, 1.1, 1.0, 2.6, 2.5, 2.4), at(2026, 10, 16, 3) to fw)
+        val f = facts(watchSamples = samples).copy(watchTrend = com.mywatch.battery.core.TrendReport.of(samples, now, zone))
+        val shift = Analyzer.findings(f).single { it.id == "watch-shift" }
+        assertEquals(Severity.CAUTION, shift.severity)
+        assertTrue(shift.title, shift.title.contains("10/16부터 대기 소모가 시간당 1.0% → 2.5%로 늘었습니다"))
+        assertTrue(shift.evidence.joinToString(), shift.evidence.any { it.contains("워치 소프트웨어 업데이트 (L350XXU1AZI1)") })
+        assertTrue(shift.evidence.joinToString(), shift.evidence.any { it.contains("1주") })
+        // 꺾임이 없으면 소견도 없다
+        val flat = days(listOf(1.0, 1.1, 1.0, 1.0, 1.1, 1.0, 1.0))
+        val g = facts(watchSamples = flat).copy(watchTrend = com.mywatch.battery.core.TrendReport.of(flat, now, zone))
+        assertTrue(Analyzer.findings(g).none { it.id == "watch-shift" })
+    }
+
     // ── 판정 가지 6개 ──
 
     @Test

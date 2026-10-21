@@ -1,6 +1,8 @@
 package doctor
 
 import com.mywatch.battery.core.BatterySample
+import com.mywatch.battery.core.ChangeFinder
+import com.mywatch.battery.core.DayTrend
 import com.mywatch.battery.core.Event
 import com.mywatch.battery.core.Rate
 import com.mywatch.battery.core.Thresholds
@@ -106,6 +108,7 @@ object HtmlReport {
             sb.append("<p>워치 기록이 없습니다. 워치 앱(갤럭시워치 전용앱)의 '배터리' 화면을 한 번 열면 15분마다 기록이 쌓이고, 다음 수집부터 그래프와 대기 소모율이 나옵니다.</p>")
         } else {
             watchSummary(sb, f, zone)
+            trendTable(sb, f, zone)
             sb.append(svg(f.watchSamples, f, zone))
             sb.append("<p class=\"legend\">선: 잔량 % · 회색 음영: 충전 중 · 파란 음영: 실험 구간 · 빨간 점: 잔량 표시 이상</p>")
         }
@@ -250,6 +253,44 @@ object HtmlReport {
         }
     }
 
+    /** 날마다 대기 소모 표 + 꺾인 날 + 그 무렵 바뀐 것(할 일) + 최근 7일 바뀐 것 */
+    private fun trendTable(sb: StringBuilder, f: Facts, zone: ZoneId) {
+        val t = f.watchTrend ?: return
+        if (t.days.none { it.pph != null }) return
+        sb.append("<h3>날마다 대기 소모 (시간당 %, 화면 꺼짐·충전 안 함)</h3><table class=\"days\"><tr>")
+        t.shownDays.forEach { sb.append("<th>${esc(ChangeFinder.day(it.date))}</th>") }
+        sb.append("</tr><tr>")
+        t.shownDays.forEach { d ->
+            val cls = when (Thresholds.idle(d.pph)) { com.mywatch.battery.core.Grade.ABNORMAL -> " class=\"bad\""; else -> "" }
+            sb.append("<td$cls>${d.pph?.let { fmt1(it) } ?: "-"}</td>")
+        }
+        sb.append("</tr></table>")
+        val shift = t.shift
+        if (shift != null) {
+            sb.append("<p class=\"${if (shift.worse) "bad" else "good"}\"><b>${esc(ChangeFinder.headline(shift))}</b></p>")
+            if (t.suspects.isEmpty()) sb.append("<p>그 무렵 워치 앱이 아는 변화(소프트웨어·앱·시계 화면·주요 설정)는 없습니다.</p>")
+            else {
+                sb.append("<p>그 무렵 바뀐 것 (가능성 높은 순):</p><ul>")
+                t.suspects.take(5).forEach { sb.append("<li>${esc(stamp(it.t, zone))} ${esc(ChangeFinder.label(it) { null })}</li>") }
+                sb.append("</ul>")
+            }
+            if (shift.worse) {
+                val (todo, how) = ChangeFinder.advice(shift, t.suspects.firstOrNull()) { null }
+                sb.append("<p>할 일: <b>${esc(todo)}</b> — ${esc(how)}</p>")
+            }
+        } else if (t.validDays < 2 * DayTrend.MIN_SIDE_DAYS) {
+            sb.append("<p>날마다 견주려면 대기 기록이 3시간 넘는 날이 ${2 * DayTrend.MIN_SIDE_DAYS}일 필요합니다 (지금 ${t.validDays}일).</p>")
+        } else {
+            sb.append("<p>날마다 대기 소모에 뚜렷한 꺾임은 없습니다.</p>")
+        }
+        val others = t.recent.filter { it !in t.suspects.take(5) }.take(8)
+        if (others.isNotEmpty()) {
+            sb.append("<details><summary>최근 7일 바뀐 것 ${others.size}개</summary><ul>")
+            others.forEach { sb.append("<li>${esc(stamp(it.t, zone))} ${esc(ChangeFinder.label(it) { null })}</li>") }
+            sb.append("</ul></details>")
+        }
+    }
+
     /** 잔량 vs 시간 선그래프 — 충전 구간 음영, 실험 구간 음영, 이상 지점 표시 */
     fun svg(samples: List<BatterySample>, f: Facts, zone: ZoneId): String {
         val sorted = samples.sortedBy { it.t }
@@ -343,6 +384,7 @@ header{margin:4px 0 12px}h1{font-size:1.4rem;margin:0}h2{font-size:1.1rem;margin
 ol.todo{padding-left:22px}ol.todo li{margin:6px 0}
 table{border-collapse:collapse;width:100%;font-size:.92rem}th,td{border:1px solid #e6e6e6;padding:6px 8px;text-align:left;vertical-align:top;word-break:break-word}th{background:#fafafa}
 table.kv th{width:38%}
+h3{font-size:1rem;margin:12px 0 6px}table.days{width:auto}table.days th,table.days td{text-align:center;padding:4px 6px;min-width:2.6em}
 .finding{border-left:5px solid #bbb;padding:8px 10px;margin:8px 0;background:#fcfcfc;border-radius:6px}.finding ul{margin:4px 0 0 18px;padding:0}
 .sev-ABNORMAL{border-left-color:#e53935}.sev-CAUTION{border-left-color:#fb8c00}.sev-INFO{border-left-color:#9e9e9e}
 .badge{display:inline-block;font-size:.75rem;padding:1px 6px;border-radius:4px;background:#9e9e9e;color:#fff;margin-right:4px}.finding.sev-ABNORMAL .badge,.badge.sev-ABNORMAL{background:#e53935}.finding.sev-CAUTION .badge,.badge.sev-CAUTION{background:#fb8c00}

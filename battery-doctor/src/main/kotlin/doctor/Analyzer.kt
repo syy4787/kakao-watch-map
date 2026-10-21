@@ -1,6 +1,9 @@
 package doctor
 
 import com.mywatch.battery.core.AnomalyKind
+import com.mywatch.battery.core.ChangeFinder
+import com.mywatch.battery.core.ChangeKind
+import com.mywatch.battery.core.DayTrend
 import com.mywatch.battery.core.DrainAnalyzer
 import com.mywatch.battery.core.Gauge
 import com.mywatch.battery.core.GaugeDriftRule
@@ -8,6 +11,7 @@ import com.mywatch.battery.core.Grade
 import com.mywatch.battery.core.Rate
 import com.mywatch.battery.core.SampleCsv
 import com.mywatch.battery.core.Thresholds
+import com.mywatch.battery.core.TrendReport
 import com.mywatch.battery.core.WatchModels
 import doctor.fix.Catalog
 import doctor.parse.AlarmDump
@@ -64,6 +68,7 @@ object Analyzer {
             watchSamples = samples,
             watchSummary = snapshot.watchSummary,
             watchMetrics = com.mywatch.battery.core.SummaryMetrics.parse(snapshot.watchSummary),
+            watchTrend = if (samples.isNotEmpty()) runCatching { TrendReport.of(samples, snapshot.time, zone) }.getOrNull() else null,
             collectedAt = snapshot.time,
             missing = snapshot.failed(),
             snapshotDir = snapshot.dir.path,
@@ -239,6 +244,19 @@ object Analyzer {
             out += Finding("gauge-phantom", Severity.CAUTION, "워치 기록: 표시 소모가 전하량 계수기 소모보다 큼 — 가짜 소모(게이지 오차)",
                 w.verdict.reasons.filter { it.contains("가짜 소모") } + listOf("기준: 24시간 평균 표시 소모(%/h)가 계수기 소모(mAh/h ÷ 공칭 용량)보다 1.5포인트 이상 크면"),
                 source = Rules.SOURCE_DRIFT, category = "gauge")
+        }
+
+        // 7-1. 언제부터 — 최근 7일 안에 대기 소모가 늘어 꺾였으면 그 무렵 바뀐 것과 할 일 (워치 앱이 표본에 남긴 '바뀐 것' 표시)
+        f.watchTrend?.takeIf { it.fresh }?.let { t ->
+            val s0 = t.shift ?: return@let
+            val (todo, how) = ChangeFinder.advice(s0, t.suspects.firstOrNull()) { null }
+            out += Finding("watch-shift", Severity.CAUTION, "워치 기록: ${ChangeFinder.headline(s0)}",
+                listOf("날마다 대기 시간당 %: " + t.shownDays.joinToString(" · ") { d -> "${ChangeFinder.day(d.date)} ${d.pph?.let { fmt1(it) } ?: "-"}" }) +
+                    (if (t.suspects.isEmpty()) listOf("그 무렵 워치 앱이 아는 변화(소프트웨어·앱·시계 화면·주요 설정)는 없음")
+                    else t.suspects.take(5).map { "그 무렵: ${time(it.t)} ${ChangeFinder.label(it) { null }}" }) +
+                    listOf("할 일: $todo — $how", "기준: 날마다 대기 %/h 중앙값이 ${DayTrend.RATIO}배·${DayTrend.MIN_DIFF}%p 넘게, 양쪽 ${DayTrend.MIN_SIDE_DAYS}일 이상이 같은 쪽"),
+                packages = t.suspects.filter { it.kind == ChangeKind.APP && it.to != "-" }.map { it.subject }.distinct().take(3),
+                category = "trend")
         }
 
         // 8. 용량

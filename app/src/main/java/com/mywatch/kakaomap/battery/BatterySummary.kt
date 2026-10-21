@@ -2,6 +2,7 @@ package com.mywatch.kakaomap.battery
 
 import com.mywatch.battery.core.Analysis
 import com.mywatch.battery.core.BatterySample
+import com.mywatch.battery.core.ChangeFinder
 import com.mywatch.battery.core.DrainAnalyzer
 import com.mywatch.battery.core.GaugeDrift
 import com.mywatch.battery.core.Grade
@@ -9,6 +10,7 @@ import com.mywatch.battery.core.Rate
 import com.mywatch.battery.core.Status
 import com.mywatch.battery.core.SummaryMetrics
 import com.mywatch.battery.core.Thresholds
+import com.mywatch.battery.core.TrendReport
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -91,6 +93,12 @@ object BatterySummary {
         "'${e.name}' $state · ${span / 60}시간 ${span % 60}분 · ${rateLine(e.rate)} — ${e.grade.label}"
     }
 
+    /** "10/12 1.0 · 10/13 1.1 · 10/14 - · …" (대기 %/h, 기록이 모자란 날은 -) — 기록 있는 날이 없으면 null */
+    fun trendLine(t: TrendReport): String? {
+        if (t.days.none { it.pph != null }) return null
+        return t.shownDays.joinToString(" · ") { d -> ChangeFinder.day(d.date) + " " + (d.pph?.let { DrainAnalyzer.fmt(it) } ?: "-") } + " (대기 %/h)"
+    }
+
     /** PC 툴킷이 읽는 숫자 한 줄 (조치 추천·치료 전후 비교) — [SummaryMetrics] */
     fun metricsLine(a: Analysis, insights: Insights?, now: Long = System.currentTimeMillis()): String = SummaryMetrics.line(linkedMapOf(
         // 쓴 때 (epoch ms) — PC 툴킷이 지난 수집보다 새 요약인지 본다
@@ -132,6 +140,11 @@ object BatterySummary {
             w.advice().forEach { appendLine(" · $it") }
         }
         insights?.watchFace?.let { appendLine("[시계 화면] $it") }
+        insights?.trend?.let { t ->
+            trendLine(t)?.let { appendLine("[최근 며칠] $it") }
+            t.shift?.let { s -> appendLine("[꺾임] ${ChangeFinder.headline(s)}" + (if (t.suspects.isEmpty()) "" else " — 그 무렵: " + t.suspects.take(3).joinToString(" · ") { ChangeFinder.label(it) { null } })) }
+            if (t.recent.isNotEmpty()) appendLine("[바뀐 것 7일] " + t.recent.take(8).joinToString(" · ") { "${time(it.t)} ${ChangeFinder.label(it) { null }}" })
+        }
         insights?.issues?.forEach { i ->
             appendLine("[알려진 문제] ${i.title} — ${i.why}")
             i.steps.forEachIndexed { n, st -> appendLine("  ${n + 1}) $st") }

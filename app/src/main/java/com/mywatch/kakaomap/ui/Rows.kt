@@ -98,6 +98,8 @@ sealed class Row {
 
     /** 배터리 24시간 그래프 ([DrainChartView]) */
     data class Chart(val key: String, val model: com.mywatch.battery.core.DrainChartModel) : Row()
+    /** 배터리 '최근 며칠' 막대 그래프 ([TrendBarsView]) */
+    data class Trend(val key: String, val model: com.mywatch.battery.core.TrendBarsModel) : Row()
     /**
      * 유튜브 동영상 큰 카드 (16:9 미리보기 · 길이 · 굵은 제목 두 줄 · [meta] = '채널 · 조회수 · 언제').
      * 누르면 이 동영상부터 [queue] 를 이어서, 길게 누르면 메뉴. [badge] = 길이 대신 오른쪽 아래에 (믹스)
@@ -141,6 +143,7 @@ internal fun keyOf(row: Row): String = when (row) {
     is Row.Step -> "s:" + row.key + ":" + row.title
     is Row.Note -> "n:" + row.text
     is Row.Chart -> "chart:" + row.key
+    is Row.Trend -> "trend:" + row.key
     is Row.VideoCard -> "v:" + row.video.id
     is Row.ChannelItem -> "c:" + row.channel.id
     is Row.PlaylistItem -> "l:" + row.playlist.id
@@ -222,6 +225,7 @@ class RowAdapter(
         is Row.Step -> R.layout.item_step
         is Row.Note -> if (look == Look.TUBE) R.layout.item_tube_note else R.layout.item_note
         is Row.Chart -> R.layout.item_chart
+        is Row.Trend -> R.layout.item_trend
         is Row.VideoCard -> R.layout.item_tube_card
         is Row.ChannelItem -> R.layout.item_tube_channel
         is Row.PlaylistItem -> R.layout.item_tube_playlist
@@ -362,6 +366,11 @@ class RowAdapter(
             }
             is Row.Chart -> {
                 (v as DrainChartView).model = row.model
+                v.setOnClickListener(null)
+                v.isClickable = false
+            }
+            is Row.Trend -> {
+                (v as TrendBarsView).model = row.model
                 v.setOnClickListener(null)
                 v.isClickable = false
             }

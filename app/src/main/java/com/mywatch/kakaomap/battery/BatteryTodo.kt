@@ -1,12 +1,14 @@
 package com.mywatch.kakaomap.battery
 
+import com.mywatch.battery.core.ChangeFinder
 import com.mywatch.battery.core.GaugeDriftRule
 import com.mywatch.battery.core.Grade
+import com.mywatch.battery.core.Thresholds
 import kotlin.math.abs
 
 /**
  * 배터리 화면 맨 위 '지금 할 일' — 여러 칸(알려진 문제·잔량 표시·화면 켜짐·밤사이·충전 습관)에 흩어진 조언 중 급한 것 [MAX] 개.
- * 차례: 비정상 알려진 문제 → 확실한 잔량 표시 오차 → 주의 알려진 문제 → 화면 켜짐(손목 올림·알림) → 밤사이(삼성 헬스 등) →
+ * 차례: 비정상 알려진 문제 → 최근 7일 안에 늘어난 꺾임(그 무렵 바뀐 것에 맞는 할 일) → 확실한 잔량 표시 오차 → 주의 알려진 문제 → 화면 켜짐(손목 올림·알림) → 밤사이(삼성 헬스 등) →
  * 권한이 없으면 PC 툴킷 → 충전 습관
  */
 object BatteryTodo {
@@ -18,6 +20,12 @@ object BatteryTodo {
         val out = ArrayList<Todo>()
         fun split(advice: String, g: Grade) = Todo(advice.substringBefore(" — "), advice.substringAfter(" — ", "").ifEmpty { null }, g)
         ins.issues.filter { it.grade == Grade.ABNORMAL }.forEach { out += Todo(it.title, it.steps.firstOrNull(), it.grade) }
+        // 최근 7일 안에 대기 소모가 늘어 꺾였으면 그 무렵 가장 그럴듯한 변화에 맞는 할 일
+        ins.trend?.takeIf { it.fresh }?.let { t ->
+            val shift = t.shift ?: return@let
+            val (title, detail) = ChangeFinder.advice(shift, t.suspects.firstOrNull()) { pkg -> label(pkg).takeIf { it != pkg } }
+            out += Todo(title, detail, if (Thresholds.idle(shift.after) == Grade.ABNORMAL) Grade.ABNORMAL else Grade.CAUTION)
+        }
         ins.analysis?.drift?.takeIf { abs(it.driftPoints) >= GaugeDriftRule.CERTAIN_POINTS }?.let { d ->
             val title = if (d.driftPoints < 0) "잔량 표시가 ${-d.driftPoints}포인트 낮게 셈 — 실제로는 더 남음" else "잔량 표시가 ${d.driftPoints}포인트 높게 셈 — 갑자기 꺼질 수 있음"
             out += Todo(title, d.advice, Grade.CAUTION)

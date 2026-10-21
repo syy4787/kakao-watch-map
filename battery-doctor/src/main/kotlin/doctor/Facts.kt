@@ -77,6 +77,8 @@ data class Facts(
     val watchSummary: String? = null,
     /** 그 요약의 '[지표]' 줄 (idle_pph, gesture_wakes …) — SummaryMetrics */
     val watchMetrics: Map<String, Double> = emptyMap(),
+    /** 워치 기록의 날마다 대기 소모·꺾인 날·그 무렵 바뀐 것 (워치 앱이 표본에 남긴 '바뀐 것' 표시로) */
+    val watchTrend: com.mywatch.battery.core.TrendReport? = null,
     val collectedAt: Long? = null,
     /** 수집에 실패한 항목 이름 */
     val missing: List<String> = emptyList(),

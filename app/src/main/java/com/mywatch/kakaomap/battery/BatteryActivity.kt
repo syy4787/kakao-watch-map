@@ -10,6 +10,7 @@ import androidx.lifecycle.lifecycleScope
 import com.mywatch.battery.core.Analysis
 import com.mywatch.battery.core.BatterySample
 import com.mywatch.battery.core.CalibrationRule
+import com.mywatch.battery.core.ChangeFinder
 import com.mywatch.battery.core.DrainAnalyzer
 import com.mywatch.battery.core.Event
 import com.mywatch.battery.core.GaugeDriftRule
@@ -126,6 +127,7 @@ class BatteryActivity : ComponentActivity() {
             v.headline, v.reasons.takeIf { it.isNotEmpty() }?.joinToString("\n"), key = "verdict",
         )
 
+        rows += trendRows()
         rows += usageRows()
         rows += guardianRows()
         rows += appRows()
@@ -383,6 +385,12 @@ class BatteryActivity : ComponentActivity() {
                     else -> cfg
                 }
                 Guardian.saveConfig(this, next)
+                // '최근 며칠'의 그 무렵 바뀐 것에 남긴다 (지킴이 설정 = cfg)
+                CONFIG_IDS[row.id.removePrefix(A_TOGGLE)]?.let { id ->
+                    val was = Guardian.flag(cfg, id)
+                    val now = Guardian.flag(next, id)
+                    if (was != null && now != null && was != now) mark(Event.USER_NOTE, ChangeWatcher.configNote(id, was, now))
+                }
                 render()
             }
             row.id == A_USAGE_ACCESS -> {
@@ -446,6 +454,41 @@ class BatteryActivity : ComponentActivity() {
         }
     }
 
+    /**
+     * '최근 며칠': 날마다 대기 소모 막대, 꺾인 날(늘었으면 주의) 과 그 무렵 바뀐 것 3개, 그 밖의 최근 7일 바뀐 것 5개.
+     * 꺾임이 없으면 날마다의 범위, 날이 모자라면 몇 날 더 필요한지
+     */
+    private fun trendRows(): List<Row> {
+        val t = insights?.trend ?: return emptyList()
+        val names = BatteryInsights.appName(this)
+        fun line(c: com.mywatch.battery.core.Change) = "· ${BatterySummary.time(c.t)} ${ChangeFinder.label(c, names)}"
+        val rows = ArrayList<Row>()
+        rows += Row.Header("최근 며칠", "대기(화면 꺼짐) 시간당 %")
+        t.bars?.let { rows += Row.Trend("days", it) }
+        val shift = t.shift
+        val near = t.suspects.take(TREND_SUSPECTS)
+        val valid = t.days.mapNotNull { it.pph }
+        when {
+            shift != null -> {
+                val g = when {
+                    !shift.worse -> Grade.NORMAL
+                    Thresholds.idle(shift.after) == Grade.ABNORMAL -> Grade.ABNORMAL
+                    else -> Grade.CAUTION
+                }
+                rows += Row.Step(color(g), if (shift.worse) R.drawable.ic_warning else R.drawable.ic_battery, null, ChangeFinder.title(shift), ChangeFinder.numbers(shift), key = "trend")
+                rows += Row.Note(
+                    if (near.isEmpty()) "그 무렵 이 앱이 아는 변화(소프트웨어·앱·시계 화면·주요 설정)는 없었습니다"
+                    else "그 무렵 바뀐 것:\n" + near.joinToString("\n", transform = ::line)
+                )
+            }
+            valid.size >= MIN_TREND_DAYS -> rows += Row.Note("큰 변화 없음 — 날마다 대기 시간당 ${DrainAnalyzer.fmt(valid.min())}~${DrainAnalyzer.fmt(valid.max())}%")
+            else -> rows += Row.Note("날마다 견주려면 대기 기록이 3시간 넘는 날이 ${MIN_TREND_DAYS}일 필요합니다 (지금 ${valid.size}일)")
+        }
+        val others = t.recent.filter { it !in near }.take(TREND_RECENT)
+        if (others.isNotEmpty()) rows += Row.Note("최근 바뀐 것:\n" + others.joinToString("\n", transform = ::line))
+        return rows
+    }
+
     private fun color(g: Grade): Int = getColor(
         when (g) {
             Grade.NORMAL -> R.color.grade_normal
@@ -477,6 +520,15 @@ class BatteryActivity : ComponentActivity() {
         const val T_NIGHT_HOTWORD = "nightHotword"
         const val T_ABNORMAL = "abnormal"
         const val T_REMINDER = "reminder"
+        /** 꺾임을 보려면 기록 있는 날이 이만큼 ([com.mywatch.battery.core.DayTrend] 양쪽 2일씩) */
+        const val MIN_TREND_DAYS = 2 * com.mywatch.battery.core.DayTrend.MIN_SIDE_DAYS
+        const val TREND_SUSPECTS = 3
+        const val TREND_RECENT = 5
+        /** 토글 → '바뀐 것'에 쓰는 지킴이 설정 이름 ([com.mywatch.battery.core.ChangeFinder.CONFIG_NAMES]) */
+        val CONFIG_IDS = mapOf(
+            T_NIGHT_SAVER to "night_saver", T_NIGHT_AOD to "night_aod", T_NIGHT_LOCATION to "night_location", T_NIGHT_SYNC to "night_sync",
+            T_NIGHT_WAKE to "night_wake", T_NIGHT_HOTWORD to "night_hotword", T_ABNORMAL to "abnormal", T_REMINDER to "reminder",
+        )
         val MODES = listOf("비행기 모드", "절전 모드", "시계만 사용", "평소대로")
         /** PC 가 없을 때: 폰의 ADB 앱으로 워치 무선 디버깅에 붙어 같은 권한을 준다 (PC 툴킷 메뉴 7 이 하는 것 중 지킴이에 꼭 필요한 셋) */
         const val NO_PC_GRANT = "PC 가 없으면: 폰의 ADB 앱(예: Bugjaeger)으로 워치 무선 디버깅에 연결해 셸에 세 줄 —\n" +

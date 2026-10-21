@@ -34,6 +34,22 @@ class BatteryTodoTest {
         assertTrue(t[2].title, t[2].title.contains("5초 안에 꺼진 화면"))
     }
 
+    /** 최근 7일 안에 대기 소모가 늘어 꺾였으면 비정상 알려진 문제 다음에 — 그 무렵 가장 그럴듯한 변화(여기선 Play 서비스 업데이트)의 할 일 */
+    @Test
+    fun aRecentRiseComesRightAfterAbnormalIssuesWithTheSuspectsAdvice() {
+        val shift = com.mywatch.battery.core.Shift(java.time.LocalDate.of(2026, 10, 17), java.time.LocalDate.of(2026, 10, 18), 1.0, 2.5, 4, 3)
+        val gmsUpdate = com.mywatch.battery.core.Change(1L, com.mywatch.battery.core.ChangeKind.APP, "com.google.android.gms", null, "26.40.31")
+        val trend = com.mywatch.battery.core.TrendReport(emptyList(), shift, listOf(gmsUpdate), emptyList(), null, fresh = true)
+        val t = BatteryTodo.pick(insights(listOf(face, gms), busyWrist).copy(trend = trend), permitted = true)
+        assertEquals("Google Play 서비스 과소모", t[0].title)
+        assertEquals("10/18 Play 서비스 업데이트 뒤 더 닳음", t[1].title)
+        assertTrue(t[1].detail ?: "", (t[1].detail ?: "").contains("캐시 지우기"))
+        assertEquals(Grade.CAUTION, t[1].grade)
+        // 오래된 꺾임(7일 넘음)·줄어든 꺾임은 할 일이 아니다
+        val old = BatteryTodo.pick(insights().copy(trend = trend.copy(fresh = false)), permitted = true)
+        assertTrue(old.isEmpty())
+    }
+
     @Test
     fun withoutThePermissionsTheToolkitIsSuggested() {
         val t = BatteryTodo.pick(insights(), permitted = false)

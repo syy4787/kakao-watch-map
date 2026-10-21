@@ -15,6 +15,7 @@ import com.mywatch.battery.core.LeverEffect
 import com.mywatch.battery.core.LeverEffects
 import com.mywatch.battery.core.NightCulprits
 import com.mywatch.battery.core.NightReport
+import com.mywatch.battery.core.TrendReport
 import com.mywatch.battery.core.UsageBreakdown
 import com.mywatch.battery.core.UsageSplit
 import com.mywatch.battery.core.WakeStats
@@ -45,7 +46,10 @@ data class Insights(
     val watchFace: String? = null,
     /** 충전 습관 (최근 7일, 충전 기록이 있을 때) */
     val charging: ChargeHabits? = null,
+    /** 최근 며칠 대기 소모·꺾인 날·그 무렵 바뀐 것 */
+    val trend: TrendReport? = null,
 )
+
 
 object BatteryInsights {
     /** 지금 시계 화면(라이브 배경화면)의 패키지 — 모든 앱 보기 권한(QUERY_ALL_PACKAGES)이 있어 읽을 수 있다 */
@@ -79,6 +83,13 @@ object BatteryInsights {
             DrainChart.buildOrNull(samples, now, zone, screen = usage?.screen, hot = breakdown?.steepest.orEmpty().map { it.start to it.end })
         }.onFailure { ErrorLog.record("배터리·그래프", it) }.getOrNull()
         val charging = runCatching { ChargeHabits.analyze(samples, now) }.getOrNull()
-        return Insights(analysis, breakdown, culprits, issues, effect, wakes, night, levers, chart, face, charging)
+        val trend = runCatching { TrendReport.of(samples, now, zone) }.onFailure { ErrorLog.record("배터리·추세", it) }.getOrNull()
+        return Insights(analysis, breakdown, culprits, issues, effect, wakes, night, levers, chart, face, charging, trend)
+    }
+
+    /** 패키지 → 앱 이름 (모르면 null — 지운 앱 등) */
+    fun appName(context: Context): (String) -> String? {
+        val pm = context.packageManager
+        return { pkg -> runCatching { pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)).toString() }.getOrNull()?.takeIf { it.isNotBlank() && it != pkg } }
     }
 }

@@ -20,9 +20,12 @@ class BatterySampleWorker(context: Context, params: WorkerParameters) : Worker(c
 
     override fun doWork(): Result {
         val event = inputData.getString(KEY_EVENT)?.let { runCatching { Event.valueOf(it) }.getOrNull() } ?: Event.PERIODIC
-        val note = inputData.getString(KEY_NOTE) ?: ""
+        val given = inputData.getString(KEY_NOTE) ?: ""
         try {
             val log = BatteryLog(applicationContext)
+            // 15분·부팅 표본엔 지난번 뒤에 바뀐 것(소프트웨어·앱·시계 화면·설정)을 붙인다 — '최근 며칠'의 그 무렵 바뀐 것
+            val note = if (given.isEmpty() && (event == Event.PERIODIC || event == Event.BOOT))
+                runCatching { ChangeWatcher.collect(applicationContext) }.getOrDefault("") else given
             BatteryProbe.read(applicationContext, event, note)?.let { log.append(it) }
             if (event == Event.PERIODIC) {
                 log.pruneIfDue()
