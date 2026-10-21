@@ -120,10 +120,11 @@ object Collect {
         val refresh = try {
             adb.run(listOf("shell", "am", "broadcast", "--include-stopped-packages", "-n", SHELL_RECEIVER, "-a", SUMMARY_ACTION), 90)
         } catch (e: Exception) { Result(-3, "", e.toString()) }
-        if (!refresh.ok || !refresh.out.contains("summary:ok")) log("  워치 앱이 요약을 새로 쓰지 못했습니다(예전 버전이거나 기록 없음) — 있던 요약을 가져옵니다")
+        val refreshed = refresh.ok && refresh.out.contains("summary:ok")
         // 워치 앱이 쓴 요약 (있으면)
         val lsSummary = adb.run(listOf("shell", "ls", WATCH_SUMMARY), 30)
         if (lsSummary.ok && lsSummary.out.contains("summary.txt")) {
+            if (!refreshed) log("  워치 앱이 요약을 새로 쓰지 못했습니다(예전 버전이거나 기록 없음) — 있던 요약을 가져옵니다")
             log("수집: 워치 앱 요약(watch_summary.txt)")
             if (!adb.pull(WATCH_SUMMARY, File(dir, "watch_summary.txt"))) log("  워치 요약을 가져오지 못했습니다")
         }

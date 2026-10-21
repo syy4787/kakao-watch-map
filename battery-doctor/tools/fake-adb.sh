@@ -10,6 +10,7 @@ SAMPLES="${FAKE_ADB_SAMPLES:-$HERE/../src/test/resources/samples}"
 STATE="${FAKE_ADB_STATE:-/tmp/fake-adb-state}"
 OUR_PKG="com.mywatch.kakaomap"
 WATCH_CSV="/sdcard/Android/data/$OUR_PKG/files/battery/log.csv"
+WATCH_SUMMARY="/sdcard/Android/data/$OUR_PKG/files/battery/summary.txt"
 mkdir -p "$STATE"
 printf '%s\n' "$*" >> "$STATE/calls.log"
 
@@ -110,6 +111,16 @@ deviceidle_cmd() {
 
 am_cmd() {
   case "${1:-}" in
+    # 워치 앱의 셸 전용 '지금 요약 쓰기' — 견본 시계(date)보다 5초 늦게 쓴 요약(워치가 Play 서비스 과소모를 짚음)
+    broadcast)
+      if printf '%s ' "$@" | grep -q "SHELL_SUMMARY"; then
+        local at=$(( $(cat "$SAMPLES/date.txt") * 1000 + 5000 ))
+        printf '갤럭시워치 배터리 기록 요약\n[판정] 주의 — 대기 소모 시간당 3.1%%\n[알려진 문제] Google Play 서비스 과소모 — CPU 시간당 16분\n[지표] at=%s idle_pph=3.1 app_window_min=120 issue_gms=2 issue_home=0 issue_face=0 back_gms=0 back_home=0\n' "$at" > "$STATE/summary.txt"
+        echo "Broadcasting: Intent { flg=0x400000 }"
+        echo 'Broadcast completed: result=0, data="summary:ok"'
+      else
+        echo "fake-adb: am broadcast ?" >&2; exit 1
+      fi ;;
     get-standby-bucket) local b; b=$(grep -E "^${2:-} " "$STATE/buckets" | tail -1 | awk '{print $2}'); echo "${b:-10}" ;;
     set-standby-bucket) echo "${2:-} ${3:-}" >> "$STATE/buckets" ;;
     force-stop) ;;
@@ -150,7 +161,7 @@ shell_cmd() {
       esac ;;
     appops) appops_cmd "$@" ;;   # `appops …` 는 `cmd appops …` 의 래퍼(실기기와 같음)
     am) am_cmd "$@" ;;
-    ls) if [ "${1:-}" = "$WATCH_CSV" ]; then echo "$1"; else echo "ls: ${1:-}: No such file or directory" >&2; exit 1; fi ;;
+    ls) if [ "${1:-}" = "$WATCH_CSV" ] || { [ "${1:-}" = "$WATCH_SUMMARY" ] && [ -f "$STATE/summary.txt" ]; }; then echo "$1"; else echo "ls: ${1:-}: No such file or directory" >&2; exit 1; fi ;;
     date) cat "$SAMPLES/date.txt" ;;   # 견본 CSV 의 시각과 맞추기 위해 견본 시계를 쓴다
     *) echo "fake-adb: shell $a ?" >&2; exit 1 ;;
   esac
@@ -160,7 +171,7 @@ case "$cmd" in
   devices) printf 'List of devices attached\n192.168.0.50:5555\tdevice\n\n' ;;
   connect) echo "connected to ${1:-}" ;;
   pair) echo "Successfully paired to ${1:-} [guid=adb-fake]" ;;
-  pull) cp "$SAMPLES/watch_log.csv" "${2:-watch_log.csv}" && echo "1 file pulled, 0 skipped." ;;
+  pull) if [ "${1:-}" = "$WATCH_SUMMARY" ]; then cp "$STATE/summary.txt" "${2:-summary.txt}"; else cp "$SAMPLES/watch_log.csv" "${2:-watch_log.csv}"; fi && echo "1 file pulled, 0 skipped." ;;
   bugreport) : > "${1:-bugreport.zip}" ;;
   reboot) echo "reboot" >> "$STATE/reboots" ;;
   kill-server|start-server) ;;

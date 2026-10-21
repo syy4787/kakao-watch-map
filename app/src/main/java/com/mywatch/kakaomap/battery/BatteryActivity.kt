@@ -333,6 +333,8 @@ class BatteryActivity : ComponentActivity() {
     private fun appRows(): List<Row> {
         val rows = ArrayList<Row>()
         rows += Row.Header("앱별 소모 (최근 2시간)")
+        // 시킨 대로 재시작했으면 그 뒤 대기 소모가 줄었는지 — 워치 기록만으로 재니 권한 없이도 (잔량 표시 오차를 보고 재시작한 사람도)
+        insights?.restart?.let { r -> rows += Row.Note("재시작 효과 (${BatterySummary.time(r.bootAt)} 재시작): ${r.line}") }
         if (!HealthReader(this).available) {
             rows += Row.Note("PC 툴킷 메뉴 7(권한 주기) 뒤에 보입니다")
             return rows

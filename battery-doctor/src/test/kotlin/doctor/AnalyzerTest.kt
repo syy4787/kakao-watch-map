@@ -486,6 +486,11 @@ class AnalyzerTest {
         // 묵은 요약(3시간 넘음)·창이 짧은 요약은 쓰지 않는다
         val stale = f.copy(watchMetrics = f.watchMetrics + ("at" to (now - 4 * 3_600_000L).toDouble()))
         assertTrue(Analyzer.findings(stale).none { it.id == "watch-gms" })
+        // 수집 중에 새로 쓴 요약은 수집 시각(먼저 읽은 워치 시계)보다 조금 늦다 — 30분까지만 '방금 쓴 것'
+        val justWritten = f.copy(watchMetrics = f.watchMetrics + ("at" to (now + 20 * 60_000L).toDouble()))
+        assertTrue(Analyzer.findings(justWritten).any { it.id == "watch-gms" })
+        val future = f.copy(watchMetrics = f.watchMetrics + ("at" to (now + 31 * 60_000L).toDouble()))
+        assertTrue(Analyzer.findings(future).none { it.id == "watch-gms" })
         val short = f.copy(watchMetrics = f.watchMetrics + ("app_window_min" to 30.0))
         assertTrue(Analyzer.findings(short).none { it.id == "watch-gms" })
     }
@@ -495,7 +500,7 @@ class AnalyzerTest {
     fun aFreshWatchHomeFindingRecommendsTheCacheTrimWithoutBlamingTheHome() {
         val now = 1792414865000L
         val f = Facts(collectedAt = now, packages = listOf(PackageInfo(Analyzer.HOME, 10123, true, false)),
-            watchMetrics = mapOf("at" to (now - 5 * 60_000L).toDouble(), "issue_home" to 2.0, "issue_back" to 1.0, "app_window_min" to 60.0))
+            watchMetrics = mapOf("at" to (now - 5 * 60_000L).toDouble(), "issue_home" to 2.0, "back_home" to 1.0, "app_window_min" to 60.0))
         val fs = Analyzer.findings(f)
         val w = fs.single { it.id == "watch-home" }
         assertEquals(Severity.ABNORMAL, w.severity)
@@ -505,11 +510,27 @@ class AnalyzerTest {
         val levers = doctor.fix.Catalog.levers(f, fs)
         assertTrue(levers.single { it.id == "trim-caches" }.recommended)
         assertTrue(levers.none { Analyzer.HOME in it.packages && it.id != "trim-caches" })
+        // 처음 짚었을 땐 강제 재시작이 먼저 — 캐시 정리는 재시작 뒤에도 또 나타났을 때만 추천 (워치의 순서와 같게)
+        val firstTime = f.copy(watchMetrics = f.watchMetrics + ("back_home" to 0.0))
+        val firstFs = Analyzer.findings(firstTime)
+        assertFalse(firstFs.single { it.id == "watch-home" }.title.contains("재시작 뒤에도"))
+        assertFalse(doctor.fix.Catalog.levers(firstTime, firstFs).single { it.id == "trim-caches" }.recommended)
+        // Play 서비스만 다시 나타났으면 홈 제목엔 붙이지 않는다 (문제마다)
+        val gmsBack = f.copy(watchMetrics = f.watchMetrics + mapOf("back_home" to 0.0, "back_gms" to 1.0, "issue_gms" to 1.0))
+        assertFalse(Analyzer.findings(gmsBack).single { it.id == "watch-home" }.title.contains("재시작 뒤에도"))
+        assertTrue(Analyzer.findings(gmsBack).single { it.id == "watch-gms" }.title.contains("재시작 뒤에도"))
         // 판정은 '하드웨어 의심'이 아니라 소프트웨어 — 앱·알람·센서가 조용해 보여도 워치가 홈을 짚었다
         val vf = facts().copy(watchMetrics = mapOf("at" to (this.now - 5 * 60_000L).toDouble(), "issue_home" to 2.0, "app_window_min" to 60.0))
         val v = Analyzer.verdict(vf, Analyzer.findings(vf) + Finding("rate-24h", Severity.ABNORMAL, "24시간 시간당 6.0%", emptyList(), category = "drain"))
         assertEquals(Cause.SOFTWARE, v.cause)
         assertTrue(v.todo.toString(), v.todo.first().contains("One UI Watch 홈"))
+        // 처음 짚었으면 강제 재시작부터, 재시작 뒤에도 또 나타났으면 캐시 정리부터 (소견·워치와 같은 순서)
+        assertTrue(v.todo.first(), v.todo.first().contains("강제 재시작 →"))
+        val vb = facts().copy(watchMetrics = mapOf("at" to (this.now - 5 * 60_000L).toDouble(), "issue_home" to 2.0, "back_home" to 1.0, "app_window_min" to 60.0))
+        val vBack = Analyzer.verdict(vb, Analyzer.findings(vb) + Finding("rate-24h", Severity.ABNORMAL, "24시간 시간당 6.0%", emptyList(), category = "drain"))
+        assertTrue(vBack.todo.first(), vBack.todo.first().contains("재시작 뒤에도 또 나타남") && vBack.todo.first().indexOf("캐시 정리") < vBack.todo.first().indexOf("강제 재시작"))
+        // 다른 할 일(다시 재서 견주기)이 밀려나지 않는다
+        assertTrue(v.todo.toString(), v.todo.any { it.contains("24시간 뒤 메뉴 2") })
     }
 
     /**

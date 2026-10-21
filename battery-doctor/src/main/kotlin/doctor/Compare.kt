@@ -65,7 +65,8 @@ object Compare {
         // 워치 쪽: 요약 지표가 양쪽 다 있고 이번 것이 지난 수집 뒤에 새로 쓰였을 때만 그것으로, 아니면 워치 기록(CSV)으로 — 섞지 않는다
         val bAt = before.watchMetrics["at"]
         val aAt = after.watchMetrics["at"]
-        val freshSummary = bAt != null && aAt != null && aAt > bAt && aAt > beforeAt
+        // 요약의 숫자는 하루치(24시간) — 지난 수집(치료) 뒤 하루가 지나 쓴 것이어야 치료 전 시간을 품지 않는다 (워치 앱 v2.43 부터 수집 때마다 새로 씀)
+        val freshSummary = bAt != null && aAt != null && aAt > bAt && aAt - beforeAt >= 24 * 3_600_000L
         if (freshSummary) {
             row(IDLE, before.watchMetrics["idle_pph"], after.watchMetrics["idle_pph"], 0.2, ::pph)
             row(NIGHT, before.watchMetrics["night_pph"], after.watchMetrics["night_pph"], 0.2, ::pph)

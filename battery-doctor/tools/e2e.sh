@@ -46,6 +46,11 @@ grep -q "소프트웨어(서비스) 과소모" "$SNAP/report.html" || fail "보�
 grep -q "<svg" "$SNAP/report.html" || fail "워치 그래프 없음"
 grep -q "com.example.drain" "$SNAP/report.html" || fail "범인 앱이 보고서에 없음"
 grep -q "소프트웨어(서비스) 과소모" collect.log || fail "콘솔 판정 출력 없음"
+# 워치 앱에 요약을 새로 쓰게 하고(셸 신호) 워치가 방금 짚은 Play 서비스 과소모를 소견으로
+grep -q "워치 앱 요약 새로 쓰기" collect.log || fail "요약 새로 쓰기 신호를 보내지 않음"
+! grep -q "있던 요약" collect.log || fail "새로 쓴 요약을 묵은 것으로 봄"
+[ -s "$SNAP/watch_summary.txt" ] || fail "watch_summary.txt 가 pull 되지 않음"
+grep -q "워치 앱: 최근 Google Play 서비스 과소모" "$SNAP/report.html" || fail "워치가 짚은 Play 서비스 과소모가 보고서에 없음"
 
 echo "[e2e] analyze (재분석)"
 run analyze | tail -3 | grep -q "report.html" || fail "analyze 출력 이상"

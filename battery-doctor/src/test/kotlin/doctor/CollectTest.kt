@@ -49,6 +49,31 @@ class CollectTest {
         assertTrue(log.toString(), log.none { it.contains("있던 요약") })
     }
 
+    /**
+     * 수집 → 분석까지: 워치 시계(date)는 요약을 새로 쓰기 전에 읽으므로 새 요약의 'at' 이 수집 시각보다 몇 초 늦다 — 그래도 '방금 쓴
+     * 요약'으로 보고 워치가 짚은 Play 서비스 과소모를 소견으로 가져온다 (리뷰에서 찾음: 늘 '미래'라 버려졌다)
+     */
+    @Test
+    fun aRefreshedSummaryReachesTheFindings() {
+        val adb = happyAdb().apply {
+            on("shell am broadcast", "Broadcast completed: result=0, data=\"summary:ok\"\n")
+            on("shell ls " + Collect.WATCH_SUMMARY, Collect.WATCH_SUMMARY + "\n")
+            pullable[Collect.WATCH_SUMMARY] = "[판정] 주의\n[지표] at=${1760878865L * 1000 + 5_000} idle_pph=3.1 app_window_min=120 issue_gms=2 issue_home=0 back_gms=0 back_home=0\n"
+        }
+        val snap = Collect.run(adb, tmp.root, bugreport = false, log = {}, now = 1760878865000L)
+        val f = Analyzer.facts(snap, java.time.ZoneId.of("Asia/Seoul"))
+        assertTrue(Analyzer.findings(f).map { it.id }.toString(), Analyzer.findings(f).any { it.id == "watch-gms" })
+    }
+
+    /** 요약이 아예 없으면(기록 전) '있던 요약을 가져온다'고 하지 않는다 */
+    @Test
+    fun noSummaryNoFallbackLine() {
+        val adb = happyAdb().apply { on("shell am broadcast", "", code = 1) }
+        val log = ArrayList<String>()
+        Collect.run(adb, tmp.root, bugreport = false, log = { log += it }, now = 1760878865000L)
+        assertTrue(log.toString(), log.none { it.contains("있던 요약") })
+    }
+
     /** 예전 워치 앱(이 신호를 모름)이나 실패면 있던 요약을 그대로 가져오고 그렇다고 적는다 */
     @Test
     fun anOldWatchAppKeepsItsLastSummary() {

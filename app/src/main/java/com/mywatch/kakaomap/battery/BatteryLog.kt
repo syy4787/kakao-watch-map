@@ -70,10 +70,15 @@ class BatteryLog(context: Context) {
         prefs.edit().putLong(KEY_PRUNED_AT, now).apply()
     }
 
-    /** 서비스센터에 보여 줄 요약 글 — PC 없이도 꺼내 볼 수 있게 같은 폴더에 */
+    /**
+     * 서비스센터에 보여 줄 요약 글 — PC 없이도 꺼내 볼 수 있게 같은 폴더에. 통째로 바꿔 쓴다: 쓰는 도중에 읽는 쪽(PC 수집·시험)이
+     * 빈 파일·반쪽 글을 보지 않게
+     */
     fun writeSummary(text: String): File = synchronized(LOCK) {
         dir.mkdirs()
-        summaryFile.writeText(text)
+        val tmp = File(dir, summaryFile.name + ".tmp")
+        tmp.writeText(text)
+        if (!tmp.renameTo(summaryFile)) { summaryFile.writeText(text); tmp.delete() }
         summaryFile
     }
 

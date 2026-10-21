@@ -150,7 +150,9 @@ object BatterySummary {
         put("issue_gms", issueCode(ins, com.mywatch.battery.core.KnownIssues.PLAY_SERVICES_LOOP))
         put("issue_home", issueCode(ins, com.mywatch.battery.core.KnownIssues.HOME_HOG))
         put("issue_face", issueCode(ins, com.mywatch.battery.core.KnownIssues.WATCH_FACE_HEAVY))
-        put("issue_back", if (ins.issues.any { it.cameBack }) 1.0 else 0.0)
+        // 재시작 뒤에도 또 나타났는지 — 문제마다 (한 문제가 다시 나타났다고 다른 문제까지 그렇게 적지 않게)
+        put("back_gms", if (ins.issues.any { it.id == com.mywatch.battery.core.KnownIssues.PLAY_SERVICES_LOOP && it.cameBack }) 1.0 else 0.0)
+        put("back_home", if (ins.issues.any { it.id == com.mywatch.battery.core.KnownIssues.HOME_HOG && it.cameBack }) 1.0 else 0.0)
     })
 
     /** summary.txt 본문 */
@@ -180,6 +182,7 @@ object BatterySummary {
         insights?.tileDevice?.let { appendLine("[타일] $it") }
         insights?.home?.let { appendLine("[홈] ${it.line}") }
         insights?.bootAt?.let { appendLine("[재시작] 마지막 부팅 ${time(it)} (${(now - it) / (24 * 3_600_000L)}일 전)") }
+        insights?.restart?.let { appendLine("[재시작 효과] ${time(it.bootAt)} 재시작: ${it.line}") }
         insights?.trend?.let { t ->
             trendLine(t)?.let { appendLine("[최근 며칠] $it") }
             t.shift?.let { s -> appendLine("[꺾임] ${ChangeFinder.headline(s)}" + (if (t.suspects.isEmpty()) "" else " — 그 무렵: " + t.suspects.take(3).joinToString(" · ") { ChangeFinder.label(it) { null } })) }

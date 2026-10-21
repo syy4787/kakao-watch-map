@@ -53,17 +53,18 @@ class SummaryForPcTest {
         assertEquals(2.0, m["issue_home"])
         assertEquals(1.0, m["issue_gms"])
         assertEquals(0.0, m["issue_face"])
-        assertEquals(1.0, m["issue_back"])
+        assertEquals(1.0, m["back_home"])
+        assertEquals(0.0, m["back_gms"])
         assertEquals(120.0, m["app_window_min"])
         // 판단할 만큼 기록이 없으면(55분 미만) 문제 칸은 적지 않는다 — '없음'과 '모름'을 가르게
         val short = SummaryMetrics.parse(BatterySummary.metricsLine(a, ins.copy(issues = emptyList(), appWindowMs = 30 * 60_000L), now))
         assertNull(short["issue_gms"])
-        assertNull(short["issue_back"])
+        assertNull(short["back_home"])
         assertEquals(30.0, short["app_window_min"])
         val none = SummaryMetrics.parse(BatterySummary.metricsLine(a, ins.copy(issues = emptyList()), now))
         assertEquals(0.0, none["issue_gms"])
         assertEquals(0.0, none["issue_home"])
-        assertEquals(0.0, none["issue_back"])
+        assertEquals(0.0, none["back_home"])
     }
 
     /** 셸이 '지금 요약'을 부르면(PC 수집 직전) 하루 한 번을 기다리지 않고 새로 쓴다 */
@@ -74,8 +75,9 @@ class SummaryForPcTest {
         log.summaryFile.parentFile?.mkdirs()
         log.summaryFile.writeText("어제 요약")
         ShellRestoreReceiver().onReceive(context, android.content.Intent(Guardian.ACTION_SHELL_SUMMARY))
-        val until = System.currentTimeMillis() + 10_000
-        while (System.currentTimeMillis() < until && log.summaryFile.readText() == "어제 요약") Thread.sleep(50)
+        // 뒤에서 쓴다 — 새 요약('[지표]'의 at)이 보일 때까지 (쓰는 도중의 빈 파일을 읽지 않게 요약은 통째로 바꿔 쓴다)
+        val until = System.currentTimeMillis() + 15_000
+        while (System.currentTimeMillis() < until && SummaryMetrics.parse(log.summaryFile.readText())["at"] == null) Thread.sleep(50)
         val text = log.summaryFile.readText()
         assertTrue(text, text.contains("[판정]"))
         val at = SummaryMetrics.parse(text)["at"]

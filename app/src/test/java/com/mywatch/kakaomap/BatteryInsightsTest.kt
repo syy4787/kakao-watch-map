@@ -259,6 +259,28 @@ class BatteryInsightsTest {
     }
 
     /**
+     * 재시작 효과: 시킨 대로 강제 재시작한 뒤 대기 소모가 줄었는지 숫자로 — 배터리 화면(알려진 문제 칸)과 하루 요약에.
+     * 재시작 전 12시간 시간당 4%, 재시작 30분 뒤부터 3시간 시간당 1% → '줄었습니다'
+     */
+    @Test
+    fun theRestartEffectIsShownOnTheScreenAndInTheSummary() {
+        // 앱별 통계 권한이 없어도 (잔량 표시 오차 알림을 보고 재시작한 사람도 본다 — 워치 기록만으로 잼)
+        val now = System.currentTimeMillis()
+        val boot = now - 3 * 3_600_000L - 30 * 60_000L
+        var t = boot - 12 * 3_600_000L
+        while (t < boot) { log.append(BatterySample(t, (90 - 4.0 * (t - (boot - 12 * 3_600_000L)) / 3_600_000L).toInt())); t += q }
+        log.append(BatterySample(boot, 42, event = com.mywatch.battery.core.Event.BOOT))
+        t = boot + q
+        while (t <= now) { log.append(BatterySample(t, (42 - 1.0 * (t - boot) / 3_600_000L).toInt())); t += q }
+        val notes = open().second.rows.filterIsInstance<Row.Note>().map { it.text }
+        assertTrue(notes.toString(), notes.any { it.startsWith("재시작 효과") && it.endsWith("— 줄었습니다") })
+        val ins = com.mywatch.kakaomap.battery.BatteryInsights.compute(context, log.readAll(), now, zone)
+        val text = com.mywatch.kakaomap.battery.BatterySummary.text(ins.analysis!!, null, "SM-L335", now, ins)
+        val line = text.lines().single { it.startsWith("[재시작 효과]") }
+        assertTrue(line, line.endsWith("— 줄었습니다") && line.split(" — ").size == 2)
+    }
+
+    /**
      * 앱별 소모 칸이 비었거나 짧을 때 왜인지 — 첫 기록 뒤엔 '다음 기록(1시간 안)부터', 재시작 뒤엔 '켜진 지 10분 뒤부터 다시', 기록이
      * 1시간이 안 되면 '알려진 문제는 1시간쯤 쌓이면' (재시작한 사람이 '문제가 사라졌나?' 헷갈리지 않게)
      */

@@ -70,7 +70,8 @@ class CompareTest {
     @Test
     fun watchAppMetricsAreComparedToo() {
         val before = Facts(collectedAt = t0, watchMetrics = mapOf("at" to (t0 - h).toDouble(), "idle_pph" to 2.4, "gesture_wakes" to 160.0, "night_pph" to 1.8))
-        val after = Facts(collectedAt = t0 + 30 * h, watchMetrics = mapOf("at" to (t0 + 20 * h).toDouble(), "idle_pph" to 1.1, "gesture_wakes" to 150.0, "night_pph" to 0.8))
+        // 지난 수집 뒤 하루가 넘어 쓴 요약 (하루치 숫자가 치료 전 시간을 품지 않게)
+        val after = Facts(collectedAt = t0 + 30 * h, watchMetrics = mapOf("at" to (t0 + 26 * h).toDouble(), "idle_pph" to 1.1, "gesture_wakes" to 150.0, "night_pph" to 0.8))
         val c = Compare.of(before, after, emptyList())!!
         val rows = c.rows.associateBy { it.label }
         assertEquals(Change.BETTER, rows.getValue(Compare.IDLE).change)
@@ -87,9 +88,12 @@ class CompareTest {
         val before = Facts(collectedAt = t0, watchMetrics = mapOf("at" to (t0 - 2 * h).toDouble(), "idle_pph" to 2.4))
         val same = Facts(collectedAt = t0 + 12 * h, watchMetrics = mapOf("at" to (t0 - 2 * h).toDouble(), "idle_pph" to 2.4))
         assertNull(Compare.of(before, same, emptyList()))
-        val fresh = Facts(collectedAt = t0 + 12 * h, watchMetrics = mapOf("at" to (t0 + 10 * h).toDouble(), "idle_pph" to 1.1))
+        val fresh = Facts(collectedAt = t0 + 28 * h, watchMetrics = mapOf("at" to (t0 + 26 * h).toDouble(), "idle_pph" to 1.1))
         assertEquals(Change.BETTER, Compare.of(before, fresh, emptyList())!!.rows.single { it.label == Compare.IDLE }.change)
         assertNull("한쪽에만 지표", Compare.of(before.copy(watchMetrics = emptyMap()), fresh, emptyList()))
+        // 수집 때마다 요약을 새로 쓰게 됐다(워치 앱 v2.43) — 지난 수집 뒤 하루가 안 돼 쓴 요약의 하루치 숫자는 치료 전 시간을 품어 견주지 않는다
+        val tooSoon = Facts(collectedAt = t0 + 12 * h, watchMetrics = mapOf("at" to (t0 + 12 * h).toDouble(), "idle_pph" to 1.1))
+        assertNull("하루가 안 됨", Compare.of(before, tooSoon, emptyList()))
     }
 
     /** 수집 → 몇 분 뒤 자동 치료(다시 수집): 충전 없이 이어진 dumpsys 창이 겹치므로 비교하지 않는다 */
