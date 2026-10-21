@@ -160,7 +160,8 @@ class MainTest {
         val (code2, out2) = run(adb, data, "undo", "--all")
         assertEquals(out2, 0, code2)
         assertEquals(listOf("shell cmd appops set com.example.drain RUN_ANY_IN_BACKGROUND allow", "shell settings put global wifi_scan_always_enabled 1"), adb.joined().filter { it != "devices" })
-        assertTrue(journal.entries().all { it.undone })
+        assertTrue(journal.entries().dropLast(1).all { it.undone })
+        assertEquals(doctor.fix.Fixer.UNDO_ALL, journal.entries().last().id)      // '모두 되돌리기' 기록
     }
 
     @Test

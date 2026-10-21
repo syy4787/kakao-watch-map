@@ -45,6 +45,13 @@ class BatteryTodoTest {
         assertTrue(t.detail ?: "", com.mywatch.battery.core.TodoText.fitsDetail(t.detail ?: ""))
     }
 
+    /** 남은 할 일이 업데이트·오류 보내기뿐인 단계(앱 정보로 할 일 없음)면 '앱 정보' 버튼을 달지 않는다 (리뷰) */
+    @Test
+    fun anIssueWithNothingLeftInAppInfoHasNoAppInfoButton() {
+        assertEquals(BatteryTodo.Action.AppInfo("com.google.android.gms", "Play 서비스"), BatteryTodo.pick(insights(listOf(gms)), permitted = true)[0].action)
+        assertEquals(null, BatteryTodo.pick(insights(listOf(gms.copy(stage = 2, appInfo = false))), permitted = true)[0].action)
+    }
+
     /** 할 일로 오를 수 있는 글은 모두 워치 줄(제목 두 줄·설명 세 줄)에 들어간다 — 잘려 다른 뜻으로 읽히지 않게 (점검에서 찾음: '(데이터 지…') */
     @Test
     fun everyCandidateFitsTheWatchLine() {

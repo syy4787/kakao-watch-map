@@ -581,8 +581,11 @@ class GuardianTest {
      */
     private fun restartAndSettle(n: Int) {
         bootCount(n)
-        org.robolectric.shadows.ShadowSystemClock.advanceBy(java.time.Duration.ofMinutes(10))
+        elapse(10)
     }
+
+    /** 켜진 뒤 시간을 [minutes] 더 민다 — 시험의 벽시계(넘겨 주는 now)와 맞춰야 할 때 (지킴이는 켜진 때 = 벽시계 − 켜진 뒤 시간으로 본다) */
+    private fun elapse(minutes: Long) = org.robolectric.shadows.ShadowSystemClock.advanceBy(java.time.Duration.ofMinutes(minutes))
 
     /**
      * 시킨 대로 재시작하면 그 앞의 판단은 바로 내리고, 재시작 뒤 첫 스냅샷은 기준값만 — 배터리 통계는 부팅 때 0 이 되지 않고 충전 뒤부터
@@ -850,7 +853,7 @@ class GuardianTest {
         restartAndSettle(3)
         tickHome(at(16, 15), 78, 73.0)
         tickHome(at(17, 15), 98, 72.0)
-        assertEquals("One UI Watch 홈 과소모 계속 — 오류 보고", Guardian.tileIssue(context, at(17, 15)))
+        assertEquals("One UI Watch 홈 과소모 계속 — 오류 보내기", Guardian.tileIssue(context, at(17, 15)))
     }
 
     /** 시계가 뒤로 갔다 — 마지막으로 본 때가 미래가 돼도 이번 일은 이어진다 (처음 단계로 돌아가 같은 '강제 재시작'을 되풀이하지 않게 · 리뷰) */
@@ -895,6 +898,7 @@ class GuardianTest {
         bootCount(1)
         homeHogUntilNoon()
         restartAndSettle(2)
+        elapse(40)                                      // 12:10 재시작 — 13:00 엔 켜진 지 50분
         fill(at(13, 0), 9, 77.0, 1.0)
         Guardian.tick(context, log, at(13, 0), stats = UidStatsSource { mapOf(home to UidUse(home, cpuMs = 36 * 60_000L)) }, zone = zone)
         fill(at(14, 0), 9, 76.0, 6.0)
@@ -917,6 +921,7 @@ class GuardianTest {
         bootCount(1)
         homeHogUntilNoon()
         restartAndSettle(2)
+        elapse(40)                                      // 12:10 재시작 — 13:00 엔 켜진 지 50분
         fill(at(13, 0), 9, 77.0, 1.0)
         Guardian.tick(context, log, at(13, 0), stats = UidStatsSource { mapOf(home to UidUse(home, cpuMs = 36 * 60_000L)) }, zone = zone)
         fill(at(14, 0), 9, 76.0, 6.0)   // 다른 까닭으로 빨리 닳음 — 홈은 재시작 뒤 조용(+1분)
@@ -944,7 +949,7 @@ class GuardianTest {
         tickHome(at(14, 30), 57, 75.0)
         assertEquals("재시작 뒤 첫 기록은 기준값", null, Guardian.tileIssue(context, at(14, 30)))
         tickHome(at(15, 30), 77, 74.0)
-        assertEquals("One UI Watch 홈 과소모 계속 — 오류 보고", Guardian.tileIssue(context, at(15, 30)))
+        assertEquals("One UI Watch 홈 과소모 계속 — 오류 보내기", Guardian.tileIssue(context, at(15, 30)))
         assertTrue(issueTitle(), issueTitle().endsWith("다음 단계 뒤에도 계속"))
         // 배터리 화면도 같은 단계
         val issue = com.mywatch.kakaomap.battery.BatteryInsights.compute(context, log.readAll(), at(15, 30), zone).issues.single()
@@ -952,11 +957,11 @@ class GuardianTest {
         // 같은 부팅에서 계속 보여도 단계는 그대로, 알림은 하루에 한 번 — 12시간 지나도 다시 알리지 않고, 24시간이 되면 한 번 더 (리뷰)
         nm.cancel(Guardian.N_ISSUE_HOME)
         tickHome(at(16, 30), 97, 73.0)
-        assertEquals("One UI Watch 홈 과소모 계속 — 오류 보고", Guardian.tileIssue(context, at(16, 30)))
+        assertEquals("One UI Watch 홈 과소모 계속 — 오류 보내기", Guardian.tileIssue(context, at(16, 30)))
         assertNull(shadowOf(nm).getNotification(Guardian.N_ISSUE_HOME))
         var cpu = 97L
         for ((h, d) in listOf(18 to 20, 21 to 20, 0 to 21, 3 to 21)) { cpu += 60; tickHome(at(h, 30, d = d), cpu, 70.0) }   // 3시간마다 시간당 20분
-        assertEquals("One UI Watch 홈 과소모 계속 — 오류 보고", Guardian.tileIssue(context, at(3, 30, d = 21)))
+        assertEquals("One UI Watch 홈 과소모 계속 — 오류 보내기", Guardian.tileIssue(context, at(3, 30, d = 21)))
         assertNull("12시간 — 아직 하루가 안 됨", shadowOf(nm).getNotification(Guardian.N_ISSUE_HOME))
         // 아침에 잠깐 화면을 봄 (하루 넘게 화면 기록이 없으면 홈은 판단하지 않는다)
         event("android", at(8, 0, d = 21), android.app.usage.UsageEvents.Event.SCREEN_INTERACTIVE)
@@ -998,7 +1003,10 @@ class GuardianTest {
         cpu = 20 * 60_000L
         tickGms(at(11, 0), 79.0)
         assertEquals("Play 서비스 과소모 — 캐시 지우고 재시작", Guardian.tileIssue(context, at(11, 0)))
-        assertTrue(Guardian.onTreated(context, at(11, 10), setOf("trim-caches", "gms-restart"), source = stats))
+        // 할 일(캐시 삭제)이 앱 정보에 있으니 알림에 그 바로 가기
+        assertEquals(listOf("Play 서비스 앱 정보"), shadowOf(nm).getNotification(Guardian.N_ISSUE)?.actions?.map { it.title.toString() })
+        nm.cancel(Guardian.N_ISSUE)
+        assertTrue(Guardian.onTreated(context, at(11, 10), setOf("trim-caches", "gms-restart")))
         assertTrue(Guardian.treatPending(context))
         assertEquals("치료 전 판단은 내린다", null, Guardian.tileIssue(context, at(11, 10)))
         assertTrue(Guardian.culpritWindow(context, at(11, 10)).ranks.isEmpty())
@@ -1011,10 +1019,126 @@ class GuardianTest {
         assertFalse(Guardian.treatPending(context))
         cpu = 46 * 60_000L
         tickGms(at(12, 25), 78.0)
-        assertEquals("Play 서비스 과소모 계속 — 업데이트·보고", Guardian.tileIssue(context, at(12, 25)))
-        // 앱별 통계 권한이 없으면 아무것도 안 한다
-        shadowOf(context as Application).denyPermissions("android.permission.BATTERY_STATS")
-        assertFalse(Guardian.onTreated(context, at(12, 30), setOf("gms-restart")))
+        assertEquals("Play 서비스 과소모 계속 — 업데이트·오류 보내기", Guardian.tileIssue(context, at(12, 25)))
+        // 남은 할 일이 업데이트·오류 보내기뿐이라 앱 정보 바로 가기는 달지 않는다 (리뷰)
+        val last = shadowOf(nm).getNotification(Guardian.N_ISSUE)
+        assertNotNull(last)
+        assertTrue(last!!.actions.isNullOrEmpty())
+    }
+
+    /**
+     * Play 서비스를 다시 시작하지 않은 치료(캐시 정리만 — 예전 PC 툴킷이면 무엇을 했는지 모름)는 Play 서비스의 다음 할 일(PC 치료)을 한 것이
+     * 아니다 — 그 뒤에 또 나타나도 단계는 그대로 (리뷰)
+     */
+    @Test
+    fun aTreatmentWithoutAPlayServicesRestartKeepsItsStep() {
+        grant()
+        val gms = "com.google.android.gms"
+        var cpu = 0L
+        val stats = UidStatsSource { mapOf(gms to UidUse(gms, cpuMs = cpu)) }
+        fun tickGms(t: Long, level: Double) { fill(t, 9, level, 1.0); Guardian.tick(context, log, t, stats = stats, zone = zone) }
+        bootCount(1)
+        tickGms(at(10, 0), 80.0)
+        cpu = 20 * 60_000L
+        tickGms(at(11, 0), 79.0)
+        for ((k, did) in listOf(setOf("trim-caches"), null).withIndex()) {
+            val t0 = at(11, 10) + k * 2 * 3_600_000L
+            assertTrue(Guardian.onTreated(context, t0, did))
+            tickGms(t0 + 15 * 60_000L, 79.0)            // 기준값
+            cpu += 20 * 60_000L
+            tickGms(t0 + 75 * 60_000L, 78.0)
+            assertEquals("$did", "Play 서비스 과소모 — 캐시 지우고 재시작", Guardian.tileIssue(context, t0 + 75 * 60_000L))
+        }
+    }
+
+    /** 시계가 뒤로 간 채 한 PC 치료도 Play 서비스를 다음 단계로 — 치료는 시각이 아니라 횟수로 견준다 (리뷰) */
+    @Test
+    fun aTreatmentAfterTheClockWentBackStillMovesPlayServicesOn() {
+        grant()
+        val gms = "com.google.android.gms"
+        var cpu = 0L
+        val stats = UidStatsSource { mapOf(gms to UidUse(gms, cpuMs = cpu)) }
+        fun tickGms(t: Long, level: Double) { fill(t, 9, level, 1.0); Guardian.tick(context, log, t, stats = stats, zone = zone) }
+        bootCount(1)
+        tickGms(at(10, 0), 80.0)
+        cpu = 20 * 60_000L
+        tickGms(at(11, 0), 79.0)
+        assertEquals("Play 서비스 과소모 — 캐시 지우고 재시작", Guardian.tileIssue(context, at(11, 0)))
+        assertTrue(Guardian.onTreated(context, at(10, 10), setOf("trim-caches", "gms-restart")))   // 시계가 1시간 뒤로
+        tickGms(at(10, 25), 79.0)                       // 기준값
+        cpu += 20 * 60_000L
+        tickGms(at(11, 25), 78.0)
+        assertEquals("Play 서비스 과소모 계속 — 업데이트·오류 보내기", Guardian.tileIssue(context, at(11, 25)))
+    }
+
+    /**
+     * 이 버전 전(v2.43)에 시작된 일이 이어지는데 이 버전에서 다시 보기 전에 PC 치료를 했다 — 치료가 올린 부팅 차례를 재시작으로 읽어 홈을
+     * 다음 단계로 넘기지 않는다 (리뷰)
+     */
+    @Test
+    fun aTreatmentBeforeTheFirstSightingKeepsALastVersionEpisode() {
+        val p = context.getSharedPreferences(BatteryLog.PREFS, Context.MODE_PRIVATE)
+        bootCount(1)
+        homeHogUntilNoon()                                      // 12:00 홈 과소모 (부팅 차례 0)
+        p.edit().apply { p.all.keys.filter { it.startsWith("gs_issue_stage") }.forEach { remove(it) } }
+            .putInt("gs_issue_seen_seq_watch-home-hog", 0).putLong("gs_issue_seen_at_watch-home-hog", at(12, 0)).commit()
+        assertTrue(Guardian.onTreated(context, at(12, 5), setOf("trim-caches", "gms-restart")))
+        tickHome(at(12, 20), 32, 77.0)                          // 치료 뒤 기준값 (부팅 차례가 오르지만 재시작은 아님)
+        tickHome(at(13, 20), 52, 76.0)
+        assertEquals("재시작 전이라 처음 단계 그대로", "One UI Watch 홈 과소모 — 강제 재시작", Guardian.tileIssue(context, at(13, 20)))
+    }
+
+    /**
+     * 배터리 화면을 열 때(PC 수집 직전의 '요약 쓰기'도 이 길)도 PC 치료 뒤 10분은 기준값을 남기지 않는다 — 다시 시작한 Play 서비스가
+     * 몰아서 하는 일이 새 창에 들어가지 않게 (리뷰: 15분 기록 쪽만 시험이 있었다)
+     */
+    @Test
+    fun openingTheScreenAlsoWaitsAfterATreatment() {
+        grant()
+        val gms = "com.google.android.gms"
+        var cpu = 0L
+        val stats = UidStatsSource { mapOf(gms to UidUse(gms, cpuMs = cpu)) }
+        bootCount(1)
+        fill(at(10, 0), 9, 80.0, 1.0)
+        Guardian.tick(context, log, at(10, 0), stats = stats, zone = zone)
+        assertTrue(Guardian.onTreated(context, at(10, 30), setOf("gms-restart")))
+        cpu = 6 * 60_000L
+        Guardian.snapshotIfStale(context, at(10, 35), source = stats)
+        assertEquals("10분이 안 됨 — 기준값을 남기지 않는다", at(10, 0), HealthStore(context).lastAt())
+        assertTrue(Guardian.treatPending(context))
+        Guardian.snapshotIfStale(context, at(10, 41), source = stats)
+        assertEquals("10분 뒤 — 새 기준값", at(10, 41), HealthStore(context).lastAt())
+        assertFalse(Guardian.treatPending(context))
+    }
+
+    /** 앱별 통계 권한이 없어도 PC 치료 뒤로 비정상 소모를 다시 잰다 — 알려진 문제만 못 볼 뿐 (리뷰) */
+    @Test
+    fun withoutThePermissionATreatmentStillRestartsTheAlertWindow() {
+        fill(at(12, 0), 9, 80.0, 4.5)
+        Guardian.tick(context, log, at(12, 0), stats = UidStatsSource { emptyMap() }, zone = zone)
+        assertFalse("권한이 없으면 false — PC 툴킷이 그렇다고 알린다", Guardian.onTreated(context, at(12, 5), setOf("trim-caches", "gms-restart")))
+        log.append(BatterySample(at(12, 15), 66))
+        Guardian.tick(context, log, at(12, 15), stats = UidStatsSource { emptyMap() }, zone = zone)
+        assertNull(shadowOf(nm).getNotification(BatteryAlerts.NOTIFICATION_ID))
+    }
+
+    /**
+     * 부팅 기록이 없을 때 새로 재기 시작하는 때는 켜진 때 — 마지막 15분 기록 뒤에 남은 표본('강제 재시작 표시 남기기'처럼 재시작 직전의
+     * 잔량)이 재시작 뒤 창의 출발점이 되면, 켜지며 게이지가 낮게 다시 잰 만큼 시간당 소모가 부풀었다 (리뷰)
+     */
+    @Test
+    fun aNoteLeftJustBeforeARestartIsNotTheFreshStart() {
+        bootCount(1)
+        fill(at(12, 0), 9, 80.0, 1.0)
+        Guardian.tick(context, log, at(12, 0), stats = UidStatsSource { emptyMap() }, zone = zone)
+        log.append(BatterySample(at(12, 1), 78, event = com.mywatch.battery.core.Event.USER_NOTE))
+        restartAndSettle(2)                                     // 12:05쯤 켜짐 — 부팅 기록은 남지 않음
+        for (k in 0..7) {                                       // 켜지며 게이지가 12 낮게 다시 잼 — 그 뒤 시간당 1%
+            val t = at(12, 15) + k * q
+            log.append(BatterySample(t, 66 - k / 4))
+            Guardian.tick(context, log, t, stats = UidStatsSource { emptyMap() }, zone = zone)
+        }
+        assertNull(shadowOf(nm).getNotification(BatteryAlerts.NOTIFICATION_ID))
     }
 
     /**
@@ -1030,14 +1154,41 @@ class GuardianTest {
         tickHome(at(13, 0), 36, 77.0)
         tickHome(at(14, 0), 56, 76.0)
         assertEquals("One UI Watch 홈 과소모 — 홈 캐시 지우고 재시작", Guardian.tileIssue(context, at(14, 0)))
-        assertTrue(Guardian.onTreated(context, at(14, 10), setOf("trim-caches", "gms-restart"), source = UidStatsSource { mapOf(home to UidUse(home, cpuMs = 57 * 60_000L)) }))
+        assertTrue(Guardian.onTreated(context, at(14, 10), setOf("trim-caches", "gms-restart")))
         tickHome(at(14, 25), 58, 75.0)                 // 기준값
         tickHome(at(15, 25), 78, 74.0)                 // 재시작은 아직 — 돌고 있는 홈이 그대로
         assertEquals("One UI Watch 홈 과소모 — 홈 캐시 지우고 재시작", Guardian.tileIssue(context, at(15, 25)))
         restartAndSettle(3)
         tickHome(at(15, 40), 79, 73.0)
         tickHome(at(16, 40), 99, 72.0)
-        assertEquals("One UI Watch 홈 과소모 계속 — 오류 보고", Guardian.tileIssue(context, at(16, 40)))
+        assertEquals("One UI Watch 홈 과소모 계속 — 오류 보내기", Guardian.tileIssue(context, at(16, 40)))
+    }
+
+    /**
+     * PC 치료 뒤 기다리는 10분 사이에 재시작했다 — 켜진 지 10분 지난 첫 기록에서 한 번만 새로 재기 시작하고(재시작과 치료가 한 경계),
+     * 그 뒤에도 Play 서비스가 또 나타나면 치료 뒤의 단계(업데이트·오류 보내기)로 (리뷰: 시험이 없던 갈래)
+     */
+    @Test
+    fun aRestartWhileTheTreatmentSettlesIsOneBoundary() {
+        grant()
+        val gms = "com.google.android.gms"
+        var cpu = 0L
+        val stats = UidStatsSource { mapOf(gms to UidUse(gms, cpuMs = cpu)) }
+        fun tickGms(t: Long, level: Double) { fill(t, 9, level, 1.0); Guardian.tick(context, log, t, stats = stats, zone = zone) }
+        bootCount(1)
+        tickGms(at(10, 0), 80.0)
+        cpu = 20 * 60_000L
+        tickGms(at(11, 0), 79.0)
+        val seq = HealthStore(context).bootSeq()
+        assertTrue(Guardian.onTreated(context, at(11, 10), setOf("trim-caches", "gms-restart")))
+        restartAndSettle(2)                              // 11:15 재시작 — 11:25 엔 켜진 지 10분
+        tickGms(at(11, 25), 79.0)
+        assertFalse(Guardian.treatPending(context))
+        assertEquals("재시작과 치료가 한 경계", seq + 1, HealthStore(context).bootSeq())
+        assertEquals(at(11, 25), HealthStore(context).lastAt())
+        cpu += 20 * 60_000L
+        tickGms(at(12, 25), 78.0)
+        assertEquals("Play 서비스 과소모 계속 — 업데이트·오류 보내기", Guardian.tileIssue(context, at(12, 25)))
     }
 
     /** 셸이 '치료함'을 보내면(PC 자동 치료 뒤) 받는 곳이 뒤에서 처리한다 — 무엇을 했는지도 넘겨받는다 (리뷰) */
@@ -1051,6 +1202,9 @@ class GuardianTest {
         assertTrue(Guardian.treatPending(context))
         val action = Guardian.lastAction(context).orEmpty()
         assertTrue(action, action.contains("PC 자동 치료") && action.contains("Play 서비스 다시 시작"))
+        // PC 툴킷이 요약을 고르는 답 — 권한이 있으면 ok, 없으면 nostats(비정상 소모만 다시 잼), 실패면 none (리뷰)
+        assertEquals(listOf("treated:ok", "treated:nostats", "treated:none"),
+            listOf(true, false, null).map { com.mywatch.kakaomap.battery.ShellRestoreReceiver.treatedAnswer(it) })
     }
 
     /**
@@ -1075,7 +1229,7 @@ class GuardianTest {
         grant()
         fill(at(12, 0), 9, 80.0, 4.5)
         Guardian.tick(context, log, at(12, 0), stats = UidStatsSource { emptyMap() }, zone = zone)
-        assertTrue(Guardian.onTreated(context, at(12, 5), setOf("trim-caches"), source = UidStatsSource { emptyMap() }))
+        assertTrue(Guardian.onTreated(context, at(12, 5), setOf("trim-caches")))
         log.append(BatterySample(at(12, 15), 66))
         Guardian.tick(context, log, at(12, 15), stats = UidStatsSource { emptyMap() }, zone = zone)
         assertNull(shadowOf(nm).getNotification(Guardian.N_ABNORMAL))

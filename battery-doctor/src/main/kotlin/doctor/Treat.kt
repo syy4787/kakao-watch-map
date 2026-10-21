@@ -159,9 +159,15 @@ object Treat {
         // 실제로 한 치료를 붙여 보낸다 — 워치가 문제마다 단계를 넘기게(Play 서비스를 다시 시작했으면 Play 서비스만 다음 단계로)
         val cureIds = setOf("trim-caches", "gms-restart")
         val cured = applied.filter { it.ok && it.lever.id in cureIds }.map { it.lever.id }
-        val told: Boolean? = if (cured.isEmpty()) null else {
+        // 워치 앱의 답: treated:ok · treated:nostats(받았지만 앱별 통계 권한이 없어 비정상 소모만 다시 잼) · 그 밖(예전 버전·못 받음)
+        val told: String? = if (cured.isEmpty()) null else {
             val r = try { adb.run(TREATED_BROADCAST + listOf("--es", "did", cured.joinToString(",")), 90) } catch (e: Exception) { Result(-3, "", e.toString()) }
-            r.ok && r.out.contains("treated:ok")
+            when {
+                !r.ok -> ""
+                r.out.contains("treated:ok") -> "ok"
+                r.out.contains("treated:nostats") -> "nostats"
+                else -> ""
+            }
         }
 
         // (f) 요약
@@ -185,10 +191,17 @@ object Treat {
         io.println(if (reset.ok) " 배터리 통계 초기화: 완료 — 지금부터가 깨끗한 측정 구간입니다"
             else " 배터리 통계 초기화: 실패 (${(reset.err.ifBlank { reset.out }).trim().lineSequence().firstOrNull() ?: "exit ${reset.code}"}) — 메뉴 3(측정 시작)을 따로 실행하세요")
         when (told) {
-            true -> io.println(" 워치 앱에 치료를 알렸습니다 — 앱별 기록을 지금부터 새로 재고 1시간쯤 뒤 다시 봅니다")
-            false -> io.println(" 워치 앱에 치료를 알리지 못했습니다(예전 버전이거나 앱별 통계 권한 없음) — 워치의 알려진 문제는 1~2시간 동안 치료 전 기록으로 보일 수 있습니다")
             null -> {}
+            // 워치 앱이 기다리는 만큼과 같은 말로 (다시 시작한 Play 서비스가 몰아서 하는 일을 빼려고 10분 — Guardian.TREAT_SETTLE_MS)
+            "ok" -> io.println(" 워치 앱에 치료를 알렸습니다 — 10분 뒤부터 앱별 기록을 새로 재고, 알려진 문제(Play 서비스·홈 과소모)는 그 뒤 1시간쯤 다시 봅니다")
+            "nostats" -> io.println(" 워치 앱에 치료를 알렸습니다 — 비정상 소모를 치료 뒤로 다시 잽니다. 앱별 통계 권한이 없어 알려진 문제(Play 서비스·홈 과소모)는 " +
+                "못 봅니다 — " + if (grantCode == null) "메뉴 7(권한 주기)을 해 보세요" else "메뉴 7(권한 주기)을 다시 해 보세요(펌웨어가 막으면 위 표에 '실패')")
+            else -> io.println(" 워치 앱에 치료를 알리지 못했습니다(워치 앱이 예전 버전이거나 받지 못함) — 워치의 알려진 문제는 1~2시간 동안 치료 전 기록으로 보일 수 있습니다")
         }
+        // 워치가 Play 서비스 과소모를 '다음 단계 뒤에도 계속'(2단계)으로 적었는데 또 캐시 정리·다시 시작을 했으면 — 그것이 끝이 아니라고 (워치 할 일과 같게)
+        val gmsLast = findings.any { it.id == "watch-gms" } && (f.watchMetrics["back_gms"] ?: 0.0) >= 2.0
+        if (gmsLast && applied.any { it.ok && it.lever.id == "gms-restart" }) io.println(" 참고: 워치는 Play 서비스 과소모를 '다음 단계 뒤에도 계속'으로 적었습니다 — " +
+            "캐시 정리·다시 시작을 한 번 더 했지만 그것으로 끝이 아닙니다. 남은 것: 충전 중 워치 Play 스토어 › 내 앱 › 모두 업데이트 · 과소모가 이어지는 동안 ${Analyzer.REPORT}")
         // 워치가 One UI Watch 홈 과소모를 재시작 뒤에도 또(1단계) 짚었는데 캐시 정리를 했으면 강제 재시작까지 — 캐시만 지우면 돌고 있는 홈은
         // 그대로다 (워치 할 일과 같은 순서). 그다음 단계면 이미 해 본 것이라 되풀이하지 않는다
         val homeTrimmed = findings.any { it.id == "watch-home" } && (f.watchMetrics["back_home"] ?: 0.0) < 2.0 && applied.any { it.ok && it.lever.id == "trim-caches" }

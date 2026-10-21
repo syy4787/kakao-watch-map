@@ -17,11 +17,11 @@ data class KnownIssue(
     /** 타일 한 줄 (문제와 그 할 일) — 없으면 제목 */
     val tile: String? = null,
     /**
-     * 몇 번째 단계인가 — 0 처음 · 1 재시작(·PC 치료) 뒤에도 또 나타나 다음 단계 · 2 그 다음 단계를 보인 뒤 또 재시작했는데도 계속
-     * ([KnownIssues.detect] 의 cameBack·again)
+     * 몇 번째 단계인가 — 0 처음 · 1 재시작 뒤에도 또 나타나 다음 단계 · 2 그 다음 단계를 보인 뒤 또 재시작했는데도(Play 서비스는 그 뒤
+     * PC 치료로 다시 시작했는데도) 계속 ([KnownIssues.detect] 의 cameBack·again)
      */
     val stage: Int = 0,
-    /** 문제 앱의 앱 정보(저장공간 › 캐시 삭제) 바로 가기가 할 일에 쓸모 있나 — 남은 단계가 오류 보고·업데이트뿐이면 false */
+    /** 문제 앱의 앱 정보(저장공간 › 캐시 삭제) 바로 가기가 할 일에 쓸모 있나 — 남은 단계가 오류 보내기·업데이트뿐이면 false */
     val appInfo: Boolean = true,
 ) {
     /** 재시작해도 그대로라 다음 단계를 주는 것 */
@@ -46,11 +46,13 @@ object KnownIssues {
     const val SHARE = 0.4
 
     /**
-     * 오류 보고 — 삼성전자서비스 안내(Galaxy Wearable 앱 › 문의하기 › 오류 보내기 / Samsung Members › 도움받기 › 오류 보내기)와 삼성
-     * 호주 안내(2026-07: 시스템 로그 데이터 보내기 체크, 증상 5분 안에). 과소모가 이어지는 동안 보내야 로그에 남는다
+     * 오류 보내기 — 삼성전자서비스 안내(2024-03, solution/98474: 폰의 Galaxy Wearable 앱 › 아래 가운데 대시보드 › 오른쪽 위 ⋮ › 설정 › 문의하기 ›
+     * 오류 보내기 · Samsung Members › 도움 받기 › 질문/오류 보내기, '증상 발생 2~3분 내'; 앱 버전에 따라 메뉴가 다르다 — 2020 안내(25167)는
+     * 왼쪽 위 메뉴 › 문의하기)와 삼성 호주 안내(2026-07: '시스템 로그 데이터 보내기' 체크, 5분 안에). 과소모가 이어지는 동안 보내야 로그에
+     * 남는다. 워치 앱과 PC 툴킷이 같은 말을 쓴다
      */
-    const val REPORT = "오류 보내기 — Galaxy Wearable 앱 › 문의하기 › 오류 보내기 또는 Samsung Members › 도움받기 › 오류 보내기 " +
-        "('시스템 로그 데이터 보내기' 체크, 삼성 안내: 증상 5분 안에)"
+    const val REPORT = "오류 보내기 — 폰의 Galaxy Wearable 앱 › 대시보드 › ⋮ › 설정 › 문의하기 › 오류 보내기 또는 Samsung Members › 도움 받기 › " +
+        "질문/오류 보내기 ('시스템 로그 데이터 보내기' 체크, 삼성 안내: 증상 2~3분 안에)"
 
     /** 삼성·구글 기본 시계 화면과 Watch Face Format 렌더러 — 시계 화면 문제로 짚지 않는다 */
     private val SYSTEM_FACES = listOf(
@@ -62,9 +64,10 @@ object KnownIssues {
 
     /**
      * [watchFace] = 지금 시계 화면의 패키지 (모르면 null), [windowMs] = 순위를 모은 시간 — 시계 화면은 늘 '보이는' 상태라
-     * 화면 밖 CPU 표시가 붙지 않으므로 CPU 를 시간당으로 따로 본다. [cameBack] = 재시작(·PC 치료)한 뒤에도 또 나타난 문제(id) — 그대로였든
+     * 화면 밖 CPU 표시가 붙지 않으므로 CPU 를 시간당으로 따로 본다. [cameBack] = 재시작한 뒤에도 또 나타난 문제(id) — 그대로였든
      * 몇 시간 뒤 다시 나타났든 같은 '재시작'을 되풀이하지 않고 다음 단계로 ('재시작해도 그대로'라고 단정하지 않는다). [again] = 그 다음
-     * 단계를 보인 뒤 또 재시작했는데도 또 나타난 문제 — 사용자가 할 일이 거의 남지 않아 오류 보고·업데이트·밤 모드로
+     * 단계를 보인 뒤 또 재시작했는데도(Play 서비스는 PC 치료로 다시 시작했는데도) 또 나타난 문제 — 사용자가 할 일이 거의 남지 않아
+     * 오류 보내기·업데이트·밤 모드로
      */
     fun detect(
         ranks: List<AppDrainRank>, watchFace: String? = null, windowMs: Long? = null, screenOnMs: Long? = null,
@@ -98,7 +101,7 @@ object KnownIssues {
                         ),
                         r.grade,
                         todo = "Play 서비스 과소모 계속" to "Play 스토어 앱 모두 업데이트 → 오류 보내기 · 밤엔 밤 모드",
-                        tile = "Play 서비스 과소모 계속 — 업데이트·보고",
+                        tile = "Play 서비스 과소모 계속 — 업데이트·오류 보내기",
                         stage = 2,
                         appInfo = false,
                     )
@@ -188,7 +191,7 @@ object KnownIssues {
                             ),
                             grade,
                             todo = "홈 과소모 계속" to "오류 보내기(Wearable 앱 › 문의하기) · 워치 업데이트 확인",
-                            tile = "One UI Watch 홈 과소모 계속 — 오류 보고",
+                            tile = "One UI Watch 홈 과소모 계속 — 오류 보내기",
                             stage = 2,
                         )
                         1 -> KnownIssue(
@@ -198,7 +201,7 @@ object KnownIssues {
                             listOf(cache, "캐시를 지운 뒤 한 번 더 강제 재시작(홈 + 뒤로 7초 이상) — 캐시만 지우면 돌고 있는 홈은 그대로라서", report),
                             grade,
                             // 캐시만 지우면 돌고 있는 홈은 그대로 — 할 일 줄·타일에도 강제 재시작을 같이 (리뷰·시나리오 점검)
-                            todo = "재시작 뒤에도 홈 과소모" to "앱 정보 › 저장공간 › 캐시만 지우고 강제 재시작 → 그대로면 오류 보고",
+                            todo = "재시작 뒤에도 홈 과소모" to "앱 정보 › 저장공간 › 캐시만 지우고 강제 재시작 → 그대로면 오류 보내기",
                             tile = "One UI Watch 홈 과소모 — 홈 캐시 지우고 재시작",
                             stage = 1,
                         )

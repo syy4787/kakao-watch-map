@@ -16,7 +16,7 @@ enum class Change {
 data class CompareRow(val label: String, val before: String, val after: String, val change: Change)
 
 /**
- * 지난 수집(조치 전)과 이번 수집(조치 후)의 비교. [actions] = 두 수집 사이에 적용해 아직 되돌리지 않은 조치 id.
+ * 지난 수집(조치 전)과 이번 수집(조치 후)의 비교. [actions] = 두 수집 사이의 조치 id ([Collect.actions] — 되돌린 것·바꾼 것 없는 기록은 빼고).
  * [Compare.of] 의 actionsBetween = 그 '사이'를 PC 시계로 (조치 기록과 같은 시계 — 모르면 수집 시각으로).
  * [sinceAction] = 바로 앞 수집이 아니라 조치 전 수집과 견줌 ([Collect.baseline])
  */
@@ -82,8 +82,10 @@ object Compare {
         }
         if (rows.isEmpty()) return null
 
-        // 조치 기록은 PC 시계 — 수집 시각(워치 시계)과 몇 분 어긋날 수 있어 알면 PC 시계 창으로 고른다
-        val actions = journal.filter { it.time in (actionsBetween ?: (beforeAt + 1)..afterAt) && it.ok && !it.undone }.map { it.id }
+        // 조치 기록은 PC 시계 — 수집 시각(워치 시계)과 몇 분 어긋날 수 있어 알면 PC 시계 창으로 고른다. 무엇을 조치로 치는지는 비교
+        // 기준을 고를 때와 같게 ([Collect.actions] — 이미 있던 권한·모두 되돌린 치료는 빼고)
+        val window = actionsBetween ?: (beforeAt + 1)..afterAt
+        val actions = Collect.actions(journal).filter { it.time in window }.map { it.id }
         return Comparison(beforeAt, afterAt, actions, rows, headline(rows, actions.isNotEmpty()))
     }
 

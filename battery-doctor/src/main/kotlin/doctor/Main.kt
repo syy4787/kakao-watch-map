@@ -328,7 +328,7 @@ object Main {
                 else -> {
                     io.println(" 번호  시각              상태        조치")
                     entries.forEachIndexed { i, e ->
-                        val state = when { e.undone -> "되돌림"; e.undo == null -> "되돌릴 수 없음"; !e.ok -> "적용 실패"; else -> "적용됨" }
+                        val state = when { e.id == Fixer.UNDO_ALL -> "기록"; e.undone -> "되돌림"; e.undo == null -> "되돌릴 수 없음"; !e.ok -> "적용 실패"; else -> "적용됨" }
                         io.println(String.format(" %3d   %s  %-8s  %s (%s)%s", i + 1, stamp(e.time), state, Evidence.describeLever(e.id), e.id, e.before?.let { "  이전 값: $it" } ?: ""))
                     }
                     val typed = io.readLine("되돌릴 번호 (all = 전부 역순, 엔터 = 취소): ")?.trim().orEmpty()
@@ -340,7 +340,7 @@ object Main {
                 }
             }
             val adb = device() ?: return 1
-            val n = Fixer.undo(adb, j, index)
+            val n = Fixer.undo(adb, j, index, clock())
             io.println("되돌린 조치: ${n}개" + (Fixer.lastError?.let { " — 실패: $it" } ?: ""))
             return if (Fixer.lastError == null) 0 else 1
         }

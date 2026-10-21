@@ -234,12 +234,14 @@ class KnownIssuesTest {
         assertTrue(third.title, third.title.endsWith("다음 단계 뒤에도 계속"))
         assertTrue(third.steps.first(), third.steps.first().startsWith("아직 안 했으면 ") && third.steps.first().contains("캐시 삭제"))
         assertTrue(third.steps.toString(), third.steps.any { it.contains("Samsung Members") })
-        // 오류 보내기는 삼성 안내의 길 그대로, 과소모가 이어지는 동안 (시스템 로그가 남게 — 삼성 안내: 증상 5분 안에)
-        assertTrue(third.steps.toString(), third.steps.any { it.contains("Galaxy Wearable 앱 › 문의하기 › 오류 보내기") && it.contains("5분") })
+        // 오류 보내기는 삼성 안내의 길 그대로, 과소모가 이어지는 동안 (시스템 로그가 남게 — 삼성전자서비스 안내: 증상 2~3분 안에 · 리뷰)
+        assertTrue(third.steps.toString(), third.steps.any {
+            it.contains("Galaxy Wearable 앱 › 대시보드 › ⋮ › 설정 › 문의하기 › 오류 보내기") && it.contains("Samsung Members › 도움 받기 › 질문/오류 보내기") && it.contains("2~3분")
+        })
         assertTrue("아직이면 홈 캐시 삭제 — 앱 정보 바로 가기가 쓸모 있다", third.appInfo)
         // 워치 소프트웨어 업데이트는 폰의 Galaxy Wearable 앱에서 (삼성 안내의 메뉴 이름 그대로)
         assertTrue(third.steps.toString(), third.steps.any { it.contains("Galaxy Wearable 앱 › 워치 설정 › 워치 소프트웨어 업데이트") })
-        assertEquals("One UI Watch 홈 과소모 계속 — 오류 보고", third.tile)
+        assertEquals("One UI Watch 홈 과소모 계속 — 오류 보내기", third.tile)
         assertTrue(third.todo!!.second, third.todo!!.second.contains("오류 보내기"))
 
         val gms = AppDrain.rank(listOf(UidUse(KnownIssues.GMS, cpuMs = 30 * 60_000L, wakelockMs = 40 * 60_000L)), 2 * h)
@@ -256,7 +258,7 @@ class KnownIssuesTest {
         // 충전 중 앱 모두 업데이트(일부 사용자에게 도움), 초기화는 마지막 수단으로만 (Gadget Hacks 2026 정리)
         assertTrue(gmsThird.steps.toString(), gmsThird.steps.any { it.contains("Play 스토어 › 내 앱 › 모두 업데이트") })
         assertTrue(gmsThird.steps.toString(), gmsThird.steps.any { it.contains("초기화") && it.contains("마지막 수단") })
-        assertEquals("Play 서비스 과소모 계속 — 업데이트·보고", gmsThird.tile)
+        assertEquals("Play 서비스 과소모 계속 — 업데이트·오류 보내기", gmsThird.tile)
         // '다시'만 있고 '또 나타남'은 없으면(앞 단계를 아직 안 보임) 다음 단계 그대로
         assertEquals(1, KnownIssues.detect(home, windowMs = 2 * h, screenOnMs = 0, cameBack = ids).single().stage)
     }

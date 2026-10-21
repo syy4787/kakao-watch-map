@@ -87,6 +87,23 @@ class FixerTest {
         assertTrue(adb.calls.isEmpty())
     }
 
+    /** 모두 되돌리기는 끝에 그렇다는 기록을 남긴다 — 번호로 하나씩 되돌린 것과 가르려고(치료 전후 비교의 기준 · 리뷰). 번호로 되돌리면 남기지 않는다 */
+    @Test
+    fun undoAllLeavesAMarkerButUndoOneDoesNot() {
+        val adb = FakeAdb().apply { on("shell settings get global wifi_scan_always_enabled", "1\n") }
+        val j = journal()
+        Fixer.apply(adb, wifi, j, now = 1)
+        Fixer.apply(adb, bg, j, now = 2)
+        Fixer.undo(adb, j, 1, now = 3)
+        assertEquals(listOf("wifi-scan-off", "bg-restrict:com.example.drain"), j.entries().map { it.id })
+        Fixer.undo(adb, j, null, now = 4)
+        val last = j.entries().last()
+        assertEquals(Fixer.UNDO_ALL, last.id)
+        assertEquals(4L, last.time)
+        assertFalse(last.undone)
+        assertEquals(null, last.undo)
+    }
+
     @Test
     fun undoOneByIndex() {
         val adb = FakeAdb().apply { on("shell settings get global wifi_scan_always_enabled", "0\n") }

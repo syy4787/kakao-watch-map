@@ -54,6 +54,29 @@ class CompareTest {
         assertTrue(Compare.of(before, after, journal)!!.actions.isEmpty())   // 워치 시계로만 보면 빠진다
     }
 
+    /**
+     * 사이에 한 조치도 비교 기준([Collect.baseline])과 같은 규칙으로 — 이미 있던 권한(되돌릴 것 없음)이나 모두 되돌린(undo --all) 뒤의
+     * 일회성 조치, '모두 되돌리기' 기록 자체는 '조치'가 아니다. 그런 것만 있으면 머리말도 '지난 수집보다' (리뷰: '지난 수집과 비교'인데
+     * '사이에 한 조치: grant:…', '조치 뒤 …')
+     */
+    @Test
+    fun noOpEntriesAndUndoneRunsAreNotActions() {
+        val before = Facts(stats = stats(10.0, 40, 9.0, 27, 0.30, 60.0, 120.0), collectedAt = t0)
+        val after = Facts(stats = stats(10.0, 15, 9.0, 9, 0.05, 5.0, 60.0), collectedAt = t0 + 30 * h)
+        val restore = listOf(listOf("shell", "settings", "put", "global", "wifi_scan_always_enabled", "1"))
+        val journal = listOf(
+            JournalEntry(t0 + h, "grant:android.permission.BATTERY_STATS", "granted", emptyList(), emptyList(), false),
+            JournalEntry(t0 + 2 * h, "wifi-scan-off", "1", emptyList(), restore, undone = true),
+            JournalEntry(t0 + 2 * h + 1, "trim-caches", null, emptyList(), null, false),
+            JournalEntry(t0 + 3 * h, doctor.fix.Fixer.UNDO_ALL, null, emptyList(), null, false),        // undo --all
+        )
+        val c = Compare.of(before, after, journal)!!
+        assertTrue(c.actions.toString(), c.actions.isEmpty())
+        assertTrue(c.headline, c.headline.startsWith("지난 수집보다"))
+        // 번호로 되돌렸으면 캐시 정리는 그대로 조치
+        assertEquals(listOf("trim-caches"), Compare.of(before, after, journal.dropLast(1))!!.actions)
+    }
+
     @Test
     fun aSimilarResultSaysTheCauseMayBeElsewhere() {
         val before = Facts(stats = stats(10.0, 30, 9.0, 18, 0.10, 6.0, 60.0), collectedAt = t0)

@@ -140,12 +140,48 @@ class CollectTest {
         assertEquals(b.dir, Collect.baseline(tmp.root, c, listOf(e(t0 + 2 * h - 60_000L, "grant:android.permission.BATTERY_STATS", emptyList())))!!.dir)
         // 실제로 준 권한(되돌릴 것 있음)은 조치
         assertEquals(a.dir, Collect.baseline(tmp.root, c, listOf(e(t0 + 2 * h - 60_000L, "grant:android.permission.BATTERY_STATS", revoke)))!!.dir)
-        // a 뒤 자동 치료(되돌릴 수 있는 조치 + 일회성 조치)를 undo --all 로 되돌렸으면 일회성도 끝난 것
+        // a 뒤 자동 치료(되돌릴 수 있는 조치 + 일회성 조치)를 undo --all 로 되돌렸으면(끝에 '모두 되돌리기' 기록) 일회성도 끝난 것
         val run = listOf(e(t0 + 60_000L, "wifi-scan-off", revoke, undone = true), e(t0 + 90_000L, "trim-caches", null))
-        assertEquals(b.dir, Collect.baseline(tmp.root, c, run)!!.dir)
+        assertEquals(b.dir, Collect.baseline(tmp.root, c, run + e(t0 + 3 * h, doctor.fix.Fixer.UNDO_ALL, null))!!.dir)
+        // 번호로 되돌렸으면('모두 되돌리기' 기록 없음) 일회성 조치는 그대로 — 치료 전(a)과 (리뷰)
+        assertEquals(a.dir, Collect.baseline(tmp.root, c, run)!!.dir)
         assertEquals(a.dir, Collect.baseline(tmp.root, c, run.map { it.copy(undone = false) })!!.dir)
         // 일회성 조치만 한 치료는 되돌릴 것이 없어 그대로 치료 전(a)과
         assertEquals(a.dir, Collect.baseline(tmp.root, c, listOf(e(t0 + 90_000L, "trim-caches", null)))!!.dir)
+    }
+
+    /**
+     * 번호로 골라 되돌렸으면(메뉴 5 → 번호) 같은 치료의 캐시 정리·Play 서비스 다시 시작은 그대로 조치 — 모두 되돌렸을 때(undo --all,
+     * 끝에 '모두 되돌리기' 기록)만 함께 끝난 것으로. 앱 데이터 삭제처럼 효과가 남는 조치는 되돌림과 상관없이 조치 (리뷰: 알림이 늦어 범인
+     * 앱 제한만 되돌렸더니 하루 뒤 수집이 10분 뒤 확인 수집 — 초기화 직후라 비교할 값이 없음 — 과 견줘졌다)
+     */
+    @Test
+    fun undoingOneLeverKeepsTheRestOfTheTreatment() {
+        val h = 3_600_000L
+        val t0 = 1_792_000_000_000L
+        val a = snapAt("20261014-100000", t0)                       // 자동 치료 안의 수집 (조치 직전)
+        val b = snapAt("20261014-101500", t0 + 15 * 60_000L)        // 10분 뒤 확인 수집
+        val c = snapAt("20261015-120000", t0 + 26 * h)
+        fun e(at: Long, id: String, undo: List<List<String>>?, undone: Boolean = false) = doctor.fix.JournalEntry(at, id, null, emptyList(), undo, undone)
+        val restore = listOf(listOf("shell", "cmd", "appops", "set", "com.example.drain", "RUN_ANY_IN_BACKGROUND", "default"))
+        // 두 번째 자동 치료: 권한은 이미 있었고(되돌릴 것 없음) 범인 앱 제한 + 캐시 정리 + Play 서비스 다시 시작
+        val run = listOf(
+            e(t0 - 2 * 60_000L, "grant:android.permission.BATTERY_STATS", emptyList()),
+            e(t0 + 60_000L, "bg-restrict:com.example.drain", restore),
+            e(t0 + 61_000L, "bucket-restricted:com.example.drain", restore),
+            e(t0 + 62_000L, "trim-caches", null),
+            e(t0 + 63_000L, "gms-restart", null),
+        )
+        val partial = run.map { if (it.id.endsWith(":com.example.drain")) it.copy(undone = true) else it }
+        assertEquals("범인 앱 제한만 되돌림 — 캐시 정리·다시 시작은 남음", a.dir, Collect.baseline(tmp.root, c, partial)!!.dir)
+        // undo --all 은 끝에 '모두 되돌리기' 기록을 남긴다 — 그 앞의 일회성 조치도 끝남, 바로 앞 수집과
+        val undoAll = e(t0 + 3 * h, doctor.fix.Fixer.UNDO_ALL, null)
+        fun allUndone(es: List<doctor.fix.JournalEntry>) = es.map { if (it.undo != null) it.copy(undone = true) else it }
+        assertEquals(b.dir, Collect.baseline(tmp.root, c, allUndone(run) + undoAll)!!.dir)
+        // 권한 기록 없이(메뉴 4 → 엔터) 건 치료에서 되돌릴 수 있는 것을 번호로 하나씩 다 되돌렸어도 '모두 되돌리기'가 아니면 그대로 (리뷰)
+        assertEquals(a.dir, Collect.baseline(tmp.root, c, allUndone(run.filterNot { it.id.startsWith("grant:") }))!!.dir)
+        // 효과가 남는 조치(앱 데이터 삭제)는 모두 되돌린 뒤에도 조치
+        assertEquals(a.dir, Collect.baseline(tmp.root, c, allUndone(run + e(t0 + 64_000L, "clear:com.example.drain", null)) + undoAll)!!.dir)
     }
 
     @Test

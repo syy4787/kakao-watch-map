@@ -1,5 +1,8 @@
 package doctor
 
+import com.mywatch.battery.core.Event
+import com.mywatch.battery.core.GaugeDriftRule
+import com.mywatch.battery.core.RestartEffects
 import com.mywatch.battery.core.Thresholds
 import com.mywatch.battery.core.WatchModels
 import doctor.fix.Journal
@@ -154,15 +157,23 @@ object Evidence {
         val mainRate = mainRate(f)
         val anomalies = f.watch?.anomalies?.takeIf { it.isNotEmpty() }?.let { list -> "${list.size}회 (" + list.groupBy { it.kind }.entries.joinToString(", ") { "${it.value.first().label} ${it.value.size}회" } + ")" } ?: (if (f.watch != null) "없음" else BLANK)
         val health = listOfNotNull(f.now?.asoc?.let { "삼성 기록 건강도(ASOC) $it%" }, f.watch?.capacity?.let { c -> "충전 곡선 추정 용량 ${fmt1(c.estimatedMah)} mAh${c.percentOfNominal?.let { p -> " (공칭의 ${fmt1(p)}%)" } ?: ""}" }).joinToString(", ").ifEmpty { BLANK }
-        val keyFindings = findings.filter { it.severity != Severity.INFO }.take(6).map { "- [${it.severity.label}] ${it.title}" }.ifEmpty { listOf("- $BLANK") }
-        val actions = journal.map { "- ${stamp(it.time, zone)} ${describeLever(it.id)} (${it.id})${if (it.undone) " — 되돌림" else ""}${if (!it.ok) " — 실패" else ""}" }.ifEmpty { listOf("- $BLANK (아직 조치 없음)") }
+        // 워치 앱이 본 단계(재시작한 뒤에도 다시 나타남 등)는 따로 풀어 적으니 주요 소견에선 뺀다
+        val stages = watchStages(f, findings)
+        val keyFindings = findings.filter { it.severity != Severity.INFO && it.id !in stages.keys }.take(6).map { "- [${it.severity.label}] ${it.title}" }.ifEmpty { listOf("- $BLANK") }
+        val actions = journal.map { "- ${stamp(it.time, zone)} ${describeLever(it.id)} (${it.id})${if (it.undone) " — 되돌림" else ""}${if (!it.ok) " — 실패" else ""}" }.ifEmpty { listOf("- $BLANK (PC 툴킷으로 한 조치 없음 — 그 밖에 한 일이 있으면 적으세요)") }
+        // 켜짐(부팅) 기록·그 전후 대기 소모·워치 앱이 본 단계는 증상(사실), 사용자가 남긴 '강제 재시작' 표시는 시도한 조치
+        val watchFacts = bootLines(f, zone) + stages.values
+        val marks = restartMarks(f, zone)
         val culprits = v.culprits.takeIf { it.isNotEmpty() }?.joinToString(", ") ?: BLANK
 
         val members = buildString {
             appendLine("[삼성멤버스 오류 보내기 — 붙여 넣을 내용]")
-            appendLine("제출 경로: Galaxy Wearable 앱 > 하단 가운데 대시보드 > 우상단 ⋮(더보기) > 설정 > 문의하기 > 오류 보내기")
+            // 삼성전자서비스 안내(2024) 그대로 — 워치 앱 할 일([com.mywatch.battery.core.KnownIssues.REPORT])과 같은 길. 앱 버전마다 메뉴 자리가 달라 예전 길도
+            appendLine("제출 경로: 폰의 Galaxy Wearable 앱 › 아래 가운데 대시보드 › 오른쪽 위 ⋮(더보기) › 설정 › 문의하기 › 오류 보내기")
+            appendLine("          (앱 버전에 따라 메뉴 자리가 다릅니다 — 예전 앱은 왼쪽 위 메뉴 › 문의하기)")
+            appendLine("          또는 Samsung Members › 도움 받기 › 질문/오류 보내기 › 보내기 › 오류 보내기")
             appendLine("  · 기기: 워치 선택, '시스템 로그 데이터 보내기' 체크 (Wi-Fi 권장)")
-            appendLine("  · 증상이 나타난 직후 5분 안에(삼성전자서비스 안내는 2~3분 안에) 보내야 로그가 남습니다. 로그 생성 중 앱을 닫지 마세요")
+            appendLine("  · 증상이 나타난 직후 2~3분 안에(삼성전자서비스 안내 — 삼성 호주 안내는 5분 안에) 보내야 로그가 남습니다. 로그 생성 중 앱을 닫지 마세요")
             appendLine("  · 빈도: 자주 / 카테고리: 배터리")
             appendLine()
             appendLine("제목: 갤럭시 워치9 배터리 비정상 소모 — $mainRate")
@@ -172,6 +183,7 @@ object Evidence {
             appendLine("- 구입일: $purchaseText$elapsed, 수집 시각: $collected")
             measures.forEach { appendLine("- $it") }
             appendLine("- 잔량 표시 이상(워치 15분 기록): $anomalies")
+            watchFacts.forEach { appendLine(it) }
             appendLine("- 배터리 건강도: $health")
             appendLine("- 자동 분석 판정: ${v.cause.label} (신뢰도 ${v.confidence}) — ${v.headline}")
             appendLine("- 범인 후보 패키지: $culprits")
@@ -179,7 +191,7 @@ object Evidence {
             keyFindings.forEach { appendLine("  $it") }
             appendLine()
             appendLine("[시도한 조치]")
-            appendLine("- 강제 재시작(홈 + 뒤로 가기 7초 이상): $BLANK (날짜·효과)")
+            marks.forEach { appendLine(it) }
             actions.forEach { appendLine(it) }
             appendLine()
             appendLine("[요청]")
@@ -200,6 +212,7 @@ object Evidence {
             appendLine("측정 요약 (PC 툴킷 battery-doctor, 수집 $collected):")
             measures.forEach { appendLine("- $it") }
             appendLine("- 잔량 표시 이상: $anomalies")
+            watchFacts.forEach { appendLine(it) }
             appendLine("- 배터리 건강도: $health")
             appendLine("- 자동 분석 판정: ${v.cause.label} (신뢰도 ${v.confidence})")
             appendLine()
@@ -211,6 +224,7 @@ object Evidence {
             appendLine("5. 동일 증상으로 2회째 접수라면: 소비자분쟁해결기준에 따라 제품교환 또는 구입가 환급을 요구합니다 (03_소비자분쟁해결기준_요구서.txt)")
             appendLine()
             appendLine("시도한 조치:")
+            marks.forEach { appendLine(it) }
             actions.forEach { appendLine(it) }
             appendLine()
             appendLine("첨부: 증거 패키지 폴더 전체 (report.html, snapshot/, watch_log.csv, summary.json)")
@@ -235,6 +249,7 @@ object Evidence {
             appendLine("정상적인 사용 상태에서 배터리가 $mainRate 소모되어 하루를 쓰지 못합니다 (공식 사용시간 최대 30~40시간).")
             measures.forEach { appendLine("- $it") }
             appendLine("- 잔량 표시 이상: $anomalies / 배터리 건강도: $health")
+            stages.values.forEach { appendLine(it) }
             appendLine("- 측정 근거: 첨부 report.html, 워치 15분 기록(watch_log.csv), dumpsys batterystats 원본")
             appendLine()
             appendLine("2. 근거 — 공정거래위원회 고시 「소비자분쟁해결기준」, 품목 \"스마트폰 (명칭 불문하고 이동통신 3세대 이후의 모든 휴대전화 포함)\" (품목명에 \"(스마트워치 포함)\" 명시)")
@@ -296,6 +311,7 @@ object Evidence {
             "wifi-scan-off" to "Wi-Fi 꺼도 스캔 허용 끄기", "ble-scan-off" to "블루투스 꺼도 BLE 스캔 허용 끄기", "adaptive-battery-on" to "적응형 배터리 켜기",
             "app-standby-on" to "앱 대기(App Standby) 켜기", "batterystats-reset" to "배터리 통계 초기화", "aod-off" to "AOD 끄기",
             "gms-rollback" to "Google Play 서비스 업데이트 제거", "reboot" to "워치 재시작",
+            "trim-caches" to "모든 앱 캐시 정리", "gms-restart" to "Play 서비스 다시 시작", doctor.fix.Fixer.UNDO_ALL to "모두 되돌리기",
         )
         fixed[id]?.let { return it }
         val colon = id.indexOf(':')
@@ -310,6 +326,87 @@ object Evidence {
     }
 
     private fun fmt1(x: Double) = String.format(Locale.US, "%.1f", x)
+    /** 신고문에 적는 켜짐·강제 재시작 기록의 기간(일)·개수 */
+    const val RESTART_DAYS = 7
+    const val MAX_RESTARTS = 8
+    private const val DAY_MS = 86_400_000L
+    /** '강제 재시작' 표시 뒤 이만큼 안에 켜졌으면 그 켜짐은 그 강제 재시작 */
+    private const val MARK_TO_BOOT_MS = 15L * 60_000L
+
+    private fun isMark(s: com.mywatch.battery.core.BatterySample) = s.event == Event.USER_NOTE && s.note == GaugeDriftRule.NOTE_FORCED_RESTART
+
+    /**
+     * 증상 쪽 사실 — 워치 15분 기록의 켜짐(부팅)을 최근 [RESTART_DAYS]일 안에서 날짜·시각으로(최근 [MAX_RESTARTS]번까지), 마지막 켜짐(이틀 안)
+     * 전후 대기 소모(워치 배터리 화면의 '재시작 효과'와 같은 계산). 켜짐은 사용자가 한 재시작만이 아니다(방전 뒤 켜짐·업데이트·멈춤 뒤 재부팅·
+     * adb reboot) — 그래서 '시도한 조치'가 아니라 사실로 적고, 알 수 있는 것만 붙인다: '강제 재시작' 표시 뒤 15분 안이면 그 재시작, 1~3%
+     * 다음에 충전기에 꽂힌 채 켜졌으면 방전 뒤 켜짐 (리뷰: 모든 켜짐을 사용자가 해 본 재시작으로 적으면 하지 않은 조치를 했다고 쓰는 셈)
+     */
+    internal fun bootLines(f: Facts, zone: ZoneId): List<String> {
+        val samples = f.watchSamples.sortedBy { it.t }
+        val now = f.collectedAt ?: samples.lastOrNull()?.t ?: return emptyList()
+        val from = now - RESTART_DAYS * DAY_MS
+        val boots = samples.filter { it.event == Event.BOOT && it.t in from..now }
+        if (boots.isEmpty()) return emptyList()
+        val marks = samples.filter { isMark(it) && it.t in from..now }.map { it.t }
+        fun label(b: com.mywatch.battery.core.BatterySample): String {
+            val prev = samples.lastOrNull { it.t < b.t && it.event != Event.BOOT }
+            val tag = when {
+                marks.any { m -> m <= b.t && b.t - m <= MARK_TO_BOOT_MS } -> "(강제 재시작 표시 뒤)"
+                b.plugged && prev != null && prev.level <= 3 -> "(방전 뒤 충전기에서 켜짐)"
+                else -> ""
+            }
+            return day(b.t, zone) + tag
+        }
+        val shown = boots.takeLast(MAX_RESTARTS)
+        val out = arrayListOf("- 워치 켜짐(부팅) 기록, 최근 ${RESTART_DAYS}일 ${boots.size}번: " + shown.joinToString(", ") { label(it) } +
+            (if (boots.size > shown.size) " 외 ${boots.size - shown.size}번" else "") + " — 재시작·업데이트·방전 뒤 켜짐을 모두 셈")
+        RestartEffects.last(samples, now)?.let { e ->
+            val v = e.verdict ?: return@let
+            val b = e.before.percentPerHour ?: return@let
+            val a = e.after.percentPerHour ?: return@let
+            val word = when (v) {
+                com.mywatch.battery.core.RestartEffect.Verdict.BETTER -> "줄었습니다"
+                com.mywatch.battery.core.RestartEffect.Verdict.SAME -> "비슷합니다"
+                com.mywatch.battery.core.RestartEffect.Verdict.WORSE -> "늘었습니다"
+            }
+            out += "- 마지막 켜짐(${day(e.bootAt, zone)}) 전후 대기(화면 꺼짐) 소모: 시간당 ${fmt1(b)}% → ${fmt1(a)}% — $word"
+        }
+        return out
+    }
+
+    /** 시도한 조치 쪽 — 사용자가 워치 배터리 화면에 남긴 '강제 재시작' 표시 (없으면 날짜를 적을 빈칸) */
+    internal fun restartMarks(f: Facts, zone: ZoneId): List<String> {
+        val now = f.collectedAt ?: f.watchSamples.maxOfOrNull { it.t }
+        val marks = if (now == null) emptyList() else f.watchSamples.filter { isMark(it) && it.t in (now - RESTART_DAYS * DAY_MS)..now }.map { it.t }.sorted()
+        if (marks.isEmpty()) return listOf("- 강제 재시작(홈 + 뒤로 가기 7초 이상): $BLANK (날짜·효과)")
+        return listOf("- 강제 재시작(홈 + 뒤로 가기 7초 이상) — 워치 배터리 화면에 남긴 표시: " + marks.takeLast(MAX_RESTARTS).joinToString(", ") { day(it, zone) })
+    }
+
+    /**
+     * 워치 앱 지킴이가 앱별 통계로 본 단계 — 처음 짚은 뒤 재시작(Play 서비스는 PC 치료도)을 했는데도 다시 나타났거나 계속인 알려진 문제
+     * (소견 id → 한 줄). 워치가 아는 것만: 재시작 횟수는 알지만 캐시를 지웠는지는 모른다
+     */
+    internal fun watchStages(f: Facts, findings: List<Finding>): Map<String, String> {
+        val out = LinkedHashMap<String, String>()
+        fun add(id: String, key: String, name: String) {
+            if (findings.none { it.id == id }) return
+            val stage = f.watchMetrics[key] ?: 0.0
+            val how = when {
+                stage >= 2.0 && id == "watch-gms" -> "처음 짚은 뒤 재시작을 두 번 이상 하거나 PC 치료(캐시 정리·Play 서비스 다시 시작)를 한 뒤에도 계속"
+                stage >= 2.0 -> "처음 짚은 뒤 재시작을 두 번 이상 한 뒤에도 계속"
+                stage >= 1.0 -> "처음 짚은 뒤 재시작한 뒤에도 다시 나타남"
+                else -> return
+            }
+            out[id] = "- 워치 앱 지킴이(앱별 통계, 최근 2시간): $name — $how"
+        }
+        add("watch-home", "back_home", "One UI Watch 홈이 화면 꺼진 채 CPU 를 많이 씀")
+        add("watch-gms", "back_gms", "Google Play 서비스 과소모")
+        return out
+    }
+
+    private val dayFmt = DateTimeFormatter.ofPattern("M/d HH:mm")
+    private fun day(t: Long, zone: ZoneId) = Instant.ofEpochMilli(t).atZone(zone).format(dayFmt)
+
     private val stampFmt = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
     private fun stamp(t: Long, zone: ZoneId) = Instant.ofEpochMilli(t).atZone(zone).format(stampFmt)
 }

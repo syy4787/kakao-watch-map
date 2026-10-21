@@ -258,6 +258,26 @@ class BatteryInsightsTest {
         assertTrue(rows.filterIsInstance<Row.Action>().any { it.id == BatteryActivity.A_APP_INFO + "com.google.android.gms" })
     }
 
+    /** 남은 할 일이 업데이트·오류 보내기뿐인 단계면 화면에도 '앱 정보 열기'를 달지 않는다 — 앱 정보로 할 일이 없다 (리뷰) */
+    @Test
+    fun theLastStageHasNoAppInfoButton() {
+        shadowOf(context as Application).grantPermissions("android.permission.BATTERY_STATS")
+        val now = System.currentTimeMillis()
+        for (i in 0..8) log.append(BatterySample(now - (8 - i) * q, 80 - i / 4))
+        val store = HealthStore(context)
+        store.record(now - 2 * 3_600_000L, mapOf("com.google.android.gms" to UidUse("com.google.android.gms")))
+        store.record(now - 60_000L, mapOf("com.google.android.gms" to UidUse("com.google.android.gms", cpuMs = 40 * 60_000L)))
+        fun appInfo(rows: List<Row>) = rows.filterIsInstance<Row.Action>().any { it.id == BatteryActivity.A_APP_INFO + "com.google.android.gms" }
+        assertTrue("처음 단계 — 캐시 삭제가 앱 정보에", appInfo(open().second.rows))
+        // 같은 일(방금 봄)에서 다음 단계 뒤에도 계속인 것으로
+        context.getSharedPreferences(BatteryLog.PREFS, Context.MODE_PRIVATE).edit()
+            .putLong("gs_issue_seen_at_play-services-loop", now).putInt("gs_issue_stage_play-services-loop", 2).commit()
+        val rows = open().second.rows
+        val issue = rows.filterIsInstance<Row.Step>().first { it.key == "issue:play-services-loop" }
+        assertTrue(issue.title, issue.title.endsWith("다음 단계 뒤에도 계속"))
+        assertFalse(appInfo(rows))
+    }
+
     /**
      * 재시작 효과: 시킨 대로 강제 재시작한 뒤 대기 소모가 줄었는지 숫자로 — 배터리 화면(알려진 문제 칸)과 하루 요약에.
      * 재시작 직전 대기 3시간 시간당 4%(그 전 12시간 내내 4%), 재시작 30분 뒤부터 3시간 시간당 1% → '줄었습니다'
@@ -300,7 +320,7 @@ class BatteryInsightsTest {
         Settings.Global.putInt(context.contentResolver, Settings.Global.BOOT_COUNT, 2)
         assertTrue(notes().toString(), notes().any { it.startsWith("재시작 뒤 — 켜진 지 10분이 지나면") })
         // PC 자동 치료 뒤 기준값 전 (리뷰)
-        assertTrue(Guardian.onTreated(context, now, setOf("trim-caches"), source = UidStatsSource { emptyMap() }))
+        assertTrue(Guardian.onTreated(context, now, setOf("trim-caches")))
         assertTrue(notes().toString(), notes().any { it.startsWith("PC 치료 뒤 — 10분이 지나면 앱별 기록을 다시 시작합니다") })
     }
 

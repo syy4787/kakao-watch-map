@@ -275,20 +275,25 @@ object Guardian {
      * 내리고, [TREAT_SETTLE_MS] 뒤 첫 기록에서 앱별 기록을 새로 시작한다 — 재시작처럼 부팅 차례를 하나 올리고 그 앞의 사용량은 빼고(다시
      * 시작한 Play 서비스가 몰아서 하는 일도 빼려고 10분 뒤). 치료 10분 뒤의 PC 수집이 치료 전 기록으로 또 치료를 권하지 않고, 1시간쯤
      * 쌓인 뒤 다시 본다. 단계는 문제마다: Play 서비스를 다시 시작한 치료는 Play 서비스의 다음 단계(PC 치료)를 한 것 — 그 뒤에 또 나타나면
-     * 그다음 단계로. 캐시 정리만으로는 돌고 있는 홈이 그대로라 홈의 단계는 재시작해야 넘어간다. 비정상 소모 판단도 치료 뒤로 다시 잰다.
-     * 앱별 통계 권한이 없으면 아무것도 안 한다(false)
+     * 그다음 단계로(시각이 아니라 치료 횟수로 견준다 — 시계가 바뀌어도). 캐시 정리만으로는 돌고 있는 홈이 그대로라 홈의 단계는 재시작해야
+     * 넘어간다. 비정상 소모 판단은 앱별 통계 권한이 없어도 치료 뒤로 다시 잰다. 돌려주는 값 = 앱별 통계 권한이 있나(없으면 알려진 문제는
+     * 못 본다 — PC 툴킷이 그렇다고 알린다)
      */
-    fun onTreated(context: Context, now: Long = System.currentTimeMillis(), did: Set<String>? = null, source: UidStatsSource? = null): Boolean {
+    fun onTreated(context: Context, now: Long = System.currentTimeMillis(), did: Set<String>? = null): Boolean {
         val c = context.applicationContext
-        if (source == null && !HealthReader(c).available) return false
-        val e = prefs(c).edit().putLong(K_TREAT_PENDING_AT, now).putLong(K_TREATED_AT, now)
-        if (did != null && GMS_RESTART in did) e.putLong(K_TREATED_GMS_AT, now)
+        val stats = HealthReader(c).available
+        // 이 버전 전(v2.43)에 시작돼 단계를 아직 안 적은 일은 지금 단계를 먼저 적어 둔다 — 치료가 올릴 부팅 차례를 재시작으로 읽지 않게 (리뷰)
+        pinLegacyStages(c, now)
+        val p = prefs(c)
+        val e = p.edit().putLong(K_TREAT_PENDING_AT, now).putLong(K_TREATED_AT, now)
+        if (did != null && GMS_RESTART in did) e.putInt(K_GMS_TREATS, p.getInt(K_GMS_TREATS, 0) + 1)
         e.apply()
         // 기준값 전이라 앱별 창이 비어 아무 문제도 찾지 않는다 — 치료 전 판단(타일 줄)을 내린다
         knownIssues(c, now, null, null)
         val what = listOfNotNull("캐시 정리".takeIf { did?.contains("trim-caches") == true }, "Play 서비스 다시 시작".takeIf { did?.contains(GMS_RESTART) == true })
-        noteAction(c, "PC 자동 치료" + (if (what.isEmpty()) "" else "(${what.joinToString("·")})") + " — 10분 뒤부터 앱별 기록을 새로 (알려진 문제는 그 뒤 1시간쯤)")
-        return true
+        noteAction(c, "PC 자동 치료" + (if (what.isEmpty()) "" else "(${what.joinToString("·")})") +
+            if (stats) " — 10분 뒤부터 앱별 기록을 새로 (알려진 문제는 그 뒤 1시간쯤)" else " — 비정상 소모를 치료 뒤로 다시 잼 (앱별 통계 권한 없음)")
+        return stats
     }
 
     /** PC 치료 뒤 앱별 기록의 새 기준값을 아직 남기지 않았다 ([onTreated] — 10분 뒤 첫 기록에서) */
@@ -300,7 +305,8 @@ object Guardian {
     private const val GMS_RESTART = "gms-restart"
     private const val K_TREAT_PENDING_AT = "gs_treat_pending_at"
     private const val K_TREATED_AT = "gs_treated_at"
-    private const val K_TREATED_GMS_AT = "gs_treated_gms_at"
+    /** Play 서비스를 다시 시작한 PC 치료 횟수 — 단계를 적을 때 함께 적고([K_STAGE_TREATS]) 그 뒤에 늘었으면 그 단계 뒤에 치료한 것 */
+    private const val K_GMS_TREATS = "gs_gms_treats"
 
     /** 앱별 통계를 남긴다 — PC 치료 뒤 첫 기록이면 새로 재기 시작(부팅 차례를 올림)하고 그 표시를 지운다 */
     private fun recordSnapshot(c: Context, now: Long, source: UidStatsSource) {
@@ -311,8 +317,10 @@ object Guardian {
     }
 
     /**
-     * 기록을 새로 재기 시작한 때 — 지킴이가 본 마지막 재시작(그 앞 15분 기록 때: 부팅 기록은 한 번짜리 작업이라 늦게 남을 수 있다)이나 PC
-     * 치료 중 늦은 것 (모르면 null). 15분 기록마다 부팅을 적어 두고 바뀌었으면 재시작으로 본다
+     * 기록을 새로 재기 시작한 때 — 지킴이가 본 마지막 재시작(켜진 때: 부팅 기록은 한 번짜리 작업이라 늦게 남거나 빠질 수 있다)이나 PC
+     * 치료 중 늦은 것 (모르면 null). 15분 기록마다 부팅을 적어 두고 바뀌었으면 재시작으로 본다. 켜진 때는 벽시계 − 켜진 뒤 시간 — 그 앞
+     * 15분 기록 뒤에 남은 표본('강제 재시작 표시'처럼 재시작 직전의 잔량)이 출발점이 되지 않게, 시계가 바뀌어 그보다 앞으로 나오면 그 앞
+     * 15분 기록 때 (리뷰)
      */
     private fun freshFrom(c: Context, now: Long): Long? {
         val p = prefs(c)
@@ -321,7 +329,10 @@ object Guardian {
             HealthStore.Boot(p.getInt(K_TICK_BOOT, -1).takeIf { n -> n >= 0 }, it, p.getLong(K_TICK_WALL, -1L).takeIf { w -> w >= 0 })
         }
         var restartAt = p.getLong(K_RESTART_AT, 0L)
-        if (lastBoot != null && boot.rebootedSince(lastBoot)) restartAt = p.getLong(K_TICK_AT, 0L).takeIf { it in 1..now } ?: now
+        if (lastBoot != null && boot.rebootedSince(lastBoot)) {
+            val bootedAt = (now - boot.elapsedMs).coerceIn(0L, now)
+            restartAt = maxOf(p.getLong(K_TICK_AT, 0L).takeIf { it in 1..now } ?: 0L, bootedAt)
+        }
         p.edit().putLong(K_TICK_AT, now).putInt(K_TICK_BOOT, boot.count ?: -1).putLong(K_TICK_ELAPSED, boot.elapsedMs)
             .putLong(K_TICK_WALL, boot.wallMs ?: -1L).putLong(K_RESTART_AT, restartAt).apply()
         return listOf(restartAt, p.getLong(K_TREATED_AT, 0L)).filter { it in 1..now }.maxOrNull()
@@ -463,14 +474,11 @@ object Guardian {
     /** 이틀이 넘게 안 보였던 문제가 다시 나타나면 새 일로 (처음 단계부터) */
     const val ISSUE_RECALL_MS = 48L * 3_600_000L
 
-    /** 재시작(·PC 치료) 뒤에도 또 나타난 문제(id) — [stages] 가 1 이상인 것 */
-    fun cameBack(c: Context, now: Long): Set<String> = stages(c, now).keys
-
     /**
      * 이번 일에서 문제마다 지금 짚으면 몇 번째 단계인가 (0 은 넣지 않는다) — 15분 기록·배터리 화면이 같이 쓴다. 단계는 문제마다 '그 단계를
      * 처음 보인 부팅'을 적어 두고, 그 뒤에 재시작했는데도 또 나타나면 하나 넘긴다(재시작을 연달아 해도 하나씩 — 앞 단계의 할 일이 실제로
-     * 보였어야). Play 서비스는 그 단계를 보인 뒤 PC 치료가 Play 서비스를 다시 시작했으면(그 단계의 다음 할 일) 그다음 단계로. 이틀 넘게 안
-     * 보였으면 새 일. 시계가 뒤로 가 마지막으로 본 때가 미래가 돼도 이어진다 (리뷰)
+     * 보였어야). Play 서비스는 그 단계를 보인 뒤 PC 치료가 Play 서비스를 다시 시작했으면(그 단계의 다음 할 일 — 치료 횟수로 견준다)
+     * 그다음 단계로. 이틀 넘게 안 보였으면 새 일. 시계가 뒤로 가 마지막으로 본 때가 미래가 돼도 이어진다 (리뷰)
      */
     fun stages(c: Context, now: Long): Map<String, Int> {
         val p = prefs(c)
@@ -488,15 +496,16 @@ object Guardian {
         if (!ongoing(p, id, now)) return 0
         val stage = p.getInt("$K_STAGE$id", -1)
         if (stage < 0) {
-            // 이 버전 전(v2.43)에 시작된 일: 처음 본 부팅 차례만 적혀 있다 — 그 차례가 지금보다 앞이면 이미 다음 단계를 본 것으로
+            // 이 버전 전(v2.43)에 시작된 일: 처음 본 부팅 차례만 적혀 있다 — 그 차례가 지금보다 앞이면 이미 다음 단계를 본 것으로. PC 치료가
+            // 차례를 올리기 전에 [pinLegacyStages] 가 단계를 적어 두므로 여기서 견주는 차례는 재시작만 센 것
             val first = p.getInt("$K_SEEN_SEQ$id", -1)
             return if (first >= 0 && first < HealthStore(c).bootSeq()) 1 else 0
         }
-        val shownAt = p.getLong("$K_STAGE_AT$id", 0L)
         val shownBoot = p.getLong("$K_STAGE_ELAPSED$id", -1L).takeIf { it >= 0 }?.let {
             HealthStore.Boot(p.getInt("$K_STAGE_BOOT$id", -1).takeIf { n -> n >= 0 }, it, p.getLong("$K_STAGE_WALL$id", -1L).takeIf { w -> w >= 0 })
         }
-        val treated = id == KnownIssues.PLAY_SERVICES_LOOP && p.getLong(K_TREATED_GMS_AT, 0L) > shownAt
+        // 단계에 치료 횟수가 안 적혀 있으면(이 버전 전 기록) 0 — 횟수는 이 버전의 PC 치료부터 세므로 그 뒤의 치료만 넘긴다 (리뷰)
+        val treated = id == KnownIssues.PLAY_SERVICES_LOOP && p.getInt(K_GMS_TREATS, 0) > p.getInt("$K_STAGE_TREATS$id", 0)
         return when {
             treated -> 2
             shownBoot != null && boot.rebootedSince(shownBoot) -> minOf(stage + 1, 2)
@@ -505,28 +514,46 @@ object Guardian {
     }
 
     /**
-     * 이번에 본 문제를 적는다 — 본 때는 늘 새로, 단계는 바뀌었을 때만(그 단계를 처음 보인 때·부팅과 함께). 새 일이면 처음 단계부터
+     * 이번에 본 문제를 적는다 — 본 때는 늘 새로, 단계는 바뀌었을 때만(그 단계를 처음 보인 부팅·치료 횟수와 함께). 새 일이면 처음 단계부터
      */
     private fun noteSeen(c: Context, now: Long, found: List<com.mywatch.battery.core.KnownIssue>) {
         val p = prefs(c)
         val boot = HealthStore.Boot.now(c)
         val e = p.edit()
         for (i in found.filter { it.id in RESTART_FIRST }) {
-            if (!ongoing(p, i.id, now) || p.getInt("$K_STAGE${i.id}", -1) != i.stage) {
-                e.putInt("$K_STAGE${i.id}", i.stage).putLong("$K_STAGE_AT${i.id}", now).putInt("$K_STAGE_BOOT${i.id}", boot.count ?: -1)
-                    .putLong("$K_STAGE_ELAPSED${i.id}", boot.elapsedMs).putLong("$K_STAGE_WALL${i.id}", boot.wallMs ?: -1L)
-            }
+            if (!ongoing(p, i.id, now) || p.getInt("$K_STAGE${i.id}", -1) != i.stage) writeStage(p, e, i.id, i.stage, boot)
             e.putLong("$K_SEEN_AT${i.id}", now)
         }
         e.apply()
     }
 
-    /** 문제마다: 지금 단계 · 그 단계를 처음 보인 때 · 그때의 부팅 (모두 'gs_issue_stage' 로 시작) */
+    private fun writeStage(p: android.content.SharedPreferences, e: android.content.SharedPreferences.Editor, id: String, stage: Int, boot: HealthStore.Boot) {
+        e.putInt("$K_STAGE$id", stage).putInt("$K_STAGE_BOOT$id", boot.count ?: -1)
+            .putLong("$K_STAGE_ELAPSED$id", boot.elapsedMs).putLong("$K_STAGE_WALL$id", boot.wallMs ?: -1L)
+            .putInt("$K_STAGE_TREATS$id", p.getInt(K_GMS_TREATS, 0))
+    }
+
+    /**
+     * 이 버전 전(v2.43)에 시작돼 이 버전에서 아직 다시 보지 못한 일의 단계를 지금 적어 둔다 — 그 버전이 남긴 '처음 본 부팅 차례'는 재시작만
+     * 세던 차례라, PC 치료가 차례를 올린 뒤에 읽으면 재시작으로 보여 홈을 다음 단계로 넘겼다 (리뷰)
+     */
+    private fun pinLegacyStages(c: Context, now: Long) {
+        val p = prefs(c)
+        val boot = HealthStore.Boot.now(c)
+        val e = p.edit()
+        for (id in RESTART_FIRST) {
+            if (!ongoing(p, id, now) || p.getInt("$K_STAGE$id", -1) >= 0) continue
+            writeStage(p, e, id, stageOf(c, p, id, now, boot), boot)
+        }
+        e.apply()
+    }
+
+    /** 문제마다: 지금 단계 · 그 단계를 처음 보인 부팅 · 그때까지의 Play 서비스 치료 횟수 (모두 'gs_issue_stage' 로 시작) */
     private const val K_STAGE = "gs_issue_stage_"
-    private const val K_STAGE_AT = "gs_issue_stage_at_"
     private const val K_STAGE_BOOT = "gs_issue_stage_boot_"
     private const val K_STAGE_ELAPSED = "gs_issue_stage_elapsed_"
     private const val K_STAGE_WALL = "gs_issue_stage_wall_"
+    private const val K_STAGE_TREATS = "gs_issue_stage_treats_"
 
     /** 이 버전 전(v2.43)이 적던, 이번 일을 처음 본 부팅 차례 — 그때 시작된 일을 이어 가는 데만 읽는다 */
     private const val K_SEEN_SEQ = "gs_issue_seen_seq_"
@@ -704,7 +731,7 @@ object Guardian {
             if (names.isNotEmpty()) append("의심 앱: ${names.joinToString(", ")}. ")
             if (phantom) append("표시 소모의 일부는 잔량 게이지 오차(가짜 소모)로 보입니다 — 배터리 화면 '잔량 표시 점검'을 보세요. ")
             // 재시작 뒤에도 또 나타난 알려진 문제가 있으면 같은 '재시작'을 시키지 않는다 (그 문제 알림·타일과 엇갈리지 않게)
-            if (back) append("재시작 뒤에도 또 나타난 문제가 있습니다 — 배터리 화면 맨 위 '지금 할 일'의 다음 단계를 보세요.")
+            if (back) append("재시작·치료 뒤에도 또 나타난 문제가 있습니다 — 배터리 화면 맨 위 '지금 할 일'의 다음 단계를 보세요.")
             else append("계속되면 홈+뒤로 버튼을 꺼질 때까지 눌러 강제 재시작하세요.")
         }
         val b = NotificationCompat.Builder(c, channel)
@@ -784,6 +811,11 @@ class GuardianReceiver : BroadcastReceiver() {
  * 같은 받는 곳이 PC 수집 직전의 '지금 요약 쓰기'([Guardian.ACTION_SHELL_SUMMARY])와 자동 치료 뒤 '치료함'([Guardian.ACTION_SHELL_TREATED])도 받는다
  */
 class ShellRestoreReceiver : BroadcastReceiver() {
+    companion object {
+        /** '치료함'에 돌려주는 답 — [Guardian.onTreated] 의 결과(앱별 통계 권한이 있나, 실패면 null). PC 툴킷이 이 말로 요약을 고른다 */
+        fun treatedAnswer(r: Boolean?): String = when (r) { true -> "treated:ok"; false -> "treated:nostats"; null -> "treated:none" }
+    }
+
     override fun onReceive(context: Context, intent: Intent) {
         when (intent.action) {
             Guardian.ACTION_SHELL_RESTORE -> {
@@ -799,14 +831,15 @@ class ShellRestoreReceiver : BroadcastReceiver() {
                     pending?.run { resultData = if (ok) "summary:ok" else "summary:none"; finish() }
                 }.start()
             }
-            // PC 자동 치료를 마쳤다 — 앱별 기록을 거기서 새로 (시스템 통계를 읽으니 뒤에서). 결과: 'treated:ok' / 'treated:none'(권한 없음)
+            // PC 자동 치료를 마쳤다 — 앱별 기록을 거기서 새로 (시스템 통계를 읽으니 뒤에서). 결과: 'treated:ok' / 'treated:nostats'(앱별 통계
+            // 권한이 없어 비정상 소모만 치료 뒤로 다시 잼) / 'treated:none'(실패)
             Guardian.ACTION_SHELL_TREATED -> {
                 val app = context.applicationContext
                 val pending: PendingResult? = goAsync()
                 Thread {
                     val did = intent.getStringExtra(Guardian.EXTRA_DID)?.split(',')?.map { it.trim() }?.filter { it.isNotEmpty() }?.toSet()
-                    val ok = runCatching { Guardian.onTreated(app, did = did) }.onFailure { ErrorLog.record("배터리·PC 치료", it) }.getOrDefault(false)
-                    pending?.run { resultData = if (ok) "treated:ok" else "treated:none"; finish() }
+                    val r = runCatching { Guardian.onTreated(app, did = did) }.onFailure { ErrorLog.record("배터리·PC 치료", it) }.getOrNull()
+                    pending?.run { resultData = treatedAnswer(r); finish() }
                 }.start()
             }
         }

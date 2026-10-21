@@ -89,8 +89,8 @@ class BatteryTileFitTest {
             snap("배터리 92%", "시간당 0.4% · 정상", farOff, "One UI Watch 홈 과소모 — 홈 캐시 지우고 재시작"),
             snap("배터리 31%", "시간당 4.0% · 주의", tonight, "Play 서비스 과소모 — 캐시·PC 치료"),
             snap("배터리 31%", "시간당 4.0% · 주의", tonight, "Play 서비스 과소모 — 캐시 지우고 재시작"),
-            snap("배터리 92%", "시간당 0.4% · 정상", farOff, "One UI Watch 홈 과소모 계속 — 오류 보고"),
-            snap("배터리 31%", "시간당 4.0% · 주의", tonight, "Play 서비스 과소모 계속 — 업데이트·보고"),
+            snap("배터리 92%", "시간당 0.4% · 정상", farOff, "One UI Watch 홈 과소모 계속 — 오류 보내기"),
+            snap("배터리 31%", "시간당 4.0% · 주의", tonight, "Play 서비스 과소모 계속 — 업데이트·오류 보내기"),
         )
     }
 

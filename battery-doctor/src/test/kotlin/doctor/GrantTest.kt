@@ -88,7 +88,7 @@ class GrantTest {
             "shell pm revoke $pkg android.permission.WRITE_SECURE_SETTINGS",
             "shell pm revoke $pkg android.permission.BATTERY_STATS",
         ), adb.joined())
-        assertTrue(j.entries().all { it.undone })
+        assertTrue(j.entries().filter { it.id != Fixer.UNDO_ALL }.all { it.undone })
         assertNull(Fixer.lastError)
     }
 

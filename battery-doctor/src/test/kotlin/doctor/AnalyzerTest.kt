@@ -608,6 +608,71 @@ class AnalyzerTest {
         assertEquals(Cause.HARDWARE, v.cause)
     }
 
+    /** 워치 기록이 하루가 안 되면 '워치 기록 24시간'이 아니라 그 길이까지만 이 보고서가 잰 구간 (리뷰) */
+    @Test
+    fun aShortWatchLogLimitsTheMeasuredWindow() {
+        val wm = mapOf("at" to (this.now - 5 * 60_000L).toDouble(), "app_window_min" to 120.0, "issue_home" to 0.0, "seen_home_h" to 10.0)
+        val short = facts(watchSamples = watch(2.5, hours = 6)).copy(watchMetrics = wm)       // dumpsys 8시간 · 워치 기록 6시간
+        assertEquals(Severity.INFO, Analyzer.findings(short).single { it.id == "watch-home-earlier" }.severity)
+        assertEquals(Severity.CAUTION, Analyzer.findings(facts().copy(watchMetrics = wm)).single { it.id == "watch-home-earlier" }.severity)
+    }
+
+    /** 요약에 앱별 기록 창이 없으면(재시작·치료 직후 비었거나 앱별 통계 권한이 없음) '0분치'라 하지 않는다 (리뷰) */
+    @Test
+    fun aMissingAppWindowIsNotZeroMinutes() {
+        val e = Analyzer.findings(facts().copy(watchMetrics = mapOf("at" to (this.now - 5 * 60_000L).toDouble(), "seen_home_h" to 2.5)))
+            .single { it.id == "watch-home-earlier" }
+        assertTrue(e.evidence.toString(), e.evidence.none { it.contains("0분치") } && e.evidence.any { it.contains("앱별 기록이 없어") })
+    }
+
+    /** 지금 짚은 범인이 있으면 다시 재서 견주기는 그 할 일 뒤에 (리뷰: 시험이 없던 갈래) */
+    @Test
+    fun theEarlierStepFollowsTheCulpritSteps() {
+        val vf = facts().copy(watchMetrics = mapOf("at" to (this.now - 5 * 60_000L).toDouble(), "app_window_min" to 20.0, "seen_home_h" to 2.5))
+        val drain = Finding("wakelock:com.example.drain", Severity.ABNORMAL, "com.example.drain 웨이크락", emptyList(), packages = listOf("com.example.drain"), category = "wakelock")
+        val v = Analyzer.verdict(vf, Analyzer.findings(vf) + drain)
+        assertTrue(v.todo.first(), v.todo.first().startsWith("메뉴 4(차단 조치)"))
+        assertTrue(v.todo.last(), v.todo.last().contains("워치가") && v.todo.last().contains("다시 수집"))
+    }
+
+    /**
+     * 워치 요약의 Play 서비스 단계는 방금 쓴 요약일 때만 — 묵은 요약(3시간 넘음)의 '다음 단계 뒤에도 계속'으로, 이 보고서의 dumpsys 만
+     * Play 서비스를 짚은 지금 할 일을 바꾸지 않는다 (리뷰)
+     */
+    @Test
+    fun aStaleWatchStageDoesNotChangeThePlayServicesSteps() {
+        val vf = facts().copy(watchMetrics = mapOf("at" to (this.now - 4 * 3_600_000L).toDouble(), "issue_gms" to 2.0, "back_gms" to 2.0, "app_window_min" to 120.0))
+        val fs = Analyzer.findings(vf)
+        assertTrue("묵은 요약은 소견으로 쓰지 않는다", fs.none { it.id == "watch-gms" })
+        val dumpsysGms = Finding("gms-share", Severity.ABNORMAL, "Play 서비스가 추정 전력의 40%", emptyList(), packages = listOf(Analyzer.GMS), category = "gms")
+        val step = Analyzer.verdict(vf, fs + dumpsysGms).todo.first { it.contains("Play 서비스는") }
+        assertTrue(step, step.contains("캐시 삭제 → 강제 재시작") && !step.contains("재시작·치료 뒤에도 계속"))
+    }
+
+    /**
+     * 오류 보내기는 워치 앱과 같은 경로·같은 말로 — 삼성전자서비스 안내(98474, 2024: 폰의 Galaxy Wearable 앱 › 대시보드 › ⋮ › 설정 › 문의하기 ›
+     * 오류 보내기 · Samsung Members › 도움 받기 › 질문/오류 보내기, 증상 2~3분 안)와 삼성 호주 안내(시스템 로그 데이터 보내기 체크).
+     * 'Samsung Members 앱으로 오류 보고'처럼 한쪽 길만 말하지 않는다 (리뷰)
+     */
+    @Test
+    fun errorReportsUseTheSamePathEverywhere() {
+        val f = Facts(collectedAt = now, packages = listOf(PackageInfo(Analyzer.HOME, 10123, true, false), PackageInfo(Analyzer.GMS, 10045, true, false)),
+            watchMetrics = mapOf("at" to (now - 5 * 60_000L).toDouble(), "issue_home" to 2.0, "back_home" to 2.0, "issue_gms" to 2.0, "back_gms" to 2.0, "app_window_min" to 120.0))
+        val fs = Analyzer.findings(f)
+        val vf = facts().copy(watchMetrics = f.watchMetrics)
+        val v = Analyzer.verdict(vf, Analyzer.findings(vf) + Finding("rate-24h", Severity.ABNORMAL, "24시간 시간당 6.0%", emptyList(), category = "drain"))
+        val hw = Analyzer.verdict(facts(), Analyzer.findings(facts()) + Finding("rate-24h", Severity.ABNORMAL, "24시간 시간당 6.0%", emptyList(), category = "drain"))
+        assertEquals(Cause.HARDWARE, hw.cause)
+        val texts = fs.filter { it.id == "watch-home" || it.id == "watch-gms" }.flatMap { it.evidence } + v.todo + hw.todo
+        val reports = texts.filter { it.contains("오류 보") }
+        assertTrue(texts.toString(), reports.size >= 4)
+        for (t in reports) assertTrue(t, (t.contains(com.mywatch.battery.core.KnownIssues.REPORT) || t.contains("오류 보내기(위 홈 줄과 같은 길)")) && !t.contains("오류 보고"))
+        // 홈·Play 서비스가 함께 마지막 단계여도 긴 경로는 할 일에 한 번만, 경로 뒤에 다른 할 일을 잇지 않는다 (리뷰)
+        val todo = v.todo.joinToString("\n")
+        assertEquals(todo, 1, todo.split(com.mywatch.battery.core.KnownIssues.REPORT).size - 1)
+        assertTrue(todo, todo.lines().none { it.contains(".txt → ") })
+    }
+
     /**
      * Play 서비스는 워치 앱과 같은 순서(캐시 삭제 → 강제 재시작)로. 어시스턴트 업데이트 제거는 2023년 워치6 사례(Play 서비스로 보였지만
      * 어시스턴트였음)의 해결책이라 그렇게 적는다 — '2026년 사례'가 아니다 (출처 확인 · 시나리오 점검)
