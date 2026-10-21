@@ -23,5 +23,7 @@ class HealthReaderKeyTest {
     @Test
     fun theSystemUidKeepsItsName() {
         assertEquals("android+2", HealthReader.groupKey(listOf(home, "android", "com.android.settings")))
+        // 알파벳 순서와 상관없이 'android' (PC 툴킷 packageOf 와 같은 규칙)
+        assertEquals("android+2", HealthReader.groupKey(listOf("aaa.vendor.service", home, "android")))
     }
 }

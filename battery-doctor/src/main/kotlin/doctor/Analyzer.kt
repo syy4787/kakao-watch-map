@@ -37,6 +37,8 @@ object Analyzer {
     const val GMS = "com.google.android.gms"
     /** One UI Watch 홈 (시스템 UI) */
     const val HOME = "com.samsung.android.wearable.sysui"
+    /** 시스템 uid (android.os.Process.SYSTEM_UID) */
+    const val SYSTEM_UID = 1000
 
     private const val DAY_MS = 24 * 3_600_000L
     /** '언제부터' 소견의 갈래 — 범인 앱을 정하지 않는다 ([Finding.blames]) */
@@ -176,6 +178,15 @@ object Analyzer {
             s.wifiScanCount?.takeIf { it > 0 }?.let { n ->
                 if (n / hours > 20) out += Finding("usage-wifi-scan", Severity.CAUTION, "Wi-Fi 스캔 ${n}회(시간당 ${fmt1(n / hours)}회)", listOf("백그라운드 Wi-Fi 스캔이 잦음 — wifi_scan_always_enabled 와 위치 서비스 확인"), source = Rules.SOURCE_USAGE, category = "usage")
             }
+        }
+
+        // One UI Watch 홈이 시스템 uid(1000)를 같이 쓰면 앱별 통계에서 홈만 따로 셀 수 없다 — 이 보고서의 순위도, 워치 앱의
+        // '홈 과소모'도 홈을 짚지 못하니 그렇다고 알린다 (따로 쓰면 조용히)
+        f.packages.firstOrNull { it.name == HOME }?.uid?.takeIf { it == SYSTEM_UID }?.let {
+            out += Finding("home-uid", Severity.INFO, "One UI Watch 홈이 시스템과 같은 uid(1000) — 홈만 따로 셀 수 없음",
+                listOf("앱별 통계는 uid 단위라 홈의 소모가 'android'(시스템)로 합쳐 보입니다 — 이 보고서의 순위와 워치 앱 지킴이의 'One UI Watch 홈 과소모'가 홈을 짚지 못합니다",
+                    "홈이 의심되면 워치의 설정 › 배터리 › 배터리 사용량에서 'One UI Watch 홈' 항목을 직접 보세요"),
+                category = "info")
         }
 
         // 6. 추정 전력 순위 + Play 서비스 패턴 + 계산/실측 차이
