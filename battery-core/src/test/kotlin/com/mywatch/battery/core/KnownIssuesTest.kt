@@ -61,4 +61,34 @@ class KnownIssuesTest {
         )
         assertTrue(KnownIssues.detect(ranks).isEmpty())
     }
+    /**
+     * 타사 시계 화면이 뒤에서(화면이 꺼진 동안에도) CPU·웨이크락을 많이 쓰면 짚는다 — 기본 삼성 시계 화면으로 바꿔 비교하라고.
+     * 삼성·구글 기본 시계 화면(Watch Face Format 렌더러 포함)은 짚지 않는다
+     */
+    @Test
+    fun aHeavyThirdPartyWatchFaceIsAKnownIssue() {
+        val face = "com.jeremysteckling.facerrel"
+        val ranks = AppDrain.rank(
+            listOf(
+                UidUse(face, cpuMs = 14 * 60_000L, wakelockMs = 12 * 60_000L),
+                UidUse("com.samsung.android.wear.shealth", sensorMs = 30 * 60_000L),
+            ),
+            2 * h,
+        )
+        val i = KnownIssues.detect(ranks, watchFace = face).single()
+        assertEquals(KnownIssues.WATCH_FACE_HEAVY, i.id)
+        assertEquals(face, i.pkg)
+        assertTrue(i.steps.first(), i.steps.first().contains("기본"))
+        assertTrue(i.grade != Grade.NORMAL)
+        // 같은 앱이라도 지금 시계 화면이 아니면 시계 화면 문제가 아니다
+        assertTrue(KnownIssues.detect(ranks, watchFace = "com.other.face").none { it.id == KnownIssues.WATCH_FACE_HEAVY })
+        // 삼성 기본 시계 화면·WFF 렌더러는 짚지 않는다
+        val samsung = AppDrain.rank(listOf(UidUse("com.samsung.android.watch.watchface.analogmodular", cpuMs = 30 * 60_000L)), 2 * h)
+        assertTrue(KnownIssues.detect(samsung, watchFace = "com.samsung.android.watch.watchface.analogmodular").isEmpty())
+        // 조금만 쓰면 그대로
+        val light = AppDrain.rank(listOf(UidUse(face, cpuMs = 60_000L)), 2 * h)
+        assertTrue(KnownIssues.detect(light, watchFace = face).isEmpty())
+        assertTrue(KnownIssues.isSystemFace("com.google.wear.watchface.runtime"))
+        assertTrue(!KnownIssues.isSystemFace(face))
+    }
 }

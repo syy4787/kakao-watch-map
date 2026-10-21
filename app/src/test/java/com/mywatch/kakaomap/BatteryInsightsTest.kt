@@ -201,6 +201,28 @@ class BatteryInsightsTest {
         assertTrue(rows.filterIsInstance<Row.Action>().any { it.id == BatteryActivity.A_APP_INFO + "com.google.android.gms" })
     }
 
+    /** 타사 시계 화면이 웨이크락·CPU 를 많이 쓰면 배터리 화면에 '기본 시계 화면으로 바꿔 비교'를, 맨 위엔 지금 시계 화면 이름을 */
+    @Test
+    fun aHeavyThirdPartyWatchFaceIsShownWithTheFix() {
+        shadowOf(context as Application).grantPermissions("android.permission.BATTERY_STATS")
+        val face = "com.jeremysteckling.facerrel"
+        com.mywatch.kakaomap.battery.BatteryInsights.watchFace = { face }
+        try {
+            val now = System.currentTimeMillis()
+            for (i in 0..12) log.append(BatterySample(now - (12 - i) * q, 80 - i))
+            val store = HealthStore(context)
+            store.record(now - 2 * 3_600_000L, mapOf(face to UidUse(face)))
+            store.record(now - 3_600_000L, mapOf(face to UidUse(face, cpuMs = 8 * 60_000L, wakelockMs = 6 * 60_000L, fgMs = 60 * 60_000L)))
+            store.record(now - 60_000L, mapOf(face to UidUse(face, cpuMs = 16 * 60_000L, wakelockMs = 12 * 60_000L, fgMs = 120 * 60_000L)))
+            val (_, adapter) = open()
+            val issue = adapter.rows.filterIsInstance<Row.Step>().first { it.key == "issue:watch-face-heavy" }
+            assertTrue(issue.sub ?: "", (issue.sub ?: "").contains("기본 삼성 시계 화면"))
+            assertTrue(adapter.rows.filterIsInstance<Row.Note>().any { it.text.startsWith("지금 시계 화면") })
+        } finally {
+            com.mywatch.kakaomap.battery.BatteryInsights.watchFace = com.mywatch.kakaomap.battery.BatteryInsights.DEFAULT_FACE
+        }
+    }
+
     /** 화면이 하루 수백 번 켜졌다 금방 꺼지면(손목 올려 켜기 오작동) 그 횟수와 끌 설정을 알려 준다. 알림이 켠 것은 앱별로 */
     @Test
     fun manyShortWakesAndNotificationWakesGetAdvice() {

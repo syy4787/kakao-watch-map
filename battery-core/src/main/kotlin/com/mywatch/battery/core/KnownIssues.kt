@@ -25,9 +25,22 @@ data class KnownIssue(
 object KnownIssues {
     const val GMS = "com.google.android.gms"
     const val PLAY_SERVICES_LOOP = "play-services-loop"
+    const val WATCH_FACE_HEAVY = "watch-face-heavy"
     const val SHARE = 0.4
 
-    fun detect(ranks: List<AppDrainRank>): List<KnownIssue> {
+    /** 삼성·구글 기본 시계 화면과 Watch Face Format 렌더러 — 시계 화면 문제로 짚지 않는다 */
+    private val SYSTEM_FACES = listOf(
+        "com.samsung.android.watch.watchface", "com.samsung.android.wear", "com.samsung.android.app.watchface",
+        "com.google.android.wearable", "com.google.wear.watchface", "com.google.android.apps.wearable",
+    )
+
+    fun isSystemFace(pkg: String): Boolean = SYSTEM_FACES.any { pkg.startsWith(it) }
+
+    /**
+     * [watchFace] = 지금 시계 화면의 패키지 (모르면 null), [windowMs] = 순위를 모은 시간 — 시계 화면은 늘 '보이는' 상태라
+     * 화면 밖 CPU 표시가 붙지 않으므로 CPU 를 시간당으로 따로 본다
+     */
+    fun detect(ranks: List<AppDrainRank>, watchFace: String? = null, windowMs: Long? = null): List<KnownIssue> {
         if (ranks.isEmpty()) return emptyList()
         val total = ranks.sumOf { it.score }
         val out = ArrayList<KnownIssue>()
@@ -44,6 +57,27 @@ object KnownIssues {
                     ),
                     r.grade,
                 )
+            }
+        }
+        // 타사 시계 화면이 웨이크락·CPU 를 많이 씀 — 기본 시계 화면으로 바꿔 비교 (Play 스토어도 2025년부터 배터리 경고를 단다)
+        if (watchFace != null && !isSystemFace(watchFace)) {
+            ranks.firstOrNull { it.use.pkg.substringBefore('+') == watchFace }?.let { r ->
+                val cpuPerH = windowMs?.let { w -> r.use.cpuMs / (w / 3_600_000.0).coerceAtLeast(0.25) }
+                val busyCpu = cpuPerH != null && cpuPerH > AppDrain.CPU_CAUTION_MS_PER_H
+                if (r.grade != Grade.NORMAL || busyCpu) {
+                    val cpuNote = cpuPerH?.takeIf { busyCpu }?.let { "CPU 시간당 ${(it / 60_000).toInt()}분" }
+                    out += KnownIssue(
+                        WATCH_FACE_HEAVY, watchFace,
+                        "지금 시계 화면이 배터리를 많이 씀",
+                        (listOfNotNull(cpuNote) + r.flags.filter { it != "이 앱" } + r.summary).distinct().joinToString(" · "),
+                        listOf(
+                            "시계 화면을 길게 눌러 기본 삼성 시계 화면으로 바꾸고 하루 소모를 비교해 보세요",
+                            "계속 쓰려면 그 시계 화면의 날씨·심박 같은 정보 칸(컴플리케이션)과 초침을 줄이세요",
+                            "Play 스토어의 그 시계 화면 정보에 '배터리 사용량이 많음' 경고가 있으면 다른 것으로",
+                        ),
+                        if (r.grade == Grade.NORMAL) Grade.CAUTION else r.grade,
+                    )
+                }
             }
         }
         return out

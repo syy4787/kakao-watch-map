@@ -14,6 +14,7 @@ import com.mywatch.battery.core.DrainAnalyzer
 import com.mywatch.battery.core.Event
 import com.mywatch.battery.core.GaugeDriftRule
 import com.mywatch.battery.core.Grade
+import com.mywatch.battery.core.KnownIssues
 import com.mywatch.battery.core.Projection
 import com.mywatch.battery.core.Rate
 import com.mywatch.battery.core.Thresholds
@@ -304,10 +305,14 @@ class BatteryActivity : ComponentActivity() {
             rows += Row.Note("PC 툴킷 메뉴 7(권한 주기) 뒤에 보입니다")
             return rows
         }
+        insights?.watchFace?.let { f ->
+            rows += Row.Note("지금 시계 화면: ${HealthStore.label(this, f)}" + if (KnownIssues.isSystemFace(f)) " (기본)" else " (타사)")
+        }
         insights?.issues?.forEach { i ->
             rows += Row.Step(color(i.grade), R.drawable.ic_warning, i.grade.label, i.title,
                 (listOf(i.why) + i.steps.mapIndexed { n, st -> "${n + 1}) $st" }).joinToString("\n"), key = "issue:${i.id}")
-            rows += Row.Action("$A_APP_INFO${i.pkg}", R.drawable.ic_edit, "Play 서비스 앱 정보 열기", accent = true)
+            val name = if (i.pkg == KnownIssues.GMS) "Play 서비스" else HealthStore.label(this, i.pkg)
+            rows += Row.Action("$A_APP_INFO${i.pkg}", R.drawable.ic_edit, "$name 앱 정보 열기", accent = true)
         }
         val ranked = insights?.culprits.orEmpty()
         if (ranked.isEmpty()) { rows += Row.Note("아직 두 번째 기록 전입니다 (15분 뒤부터)"); return rows }

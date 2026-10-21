@@ -122,6 +122,7 @@ object BatterySummary {
                 w.topNotifiers.take(3).joinToString(", ") { "${it.first} ${it.second}" } + ")")
             w.advice().forEach { appendLine(" · $it") }
         }
+        insights?.watchFace?.let { appendLine("[시계 화면] $it") }
         insights?.issues?.forEach { i ->
             appendLine("[알려진 문제] ${i.title} — ${i.why}")
             i.steps.forEachIndexed { n, st -> appendLine("  ${n + 1}) $st") }

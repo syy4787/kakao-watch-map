@@ -173,7 +173,9 @@ object Guardian {
      * 그 앱 정보 바로 가기를 알린다 (12시간에 한 번). 권한(BATTERY_STATS)이 있어야 앱별 사용량을 안다
      */
     private fun checkKnownIssues(c: Context, now: Long) {
-        val issue = KnownIssues.detect(culprits(c, now)).firstOrNull { it.grade == Grade.ABNORMAL } ?: return
+        val (ranks, window) = culpritsInWindow(c, now)
+        val face = runCatching { BatteryInsights.watchFace(c) }.getOrNull()
+        val issue = KnownIssues.detect(ranks, face, window.takeIf { it > 0 }).firstOrNull { it.grade == Grade.ABNORMAL } ?: return
         val p = prefs(c)
         val last = p.getLong(K_S_ISSUE_AT, 0L)
         if (last > 0 && now - last < ISSUE_COOLDOWN_MS) return
@@ -187,7 +189,8 @@ object Guardian {
             .setStyle(NotificationCompat.BigTextStyle().bigText(text))
             .setContentIntent(openScreen(c))
             .setAutoCancel(true)
-            .addAction(0, "Play 서비스 앱 정보", PendingIntent.getActivity(c, 4, info, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT))
+            .addAction(0, if (issue.pkg == KnownIssues.GMS) "Play 서비스 앱 정보" else "${HealthStore.label(c, issue.pkg)} 앱 정보",
+                PendingIntent.getActivity(c, 4, info, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT))
             .build()
         nm.notify(N_ISSUE, n)
         p.edit().putLong(K_S_ISSUE_AT, now).apply()
@@ -265,10 +268,14 @@ object Guardian {
     }
 
     /** 최근 2시간 가장 많이 쓴 앱들 (권한이 없으면 빈 목록) */
-    fun culprits(c: Context, now: Long): List<AppDrainRank> {
+    fun culprits(c: Context, now: Long): List<AppDrainRank> = culpritsInWindow(c, now).first
+
+    /** [culprits] 와 그 순위를 모은 시간(ms) */
+    fun culpritsInWindow(c: Context, now: Long): Pair<List<AppDrainRank>, Long> {
         val (uses, covered) = runCatching { HealthStore(c).recent(2, now) }.getOrDefault(emptyList<com.mywatch.battery.core.UidUse>() to 0L)
-        if (uses.isEmpty()) return emptyList()
-        return AppDrain.rank(uses, covered.coerceAtLeast(15 * 60_000L), ownPkg = c.packageName)
+        if (uses.isEmpty()) return emptyList<AppDrainRank>() to 0L
+        val window = covered.coerceAtLeast(15 * 60_000L)
+        return AppDrain.rank(uses, window, ownPkg = c.packageName) to window
     }
 
     internal fun channel(c: Context): NotificationManager? {

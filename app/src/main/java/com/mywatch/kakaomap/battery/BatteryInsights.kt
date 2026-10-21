@@ -40,9 +40,20 @@ data class Insights(
     val levers: String? = null,
     /** 24시간 그래프 (표본이 2개 이상일 때) */
     val chart: DrainChartModel? = null,
+    /** 지금 시계 화면의 패키지 (모르면 null) */
+    val watchFace: String? = null,
 )
 
 object BatteryInsights {
+    /** 지금 시계 화면(라이브 배경화면)의 패키지 — 모든 앱 보기 권한(QUERY_ALL_PACKAGES)이 있어 읽을 수 있다 */
+    val DEFAULT_FACE: (Context) -> String? = { c ->
+        runCatching { android.app.WallpaperManager.getInstance(c).wallpaperInfo?.packageName }.getOrNull()
+    }
+
+    /** 시험에선 바꿔 끼운다 */
+    @Volatile
+    var watchFace: (Context) -> String? = DEFAULT_FACE
+
     /** 무거운 계산은 부르는 쪽이 IO 스레드에서 */
     fun compute(context: Context, samples: List<BatterySample>, now: Long = System.currentTimeMillis(), zone: ZoneId = ZoneId.systemDefault()): Insights {
         val c = context.applicationContext
@@ -54,15 +65,16 @@ object BatteryInsights {
             UsageSplit.analyze(samples, usage?.screen, usage?.apps.orEmpty(), HealthStore(c).windows(24, now), now, zone, ownPkg = c.packageName)
         }.onFailure { ErrorLog.record("배터리·사용 내역", it) }.getOrNull()
         val wakes = usage?.let { u -> runCatching { Wakes.analyze(u.screen, u.notifications, now - 24 * 3_600_000L, now, breakdown?.screenPph) }.getOrNull() }
-        val culprits = runCatching { Guardian.culprits(c, now) }.getOrDefault(emptyList())
+        val (culprits, window) = runCatching { Guardian.culpritsInWindow(c, now) }.getOrDefault(emptyList<AppDrainRank>() to 0L)
         val night = runCatching { NightCulprits.lastNight(HealthStore(c).windows(24, now), now, zone, c.packageName) }.getOrNull()
-        val issues = KnownIssues.detect(culprits)
+        val face = runCatching { watchFace(c) }.getOrNull()
+        val issues = KnownIssues.detect(culprits, face, window.takeIf { it > 0 })
         val effect = runCatching { LeverEffects.nightMode(samples, GuardianJournal(c).nightSessions(now), now, zone) }
             .getOrDefault(LeverEffect(emptyList(), emptyList()))
         val levers = runCatching { Levers(c).checkLine(Guardian.state(c).saverBroken) }.getOrNull()
         val chart = runCatching {
             DrainChart.buildOrNull(samples, now, zone, screen = usage?.screen, hot = breakdown?.steepest.orEmpty().map { it.start to it.end })
         }.onFailure { ErrorLog.record("배터리·그래프", it) }.getOrNull()
-        return Insights(analysis, breakdown, culprits, issues, effect, wakes, night, levers, chart)
+        return Insights(analysis, breakdown, culprits, issues, effect, wakes, night, levers, chart, face)
     }
 }
