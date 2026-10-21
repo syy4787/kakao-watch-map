@@ -53,6 +53,8 @@ class WakeStatsTest {
         // 삼성 안내의 경로 그대로 (워치 설정 › 를 빼먹지 않게 — 리뷰에서 찾음)
         assertTrue(detail, detail.contains("웨어러블 앱 › 워치 설정 › 알림 › 고급 설정 › '알림 받으면 화면 켜기' 끄기") && TodoText.fitsDetail(detail))
         assertTrue(advice.toString(), advice.any { it.contains("'알림 받으면 화면 켜기'") && it.contains("알림은 그대로") })
+        // 삼성 배터리 안내는 같은 곳의 '세부 내용 자동 보기'도 끄라고 한다 — 한국어 메뉴 이름 그대로
+        assertTrue(advice.toString(), advice.any { it.contains("'알림 수신 8초 내 확인 시 상세 내용 바로보기'") })
     }
 
     /**
