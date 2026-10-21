@@ -188,8 +188,8 @@ tasks.withType<Test>().configureEach {
     if (!project.hasProperty("render")) exclude("**/render/**")
     // Gradle 의 테스트 JVM 기본 힙은 512MB — Robolectric 샌드박스가 쌓이면 끝 무렵에 테스트 프로세스가 통째로 죽는다(종료 코드 1)
     maxHeapSize = "2g"
-    // Robolectric 의 안드로이드 16(SDK 36) 샌드박스가 JDK 21 에서 FileDescriptor 내부(SharedSecrets)를 건드린다 — 타일 맞춤 시험을 워치9 와
-    // 같은 안드로이드 16 으로도 돌리려고
+    // Robolectric 의 안드로이드 16(SDK 36) 샌드박스가 JDK 21 에서 FileDescriptor 내부(SharedSecrets)를 건드린다 — 타일 맞춤 시험을 워치9
+    // (Wear OS 6~7 = 안드로이드 16~17)와 같거나 가장 가까운 안드로이드 16 으로도 돌리려고 (Robolectric 은 아직 17 이 없다)
     jvmArgs("--add-opens=java.base/java.io=ALL-UNNAMED", "--add-opens=java.base/jdk.internal.access=ALL-UNNAMED", "--add-exports=java.base/jdk.internal.access=ALL-UNNAMED")
     // 유튜브 화면 무작위 사용자 시뮬레이션 씨앗 범위 (예: -Ptube.seeds=1..1000) — 평소엔 테스트에 적힌 기본값
     project.findProperty("tube.seeds")?.let { systemProperty("tube.seeds", it) }
