@@ -99,6 +99,8 @@ class HealthStore(context: Context) {
         val windows = ArrayList<List<UidUse>>()
         var covered = 0L
         deltas.forEachLine { line ->
+            // 창 밖 줄은 앞의 날짜만 보고 건너뛴다 (24시간치를 15분마다 다 풀지 않게)
+            fastT(line)?.let { if (it < from || it > now) return@forEachLine }
             val o = runCatching { JSONObject(line) }.getOrNull() ?: return@forEachLine
             val t = o.optLong("t")
             if (t < from || t > now) return@forEachLine
@@ -116,6 +118,7 @@ class HealthStore(context: Context) {
         val from = now - hours * 3_600_000L
         val out = ArrayList<TimedUse>()
         deltas.forEachLine { line ->
+            fastT(line)?.let { if (it < from || it > now) return@forEachLine }
             val o = runCatching { JSONObject(line) }.getOrNull() ?: return@forEachLine
             val t = o.optLong("t")
             if (t < from || t > now) return@forEachLine
@@ -158,6 +161,10 @@ class HealthStore(context: Context) {
 
     companion object {
         const val MAX_PER_ROW = 25
+        private val T_PREFIX = Regex("^\\{\"t\":(-?\\d+)[,}]")
+
+        /** 줄 맨 앞 '{"t":숫자' 의 시각 — 우리가 쓴 줄은 늘 t 가 먼저다. 모양이 다르면 null (그땐 통째로 푼다) */
+        internal fun fastT(line: String): Long? = T_PREFIX.find(line)?.groupValues?.get(1)?.toLongOrNull()
 
         /** 패키지 이름 → 화면에 보일 이름 (공유 uid 는 첫 패키지 기준) */
         fun label(context: Context, pkg: String): String {

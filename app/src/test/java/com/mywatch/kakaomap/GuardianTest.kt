@@ -235,6 +235,39 @@ class GuardianTest {
         assertEquals("com.example.x 외 2", HealthStore.label(context, "com.example.x+2"))
     }
 
+    /**
+     * 15분마다 최근 2시간만 필요하다 — 24시간치 줄은 날짜만 보고 건너뛴다(JSON 을 다 풀지 않음). 그래서 옛 줄이 깨져 있어도 상관없고,
+     * 날짜를 앞에서 못 읽는 줄은 예전처럼 통째로 풀어 본다
+     */
+    @Test
+    fun recentHealthSkipsOldLinesByTheirTimestamp() {
+        val store = HealthStore(context)
+        val dir = BatteryLog(context).dir.apply { mkdirs() }
+        val f = java.io.File(dir, "health_deltas.jsonl")
+        val t = at(10, 0)
+        f.writeText(
+            "{\"t\":${t - 5 * 3_600_000L},\"ms\":900000,\"d\":[{\"p\":\"old\",\"wl\":5 BROKEN\n" +
+                "{\"t\":${t - q},\"ms\":900000,\"d\":[{\"p\":\"a\",\"wl\":1000}]}\n" +
+                "{\"ms\":900000,\"t\":$t,\"d\":[{\"p\":\"a\",\"wl\":500}]}\n"
+        )
+        val (sum, covered) = store.recent(2, t)
+        assertEquals(1_500L, sum.single { it.pkg == "a" }.wakelockMs)
+        assertEquals(2 * q, covered)
+        assertEquals(listOf(t - q, t), store.windows(2, t).map { it.t })
+    }
+
+    /** 요약을 못 쓴 날도 15분마다 다시 30일치를 읽고 분석하지 않는다 — 다음 날 다시 */
+    @Test
+    fun aFailedDailySummaryIsNotRetriedEveryQuarterHour() {
+        fill(at(14, 0), 9, 80.0, 1.0)
+        log.summaryFile.parentFile?.mkdirs()
+        log.summaryFile.mkdirs()      // 요약 파일 자리에 폴더 → 쓰기 실패
+        runCatching { com.mywatch.kakaomap.battery.BatterySummary.writeDailyIfDue(context, log, at(14, 0)) }
+        val p = context.getSharedPreferences(BatteryLog.PREFS, Context.MODE_PRIVATE)
+        assertEquals(at(14, 0), p.getLong("summary_written_at", 0L))
+        log.summaryFile.delete()
+    }
+
     /** 밤 모드: 손목 올림·화면 터치로 켜지는 것도 끄고(이 워치에 그 설정이 있을 때) 아침에 원래대로. 'Hey Google' 은 기본으로 그대로 */
     @Test
     fun nightTurnsWakeGesturesOffAndMorningRestoresThem() {

@@ -74,8 +74,11 @@ object Guardian {
     const val ISSUE_COOLDOWN_MS = 12L * 3_600_000L
     /** 지킴이 판단에 읽는 기록 (일) */
     const val RECENT_DAYS = 3
-    /** 화면 켜짐을 볼 창 (하루 — 이 안에 기록이 있어야 사용 통계를 믿는다) */
-    const val SCREEN_LOOKBACK_MS = 24L * 3_600_000L
+    /**
+     * 화면 켜짐을 볼 창 — 이 안에 기록이 있어야 사용 통계를 믿는다. 15분마다 읽으니 짧게(6시간): 그보다 오래 꺼져 있었으면
+     * 표본으로 어림해도 '밤 모드 시작'(30분)·'최근 2시간 화면' 판단은 같다
+     */
+    const val SCREEN_LOOKBACK_MS = 6L * 3_600_000L
     /** 마지막으로 알린 드리프트(포인트) — 알림에서 보정을 시작할 때 '시작 때 오차'로 */
     internal const val K_S_LAST_DRIFT = "gs_last_drift"
     private const val K_LAST_ACTION = "gs_last_action"
