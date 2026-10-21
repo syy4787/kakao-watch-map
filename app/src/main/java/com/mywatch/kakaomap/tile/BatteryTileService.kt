@@ -104,15 +104,18 @@ class BatteryTileService : Material3TileService() {
             // 소모율은 위 줄에 있으니 언제 15%·0% 인지만 (작은 글씨 두 줄에 0% 시각이 잘리지 않게)
             val forecast = Projection.forecast(samples, now)?.short(zone, now)
                 ?: if (last?.plugged == true) "충전기에서 빼면 다시 잽니다" else "앞날은 2시간 기록 뒤부터"
-            // 알려진 문제는 15분 기록(지킴이)이 찾아 적어 둔 것 — 타일이 앱별 통계 파일을 읽지 않게
-            val issue = runCatching { Guardian.tileIssue(c, now) }.getOrNull()
+            // 알려진 문제는 15분 기록(지킴이)이 찾아 적어 둔 그 문제의 할 일 한 줄 — 타일이 앱별 통계 파일을 읽지 않게
+            val issue = runCatching { Guardian.tileIssueGraded(c, now) }.getOrNull()
             val st = Guardian.state(c)
             val trendLine = runCatching { com.mywatch.kakaomap.battery.BatteryAlerts.trendLine(c, now) }.getOrNull()
+            // 절전이 실제로 켜졌을 때만 '절전 켬' (설정으로 안 켜지는 워치이거나 못 켰으면 아니다)
+            val saverOn = !st.saverBroken && runCatching { com.mywatch.kakaomap.battery.Levers(c).saverOn() }.getOrDefault(false)
             val status = when {
-                issue != null -> issue.substringBefore(" —") + " — 캐시 지우기"
+                issue != null && issue.second == Grade.ABNORMAL -> issue.first
                 // 지금 바꿔 둔 것이 먼저 — 무엇이 꺼져 있는지 알아야 한다
                 st.nightActive -> "지킴이: 밤 모드 중 (아침·충전 때 원래대로)"
-                st.abnormalActive -> "지킴이: 비정상 소모 — 절전 켬"
+                st.abnormalActive -> if (saverOn) "지킴이: 비정상 소모 — 절전 켬" else "지킴이: 비정상 소모 감지"
+                issue != null -> issue.first
                 // 최근 며칠 대기 소모가 늘었으면 그 무렵 바뀐 것 (하루 요약이 정해 둔 줄)
                 trendLine != null -> trendLine
                 else -> a?.drift?.takeIf { it.suspicious }?.headline?.substringAfter("— ")?.let { "잔량 표시: $it" } ?: "지킴이: 대기 중"

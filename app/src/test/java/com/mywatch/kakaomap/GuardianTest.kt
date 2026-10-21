@@ -228,6 +228,24 @@ class GuardianTest {
         assertFalse(Levers(context).holdsAnything)
         val text = shadowOf(nm).getNotification(Guardian.N_RELEASE).extras.getCharSequence(Notification.EXTRA_BIG_TEXT).toString()
         assertTrue(text, text.contains("AOD 켜기") && text.contains("손목 올려 켜기"))
+        // 권한만 다시 주는 것은 메뉴 7 (메뉴 8 자동 치료는 앱 제한·통계 초기화까지 한다 — 리뷰에서 찾음)
+        assertTrue(text, text.contains("메뉴 7"))
+    }
+
+    /** 알림의 '되돌리기'에서 권한이 없어 못 되돌린 것이 있으면 무엇을 직접 켤지 알린다 (조용히 내려놓지 않게 — 리뷰에서 찾음) */
+    @Test
+    fun theNotificationsRestoreTellsWhatItCouldNotUndo() {
+        grant()
+        Settings.Global.putInt(cr, "low_power", 0)
+        assertTrue(Levers(context).applyAbnormal())
+        shadowOf(context.getSystemService(PowerManager::class.java)).setIsPowerSaveMode(true)
+        Levers.writeHook = { _, _ -> false }
+        try {
+            com.mywatch.kakaomap.battery.GuardianReceiver().onReceive(context, android.content.Intent(Guardian.ACTION_RESTORE))
+        } finally { Levers.writeHook = null }
+        val n = shadowOf(nm).getNotification(Guardian.N_RELEASE)
+        assertNotNull(n)
+        assertTrue(n.extras.getCharSequence(Notification.EXTRA_BIG_TEXT).toString().contains("절전 모드 끄기"))
     }
 
     /** 설정으로 켠 절전은 '끈 채 유지(sticky)' 표시가 남아 충전 뒤 다시 켜진다 — 원래 꺼져 있었으면 되돌릴 때 그 표시도 지운다 (점검에서 찾음) */
@@ -298,6 +316,31 @@ class GuardianTest {
         fill(at(11, 15), 9, 80.0, 4.0)
         Guardian.tick(context, log, at(11, 15), stats = stats, zone = zone)
         assertEquals(3, takes)
+    }
+
+    /**
+     * 앱별 통계 파일은 120KB 를 넘어도 맨 앞 줄이 26시간 안이면 아직 자르지 않는다 — 소모가 높아 15분마다 스냅샷을 남길 때
+     * 15분마다 파일을 통째로 읽고 다시 쓰지 않게(2시간에 한 번쯤). 26시간이 넘으면 24시간치만 남긴다 (리뷰에서 찾음)
+     */
+    @Test
+    fun theStatsFileIsNotRewrittenEveryQuarterHour() {
+        val store = HealthStore(context)
+        val file = java.io.File(BatteryLog(context).dir, "health_deltas.jsonl")
+        file.delete()
+        val head = at(0, 0, d = 19)
+        var cpu = 0L
+        fun snap(t: Long) { cpu += 1_000L; store.record(t, (1..25).associate { k -> "com.example.app$k" to UidUse("com.example.app$k", cpuMs = cpu + k) }) }
+        snap(head - q)
+        snap(head)                               // 맨 앞 줄
+        // 16시간 뒤부터 10분마다 — 130KB 가 될 때 맨 앞 줄은 24~26시간 전 (그 전 코드는 24시간 넘은 줄을 그때마다 잘랐다)
+        var t = head + 16 * 3_600_000L
+        while (file.length() < 130_000L) { snap(t); t += 10 * 60_000L }
+        val last = t - 10 * 60_000L
+        assertTrue("전제: 맨 앞 줄이 24~26시간 전", last - head in 24 * 3_600_000L until 26 * 3_600_000L)
+        assertTrue("맨 앞 줄이 26시간 안 — 아직 안 자름", store.windows(30, last).any { it.t == head })
+        // 26시간이 넘으면 24시간치만 남긴다
+        snap(head + 27 * 3_600_000L)
+        assertTrue(store.windows(30, head + 27 * 3_600_000L).none { it.t == head })
     }
 
     @Test

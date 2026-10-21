@@ -216,7 +216,9 @@ object Analyzer {
             }
         }
         f.watch?.anomalies?.takeIf { it.isNotEmpty() }?.let { list ->
-            val hard = list.filter { it.kind != AnomalyKind.CLIFF }
+            // 판정(비정상 → 게이지 고장)엔 최근 7일 것만 — 워치 판정과 같게. 그 앞의 것은 증거 줄로만
+            val since = (f.collectedAt ?: list.maxOf { it.t }) - com.mywatch.battery.core.DrainAnalyzer.RECENT_ANOMALY_MS
+            val hard = list.filter { it.kind != AnomalyKind.CLIFF && it.t >= since }
             val sev = if (hard.isNotEmpty()) Severity.ABNORMAL else Severity.CAUTION
             val kinds = list.groupBy { it.kind }.entries.joinToString(", ") { "${it.value.first().label} ${it.value.size}회" }
             out += Finding("gauge-watch", sev, "워치 기록의 잔량 표시 이상 ${list.size}회 ($kinds) — ${sev.label}",

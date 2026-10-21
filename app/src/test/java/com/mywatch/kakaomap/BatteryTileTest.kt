@@ -81,6 +81,43 @@ class BatteryTileTest {
         assertFalse(BatteryTileService.snapshot(context, now + 4 * 3_600_000L, zone).status.contains("캐시"))
     }
 
+    /**
+     * 알려진 문제마다 그 문제의 할 일 — 무거운 시계 화면에 '캐시 지우기'라 하지 않는다. 주의 등급 문제는 지킴이가 지금 바꿔 둔
+     * 상태(밤 모드) 다음 (리뷰에서 찾음)
+     */
+    @Test
+    fun aWatchFaceIssueSaysToSwitchFacesNotClearCache() {
+        val now = at(12)
+        drain(now, 9, 63.0, 4.0)
+        com.mywatch.kakaomap.battery.BatteryInsights.watchFace = { "com.example.face" }
+        try {
+            var cpu = 0L
+            val stats = com.mywatch.kakaomap.battery.UidStatsSource { mapOf("com.example.face" to UidUse("com.example.face", cpuMs = cpu)) }
+            Guardian.tick(context, log, now - 2 * 3_600_000L, stats = stats, zone = zone)
+            cpu = 12 * 60_000L   // 화면 밖 CPU 시간당 6분 — 주의 등급
+            Guardian.tick(context, log, now - 60_000L, stats = stats, zone = zone)
+        } finally {
+            com.mywatch.kakaomap.battery.BatteryInsights.watchFace = com.mywatch.kakaomap.battery.BatteryInsights.DEFAULT_FACE
+        }
+        val s = BatteryTileService.snapshot(context, now, zone).status
+        assertTrue(s, s.contains("시계 화면") && !s.contains("캐시"))
+        Guardian.saveState(context, Guardian.state(context).copy(nightActive = true))
+        assertTrue(BatteryTileService.snapshot(context, now, zone).status.contains("밤 모드"))
+    }
+
+    /** 배터리 화면을 열어 남긴 스냅샷으로도 알려진 문제를 다시 본다 — 화면을 자주 열어 15분 기록의 확인이 밀려도 타일 줄이 사라지지 않게 */
+    @Test
+    fun openingTheScreenAlsoRefreshesTheTilesIssue() {
+        val now = at(12)
+        drain(now, 9, 63.0, 4.0)
+        var cpu = 0L
+        val stats = com.mywatch.kakaomap.battery.UidStatsSource { mapOf("com.google.android.gms" to UidUse("com.google.android.gms", cpuMs = cpu)) }
+        Guardian.snapshotIfStale(context, now - 2 * 3_600_000L, source = stats)
+        cpu = 40 * 60_000L
+        Guardian.snapshotIfStale(context, now, source = stats)
+        assertTrue(Guardian.tileIssue(context, now) ?: "", (Guardian.tileIssue(context, now) ?: "").contains("Play 서비스"))
+    }
+
     /** 지킴이가 지금 설정을 바꿔 둔 상태(밤 모드·비정상 절전)는 '언제부터 더 닳음' 줄보다 먼저 — 지금 무엇이 바뀌어 있는지가 급하다 */
     @Test
     fun theGuardiansCurrentStateComesBeforeTheTrendLine() {
@@ -91,6 +128,12 @@ class BatteryTileTest {
             .putLong(com.mywatch.kakaomap.battery.BatteryAlerts.KEY_TREND_UNTIL, now + 3_600_000L).commit()
         Guardian.saveState(context, Guardian.state(context).copy(abnormalActive = true))
         assertTrue(BatteryTileService.snapshot(context, now, zone).status.contains("비정상 소모"))
+        // 절전이 실제로 켜졌을 때만 '절전 켬' (이 워치에서 설정으로 안 켜지거나 못 켰으면 아니다 — 리뷰에서 찾음)
+        assertFalse(BatteryTileService.snapshot(context, now, zone).status.contains("절전 켬"))
+        shadowOf(context.getSystemService(android.os.PowerManager::class.java)).setIsPowerSaveMode(true)
+        assertTrue(BatteryTileService.snapshot(context, now, zone).status.contains("절전 켬"))
+        Guardian.saveState(context, Guardian.state(context).copy(saverBroken = true))
+        assertFalse(BatteryTileService.snapshot(context, now, zone).status.contains("절전 켬"))
     }
 
     @Test

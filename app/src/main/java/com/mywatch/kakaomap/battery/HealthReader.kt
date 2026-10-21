@@ -77,8 +77,7 @@ class HealthStore(context: Context) {
     private val deltas = File(dir, "health_deltas.jsonl")
 
     /** 지금 스냅샷을 기록하고 직전과의 차를 돌려준다 (첫 기록이면 빈 목록 — 누적값은 구간 사용량이 아니다) */
-    @Synchronized
-    fun record(now: Long, snapshot: Map<String, UidUse>): List<UidUse> {
+    fun record(now: Long, snapshot: Map<String, UidUse>): List<UidUse> = synchronized(LOCK) {
         dir.mkdirs()
         val prev = readLast()
         val d = if (prev == null) emptyList() else AppDrain.delta(prev.second, snapshot)
@@ -97,8 +96,7 @@ class HealthStore(context: Context) {
     fun lastAt(): Long = prefs.getLong(K_LAST_AT, 0L)
 
     /** 최근 [hours]시간의 차를 앱별로 합친 것과 실제로 덮인 시간(ms) */
-    @Synchronized
-    fun recent(hours: Int, now: Long): Pair<List<UidUse>, Long> {
+    fun recent(hours: Int, now: Long): Pair<List<UidUse>, Long> = synchronized(LOCK) {
         if (!deltas.exists()) return emptyList<UidUse>() to 0L
         val from = now - hours * 3_600_000L
         val windows = ArrayList<List<UidUse>>()
@@ -117,8 +115,7 @@ class HealthStore(context: Context) {
     }
 
     /** 최근 [hours]시간의 15분 차를 그대로 (시간대별 범인을 찾을 때) */
-    @Synchronized
-    fun windows(hours: Int, now: Long): List<TimedUse> {
+    fun windows(hours: Int, now: Long): List<TimedUse> = synchronized(LOCK) {
         if (!deltas.exists()) return emptyList()
         val from = now - hours * 3_600_000L
         val out = ArrayList<TimedUse>()
@@ -153,7 +150,10 @@ class HealthStore(context: Context) {
         // 1시간에 한 줄(소모가 높으면 15분)이라 하루치는 수십 KB — 화면·지킴이가 읽는 파일이 커지지 않게 일찍 자른다
         if (deltas.length() < PRUNE_BYTES) return
         val keepFrom = now - 24 * 3_600_000L
-        val kept = deltas.readLines().filter { l -> runCatching { JSONObject(l).optLong("t") >= keepFrom }.getOrDefault(false) }
+        // 맨 앞 줄이 26시간 안이면 아직 자르지 않는다 — 15분마다 파일을 통째로 다시 쓰지 않게(2시간에 한 번쯤)
+        val first = deltas.bufferedReader().use { it.readLine() }
+        if (first != null && (fastT(first) ?: Long.MIN_VALUE) >= now - 26 * 3_600_000L) return
+        val kept = deltas.readLines().filter { l -> (fastT(l) ?: runCatching { JSONObject(l).optLong("t") }.getOrDefault(0L)) >= keepFrom }
         deltas.writeText(kept.joinToString("\n", postfix = if (kept.isEmpty()) "" else "\n"))
     }
 
@@ -167,6 +167,8 @@ class HealthStore(context: Context) {
 
     companion object {
         const val MAX_PER_ROW = 25
+        /** 배터리 화면(IO 스레드)과 15분 기록이 같이 쓰므로 인스턴스가 아니라 파일에 하나 */
+        private val LOCK = Any()
         private const val K_LAST_AT = "health_last_at"
         private const val PRUNE_BYTES = 120_000L
         private val T_PREFIX = Regex("^\\{\"t\":(-?\\d+)[,}]")

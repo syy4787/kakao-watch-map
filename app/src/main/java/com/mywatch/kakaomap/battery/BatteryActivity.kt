@@ -149,7 +149,7 @@ class BatteryActivity : ComponentActivity() {
             if (top.isNotEmpty()) rows += Row.Note("밤사이 뒤에서 (${BatterySummary.time(n.start)}~):\n$top")
             // 할 일은 줄에 맞춘 짧은 글로 (눌러 펼치면 끝까지)
             n.todos.forEachIndexed { i, (title, sub) ->
-                rows += Row.Step(color(Grade.CAUTION), R.drawable.ic_warning, "할 일", title, sub, key = "night:$i")
+                rows += Row.Step(color(Grade.CAUTION), R.drawable.ic_warning, null, title, sub, key = "night:$i")
             }
         }
 
@@ -167,7 +167,7 @@ class BatteryActivity : ComponentActivity() {
             rows += Row.Header("충전 습관")
             rows += Row.Note(BatterySummary.chargingLine(ch))
             ch.todos.forEachIndexed { i, (title, sub) ->
-                rows += Row.Step(color(Grade.CAUTION), R.drawable.ic_battery, "할 일", title, sub, key = "charge:$i")
+                rows += Row.Step(color(Grade.CAUTION), R.drawable.ic_battery, null, title, sub, key = "charge:$i")
             }
         }
 
@@ -308,7 +308,7 @@ class BatteryActivity : ComponentActivity() {
         insights?.wakes?.let { w ->
             rows += Row.Note("화면 켜짐 ${w.wakes}번 — 5초 안에 꺼짐 ${w.shortWakes}번 · 알림이 켬 ${w.notificationWakes}번 (알림 ${w.notifications}개)")
             listOfNotNull(w.gestureTodo(), w.notificationTodo { appLabel(it) }).forEachIndexed { i, (title, sub) ->
-                rows += Row.Step(color(Grade.CAUTION), R.drawable.ic_warning, "할 일", title, sub, key = "wake:$i")
+                rows += Row.Step(color(Grade.CAUTION), R.drawable.ic_warning, null, title, sub, key = "wake:$i")
             }
         }
         b.steepest.forEach { h ->

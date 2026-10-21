@@ -116,7 +116,7 @@ class BatteryTodoTest {
         val t = BatteryTodo.pick(insights(), permitted = false)
         assertEquals(1, t.size)
         assertTrue(t[0].title, t[0].title.contains("권한"))
-        assertTrue(t[0].detail ?: "", (t[0].detail ?: "").contains("메뉴 8"))
+        assertTrue(t[0].detail ?: "", (t[0].detail ?: "").contains("메뉴 8(자동 치료)"))
         assertTrue("권한이 있으면 할 일 없음", BatteryTodo.pick(insights(), permitted = true).isEmpty())
     }
 }

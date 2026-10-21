@@ -14,6 +14,8 @@ data class KnownIssue(
     val grade: Grade = Grade.CAUTION,
     /** '지금 할 일' 줄에 맞춘 짧은 제목·설명 ([TodoText]) — 없으면 제목과 첫 단계 */
     val todo: Pair<String, String>? = null,
+    /** 타일 한 줄 (문제와 그 할 일) — 없으면 제목 */
+    val tile: String? = null,
 )
 
 /**
@@ -60,6 +62,7 @@ object KnownIssues {
                     r.grade,
                     // 줄에 맞게 — '캐시만'(데이터는 지우지 않음)이 잘려 '데이터 지…'로 읽히지 않게
                     todo = "Play 서비스 과소모" to "앱 정보 › 저장공간 › 캐시만 지우기 → 30분 뒤 그대로면 강제 재시작",
+                    tile = "Play 서비스 과소모 — 캐시 지우기",
                 )
             }
         }
@@ -81,6 +84,7 @@ object KnownIssues {
                         ),
                         if (r.grade == Grade.NORMAL) Grade.CAUTION else r.grade,
                         todo = "시계 화면이 많이 씀" to "기본 삼성 시계 화면으로 하루 써 보고 비교",
+                        tile = "시계 화면이 많이 씀 — 기본 화면으로",
                     )
                 }
             }

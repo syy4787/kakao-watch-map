@@ -228,8 +228,13 @@ object Guardian {
         saveState(c, st.copy(nightActive = false, abnormalActive = false, saverSeenOn = false))
         noteAction(c, "권한이 없어 손 뗌" + if (todo.isEmpty()) "" else " — 직접 되돌릴 것: ${todo.joinToString(", ")}")
         if (todo.isEmpty()) return
+        notifyRelease(c, todo, now, zone)
+    }
+
+    /** 바꿔 둔 설정을 되돌리지 못했다 — 직접 되돌릴 것 (권한만 다시 주는 것은 메뉴 7, 메뉴 8 은 앱 제한·통계 초기화까지 한다) */
+    private fun notifyRelease(c: Context, todo: List<String>, now: Long, zone: ZoneId) {
         val (nm, channel) = BatteryAlerts.manager(c, BatteryAlerts.quiet(now, zone)) ?: return
-        val text = "직접 되돌려 주세요: ${todo.joinToString(" · ")}. PC 툴킷 메뉴 8로 권한을 다시 주면 지킴이가 다시 맡습니다."
+        val text = "직접 되돌려 주세요: ${todo.joinToString(" · ")}. PC 툴킷 메뉴 7(권한 주기)로 권한을 다시 주면 지킴이가 다시 맡습니다."
         val n = NotificationCompat.Builder(c, channel)
             .setSmallIcon(R.drawable.ic_warning)
             .setContentTitle("지킴이 권한이 없어 설정을 못 되돌림")
@@ -253,26 +258,44 @@ object Guardian {
     }
 
     /**
-     * 배터리 화면을 열 때: 앱별 통계가 [maxAgeMs] 보다 묵었으면 지금 하나 남긴다 (1시간 간격이라 '최근 2시간 앱별 소모'가 늦지 않게).
-     * 권한이 없으면 아무것도 안 한다
+     * 배터리 화면을 열 때: 앱별 통계가 [maxAgeMs] 보다 묵었으면 지금 하나 남기고 알려진 문제(타일 줄)도 다시 본다
+     * (1시간 간격이라 '최근 2시간 앱별 소모'가 늦지 않게, 화면을 자주 열어도 타일 줄이 밀려 사라지지 않게). 권한이 없으면 아무것도 안 한다
      */
-    fun snapshotIfStale(context: Context, now: Long = System.currentTimeMillis(), maxAgeMs: Long = 15L * 60_000L) {
+    fun snapshotIfStale(context: Context, now: Long = System.currentTimeMillis(), maxAgeMs: Long = 15L * 60_000L, source: UidStatsSource? = null) {
         val c = context.applicationContext
-        val reader = HealthReader(c).takeIf { it.available } ?: return
+        val reader = source ?: HealthReader(c).takeIf { it.available } ?: return
         val store = HealthStore(c)
         if (now - store.lastAt() < maxAgeMs && now >= store.lastAt()) return
         runCatching { store.record(now, reader.take()) }.onFailure { ErrorLog.record("배터리·앱별 통계", it) }
+        runCatching { knownIssues(c, now) }.onFailure { ErrorLog.record("배터리·알려진 문제", it) }
     }
 
-    /** 타일에 보일 알려진 문제 제목 — 15분 기록이 찾아 적어 둔 것 (3시간 넘게 다시 확인 못 했으면 null) */
-    fun tileIssue(c: Context, now: Long): String? {
+    /** 타일에 보일 알려진 문제 (한 줄, 등급) — 15분 기록·배터리 화면이 찾아 적어 둔 것 (3시간 넘게 다시 확인 못 했으면 null) */
+    fun tileIssue(c: Context, now: Long): String? = tileIssueGraded(c, now)?.first
+
+    fun tileIssueGraded(c: Context, now: Long): Pair<String, Grade>? {
         val p = prefs(c)
         val at = p.getLong(K_TILE_ISSUE_AT, 0L)
         if (at <= 0L || now - at > TILE_ISSUE_MAX_AGE_MS || now < at) return null
-        return p.getString(K_TILE_ISSUE, null)
+        val line = p.getString(K_TILE_ISSUE, null) ?: return null
+        val grade = runCatching { Grade.valueOf(p.getString(K_TILE_ISSUE_GRADE, null) ?: "CAUTION") }.getOrDefault(Grade.CAUTION)
+        return line to grade
+    }
+
+    /** 최근 2시간 앱별 순위로 알려진 문제를 찾고 타일 줄을 적어 둔다 (알림은 [checkKnownIssues]) */
+    private fun knownIssues(c: Context, now: Long): List<com.mywatch.battery.core.KnownIssue> {
+        val (ranks, window) = culpritsInWindow(c, now)
+        val face = runCatching { BatteryInsights.watchFace(c) }.getOrNull()
+        val found = KnownIssues.detect(ranks, face, window.takeIf { it > 0 })
+        // 타일은 이 결과를 읽는다 (타일이 통계 파일을 읽고 분석하지 않게) — 문제마다 그 할 일로
+        val top = found.firstOrNull()
+        prefs(c).edit().putString(K_TILE_ISSUE, top?.let { it.tile ?: it.title }).putString(K_TILE_ISSUE_GRADE, top?.grade?.name)
+            .putLong(K_TILE_ISSUE_AT, now).apply()
+        return found
     }
 
     private const val K_TILE_ISSUE = "gs_tile_issue"
+    private const val K_TILE_ISSUE_GRADE = "gs_tile_issue_grade"
     private const val K_TILE_ISSUE_AT = "gs_tile_issue_at"
     private const val TILE_ISSUE_MAX_AGE_MS = 3L * 3_600_000L
 
@@ -287,12 +310,7 @@ object Guardian {
      * 그 앱 정보 바로 가기를 알린다 (12시간에 한 번). 권한(BATTERY_STATS)이 있어야 앱별 사용량을 안다
      */
     private fun checkKnownIssues(c: Context, now: Long, zone: ZoneId) {
-        val (ranks, window) = culpritsInWindow(c, now)
-        val face = runCatching { BatteryInsights.watchFace(c) }.getOrNull()
-        val found = KnownIssues.detect(ranks, face, window.takeIf { it > 0 })
-        // 타일은 이 결과를 읽는다 (타일이 통계 파일을 읽고 분석하지 않게)
-        prefs(c).edit().putString(K_TILE_ISSUE, found.firstOrNull()?.title).putLong(K_TILE_ISSUE_AT, now).apply()
-        val issue = found.firstOrNull { it.grade == Grade.ABNORMAL } ?: return
+        val issue = knownIssues(c, now).firstOrNull { it.grade == Grade.ABNORMAL } ?: return
         val p = prefs(c)
         val last = p.getLong(K_S_ISSUE_AT, 0L)
         if (last > 0 && now - last < ISSUE_COOLDOWN_MS) return
@@ -450,7 +468,7 @@ object Guardian {
      * 알림의 '되돌리기'·화면의 '지금 되돌리기'·PC 툴킷이 권한을 거두기 전: 우리가 바꾼 것을 모두 원래대로, 12시간 쉼.
      * 권한이 없어 되돌리지 못한 것은 직접 되돌릴 일로 돌려준다 (없으면 빈 목록)
      */
-    fun restoreNow(c: Context, now: Long = System.currentTimeMillis()): List<String> {
+    fun restoreNow(c: Context, now: Long = System.currentTimeMillis(), zone: ZoneId = ZoneId.systemDefault()): List<String> {
         val levers = Levers(c)
         levers.restoreAll(keepSaver = false)
         // 쓰기에 실패해 남은 것(권한 없음) — 사용자가 직접 되돌릴 것으로 알리고 내려놓는다
@@ -460,6 +478,8 @@ object Guardian {
         saveState(c, s.copy(nightActive = false, abnormalActive = false, userOverrideUntil = now + GuardianRules.USER_OVERRIDE_MS))
         noteAction(c, "사용자가 되돌림 — 12시간 쉼" + if (left.isEmpty()) "" else " (직접 되돌릴 것: ${left.joinToString(", ")})")
         runCatching { c.getSystemService(NotificationManager::class.java)?.cancel(N_ABNORMAL) }
+        // 알림의 '되돌리기'처럼 화면이 없을 때도 무엇이 남았는지 알게 (기억은 이미 내려놓았으니 다음 기록은 다시 알리지 못한다)
+        if (left.isNotEmpty()) runCatching { notifyRelease(c, left, now, zone) }
         return left
     }
 }

@@ -72,7 +72,7 @@ object BatteryTodo {
         }
         ins.night?.todos?.forEach { out += todo(it, Grade.CAUTION) }
         if (!permitted) {
-            out += Todo("지킴이 권한 주기", "PC 툴킷 메뉴 8 한 번 — 밤·과소모 때 워치가 알아서 조절", Grade.UNKNOWN)
+            out += Todo("지킴이 권한 주기", "PC 툴킷 메뉴 8(자동 치료) 한 번 — 밤·과소모 때 워치가 알아서 조절", Grade.UNKNOWN)
         }
         ins.charging?.let { ch ->
             ch.todos.forEachIndexed { i, t -> out += todo(t, Grade.CAUTION, if (i == 0 && ch.protectAdvised) Action.Battery else null) }

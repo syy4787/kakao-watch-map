@@ -145,6 +145,18 @@ class AnalyzerTest {
         assertTrue(v.todo.joinToString().contains("증거 패키지"))
     }
 
+    /** 3주 전 한 번의 부팅 점프는 증거로만 — 지금 판정을 '게이지 고장(서비스센터)'으로 만들지 않는다 (워치 판정과 같은 7일, 리뷰에서 찾음) */
+    @Test
+    fun anOldRebootJumpIsEvidenceNotAGaugeVerdict() {
+        val old = now - 21 * 24 * 3_600_000L
+        val s = listOf(BatterySample(t = old, level = 17), BatterySample(t = old + q, level = 47, event = Event.BOOT)) + watch(2.5)
+        val f = facts(watchSamples = s)
+        val fs = Analyzer.findings(f)
+        val g = fs.first { it.id == "gauge-watch" }
+        assertEquals(Severity.CAUTION, g.severity)
+        assertTrue(Analyzer.verdict(f, fs).cause != Cause.GAUGE)
+    }
+
     @Test
     fun gaugeFromChargeCounterMismatch() {
         // 196800 µAh 가 90% 라면 218 mAh = 공칭의 49% → 잔량 표시 불일치
