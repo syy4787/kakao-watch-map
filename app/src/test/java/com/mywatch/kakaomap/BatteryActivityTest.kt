@@ -78,6 +78,9 @@ class BatteryActivityTest {
         val verdict = steps.first { it.key == "verdict" }
         assertEquals("비정상", verdict.chip)
         assertTrue(verdict.title, verdict.title.contains("시간당"))
+        // 맨 위 '지금 할 일': 권한이 없으면 PC 툴킷 자동 치료부터
+        val todo = steps.first { it.key == "todo:0" }
+        assertTrue(todo.sub ?: "", (todo.sub ?: "").contains("메뉴 8"))
     }
 
     @Test

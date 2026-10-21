@@ -102,6 +102,16 @@ class BatteryActivity : ComponentActivity() {
         notice?.let { rows += Row.Note(it) }
         forecast?.let { rows += Row.Note(it) }
         insights?.chart?.let { rows += Row.Chart("day", it) }
+        insights?.let { ins ->
+            val permitted = Levers(this).canWriteSecure && HealthReader(this).available
+            val todo = BatteryTodo.pick(ins, permitted) { HealthStore.label(this, it) }
+            if (todo.isNotEmpty()) {
+                rows += Row.Header("지금 할 일")
+                todo.forEachIndexed { i, t ->
+                    rows += Row.Step(color(if (t.grade == Grade.UNKNOWN) Grade.CAUTION else t.grade), R.drawable.ic_warning, "${i + 1}", t.title, t.detail, key = "todo:$i")
+                }
+            }
+        }
 
         rows += Row.Header("소모율")
         rows += rateRow("1시간", a.w1, Thresholds.mixed24h(a.w1.percentPerHour))
