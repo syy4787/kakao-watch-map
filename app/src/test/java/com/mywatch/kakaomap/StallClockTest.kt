@@ -138,6 +138,21 @@ class StallClockTest {
         assertFalse(c.shouldGiveUp(waiting.copy(onRide = true, waitingBus = false, boardingStep = null), 300 * min))
     }
 
+    /** 얼마나 기다렸는지 — 위치 정책이 오래 기다리면 GPS 를 덜 자주 받게 */
+    @Test
+    fun waitingTimeIsCountedFromTheFirstMomentAtTheStop() {
+        val c = StallClock()
+        c.start(0)
+        assertEquals(0L, c.waitingMs(0))
+        c.update(walking(4_000, step = 0).copy(toStepEndM = 200, toActionM = 200, boardingStep = 1), 0)
+        assertEquals(0L, c.waitingMs(1 * min))
+        c.update(atBusStop, 2 * min)
+        c.update(atBusStop, 7 * min)
+        assertEquals(5 * min, c.waitingMs(7 * min))
+        c.update(atBusStop.copy(onRide = true, waitingBus = false, boardingStep = null), 9 * min)
+        assertEquals(0L, c.waitingMs(9 * min))
+    }
+
     private val atBusStop = walking(4_000, step = 0).copy(toStepEndM = 0, toActionM = 0, boardingStep = 1, waitingBus = true)
     /** 정류장에서 걸어온 길 쪽으로 45m — GPS 가 튀었거나 정류장을 떠남 */
     private val offTheStop = walking(4_000, step = 0).copy(toStepEndM = 45, toActionM = 45, boardingStep = 1)

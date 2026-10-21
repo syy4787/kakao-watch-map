@@ -92,6 +92,12 @@ class StallClock {
     /** 오래 기다리면 끝내는지 — 시간표가 있는 기차·고속버스는 끝내지 않는다 (놓치면 엔진이 알아채 다음 편으로 다시 찾음) */
     private fun waitCapped(s: NavState) = !(s.waitingLongRide && s.longRideAtMs != null)
 
+    /** 탈 것을 기다린 시간 (지금 기다리는 중이 아니면 0) — 오래 기다리면 위치를 덜 자주 받는다 ([LocationPolicy]) */
+    fun waitingMs(now: Long): Long {
+        if (last?.waitingToBoard != true) return 0L
+        return waitingSince?.let { (now - it).coerceAtLeast(0L) } ?: 0L
+    }
+
     fun stalledMs(now: Long): Long {
         val s = last ?: return 0L
         if (riding(s) || outOfRoute(s) || s.arrived) return 0L

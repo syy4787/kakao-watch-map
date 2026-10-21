@@ -729,6 +729,9 @@ class NavEngine(
      * 타려는 시내 버스 구간 [stepIndex] 의 실시간 도착 (안내 중 45초마다 받아 넣는다, 못 받았으면 null).
      * 지금 그 버스 승차 안내 중이면 문구를 바로 고치고, 2분 안에 오는데 정류장에 있거나 150m 안이면 한 번 진동
      */
+    /** 그 탈 것 구간의 실시간 도착: 가장 빨리 오는 버스까지 초 (모르면 null) */
+    fun liveSoonestSec(stepIndex: Int): Int? = live[stepIndex]?.soonestSec
+
     fun setLiveArrival(stepIndex: Int, bus: LiveBus?): List<NavEvent> {
         if (!isCityBus(stepIndex)) return emptyList()
         if (bus?.short == null) live.remove(stepIndex) else live[stepIndex] = bus

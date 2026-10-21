@@ -19,8 +19,13 @@ object Http {
     fun post(url: String, form: Map<String, String>, headers: Map<String, String> = emptyMap(), timeoutMs: Int = 12_000): Response =
         send(url, "POST", query(form).toByteArray(Charsets.UTF_8), headers, timeoutMs)
 
+    /**
+     * 응답을 끝까지 읽으면 연결을 끊지 않는다 — 시스템이 그 연결을 몇 분 동안 다시 써서, 45초마다 묻는 실시간 버스 도착 등이
+     * 매번 새 TLS 연결(블루투스 너머 폰까지 왕복 여러 번)을 맺지 않게. 실패했을 때만 끊는다
+     */
     private fun send(url: String, method: String, body: ByteArray?, headers: Map<String, String>, timeoutMs: Int): Response {
         val conn = URL(url).openConnection() as HttpURLConnection
+        var done = false
         try {
             conn.connectTimeout = timeoutMs
             conn.readTimeout = timeoutMs
@@ -36,9 +41,10 @@ object Http {
             val code = conn.responseCode
             val stream = if (code in 200..299) conn.inputStream else conn.errorStream
             val text = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
+            done = true
             return Response(code, text)
         } finally {
-            conn.disconnect()
+            if (!done) conn.disconnect()
         }
     }
 

@@ -603,6 +603,8 @@ class NavigationService : Service() {
             lowBattery = lowBattery,
             sinceLostMs = sinceLost(),
             stalledMs = stall.stalledMs(now),
+            waitingMs = stall.waitingMs(now),
+            busSoonSec = Navigator.liveSoonestSec(s.boardingStep),
         )
         // 재탐색을 다 쓴 뒤에도 벗어나 있으면 1초 GPS 를 계속 쓰지 않는다 (경로로 돌아오면 다시 촘촘히)
         val exhausted = (s.offRoute || s.passedStop || s.missedRide) && reroutes.exhausted

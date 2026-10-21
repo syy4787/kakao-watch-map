@@ -70,6 +70,9 @@ object Navigator {
 
     /** 타려는 버스의 실시간 도착 (다른 경로로 바뀌었으면 무시). 2분 안에 오면 진동 */
     @MainThread
+    /** 기다리는 탈 것 구간의 실시간 도착(초) — 위치 정책용 */
+    fun liveSoonestSec(stepIndex: Int?): Int? = stepIndex?.let { engine?.liveSoonestSec(it) }
+
     fun setLiveArrival(context: Context, routeVersion: Int, stepIndex: Int, bus: LiveBus?) {
         val eng = engine ?: return
         if (eng.routeVersion != routeVersion) return

@@ -26,6 +26,7 @@ data class LocPlan(
  *  · 손목을 내리면(화면 꺼짐·저전력 화면) 상황별로 — 기준은 '다음에 할 일'(회전·횡단보도·승차·하차)까지 거리:
  *      할 일 60m 안·경로 이탈·출발 직후 → 1초 / 250m 안 → 2초 / 긴 직진 → 4초(8초까지 모아 받기)
  *      멈춰 서 있음(신호·정류장 대기) → 5초 (갈림길 바로 앞이어도. 움직이면 바로 촘촘히), 시내 버스 정류장에서 기다리는 중엔 서성여도 5초
+ *      — 3분 넘게 기다리면 20초 (버스가 2분 안에 온다고 하면 다시 5초, 떠나는 속도면 1초)
  *      버스에서 내릴 곳이 3km 넘게 → 15초, 1.5km 넘게 → 10초(모아 받기), 그 안 → 3초
  *      기차·고속버스에서 내릴 역이 10km 넘게(도착 10분 넘게 남음) → GPS 끄고 기지국·Wi-Fi 위치 1분, 4km 넘게 → 10초, 그 안 → 3초
  *      기차·고속버스 역에서 기다리는 중 → 출발 3분 전까지 Wi-Fi·기지국 위치 30초
@@ -60,6 +61,10 @@ object LocationPolicy {
     private const val NOT_MATCHED_FAST_MS = 60_000L
     /** 정류장에서 기다리다 이 속도(시속 11km)를 넘으면 버스가 떠나는 것 — 다시 촘촘히 */
     private const val BUS_LEAVING_MPS = 3f
+    /** 시내 버스 정류장: 이만큼 기다린 뒤엔 위치를 덜 자주 (20초) */
+    const val BUS_WAIT_FAST_MS = 3 * 60_000L
+    /** 실시간 도착이 이 안(2분)이면 다시 5초 */
+    const val BUS_NEAR_SEC = 120
 
     /**
      * 안내 서비스의 위치 계획.
@@ -82,8 +87,12 @@ object LocationPolicy {
         /** 지금 시각 (기차·버스 시간표와 비교) */
         nowMs: Long = System.currentTimeMillis(),
         stalledMs: Long = 0,
+        /** 탈 것을 기다린 시간 — [StallClock.waitingMs] */
+        waitingMs: Long = 0,
+        /** 기다리는 버스가 몇 초 뒤 오는지 (실시간 도착, 모르면 null) */
+        busSoonSec: Int? = null,
     ): LocPlan {
-        val plan = basePlan(s, bike, speedMps, sinceArrivalMs, sinceStartMs, sinceLostMs, nowMs, stalledMs)
+        val plan = basePlan(s, bike, speedMps, sinceArrivalMs, sinceStartMs, sinceLostMs, nowMs, stalledMs, waitingMs, busSoonSec)
         if (!lowBattery || plan.power != LocPower.HIGH) return plan
         return plan.copy(
             intervalMs = maxOf(plan.intervalMs * 2, 2_000L),
@@ -93,7 +102,7 @@ object LocationPolicy {
 
     private fun basePlan(
         s: NavState, bike: Boolean, speedMps: Float?, sinceArrivalMs: Long, sinceStartMs: Long, sinceLostMs: Long, nowMs: Long,
-        stalledMs: Long,
+        stalledMs: Long, waitingMs: Long, busSoonSec: Int?,
     ): LocPlan {
         if (s.arrived) {
             return if (sinceArrivalMs < AFTER_ARRIVAL_ACTIVE_MS) LocPlan(LocPower.BALANCED, 10_000, minDistanceM = 5f)
@@ -153,8 +162,12 @@ object LocationPolicy {
             }
         }
         // 시내 버스 정류장에서 기다리는 중: 버스가 떠나는 속도가 아니면 5초 (서성여도 — 탔는지는 노선을 따라 60m 넘게 가야 안다).
-        // 서 있어도 위치를 받는다(거리 조건 없음): 그때마다 실시간 버스 도착을 45초마다 새로 묻기 때문
-        if (s.waitingBus && (speedMps ?: 0f) < BUS_LEAVING_MPS) return LocPlan(LocPower.HIGH, 5_000)
+        // 서 있어도 위치를 받는다(거리 조건 없음): 그때마다 실시간 버스 도착을 45초마다 새로 묻기 때문.
+        // 3분 넘게 기다리면 20초 — 버스가 2분 안에 온다고 하면 다시 5초, 떠나는 속도가 되면 아래에서 1초
+        if (s.waitingBus && (speedMps ?: 0f) < BUS_LEAVING_MPS) {
+            val near = busSoonSec != null && busSoonSec <= BUS_NEAR_SEC
+            return LocPlan(LocPower.HIGH, if (waitingMs < BUS_WAIT_FAST_MS || near) 5_000 else 20_000)
+        }
         if (still) return LocPlan(LocPower.HIGH, 5_000, minDistanceM = 3f)            // 신호 대기 등
         if (bike) return if (toNext <= 300) LocPlan(LocPower.HIGH, 1_000) else LocPlan(LocPower.HIGH, 2_000)
         return when {

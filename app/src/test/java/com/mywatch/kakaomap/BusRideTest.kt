@@ -484,4 +484,24 @@ class BusRideTest {
         // 버스가 떠나는 속도면 다시 촘촘히 (탔는지 빨리 알게)
         assertEquals(1_000L, LocationPolicy.navigation(waiting, false, 6f, 0).intervalMs)
     }
+
+    /**
+     * 정류장에서 오래 기다리면 GPS 를 덜 자주: 3분까지는 5초, 그 뒤엔 20초 (실시간 도착은 45초마다라 그대로 물음).
+     * 버스가 2분 안에 온다고 하면 다시 5초, 버스가 떠나는 속도면 바로 촘촘히
+     */
+    @Test
+    fun aLongWaitAtTheStopSlowsGpsUntilTheBusIsNear() {
+        val waiting = NavState(routeVersion = 1, stepIndex = 0, matched = true, toStepEndM = 0, toActionM = 0, waitingBus = true)
+        val min = 60_000L
+        assertEquals(5_000L, LocationPolicy.navigation(waiting, false, 0f, 0, waitingMs = 2 * min).intervalMs)
+        val long = LocationPolicy.navigation(waiting, false, 0f, 0, waitingMs = 8 * min)
+        assertEquals(LocPower.HIGH, long.power)
+        assertEquals(20_000L, long.intervalMs)
+        assertEquals(0f, long.minDistanceM)
+        assertEquals(20_000L, LocationPolicy.navigation(waiting, false, 0f, 0, waitingMs = 8 * min, busSoonSec = 400).intervalMs)
+        assertEquals(5_000L, LocationPolicy.navigation(waiting, false, 0f, 0, waitingMs = 8 * min, busSoonSec = 90).intervalMs)
+        assertEquals(1_000L, LocationPolicy.navigation(waiting, false, 6f, 0, waitingMs = 8 * min).intervalMs)
+        // 배터리가 적으면 그 두 배
+        assertEquals(40_000L, LocationPolicy.navigation(waiting, false, 0f, 0, lowBattery = true, waitingMs = 8 * min).intervalMs)
+    }
 }
