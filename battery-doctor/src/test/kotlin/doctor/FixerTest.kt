@@ -102,6 +102,10 @@ class FixerTest {
         assertEquals(4L, last.time)
         assertFalse(last.undone)
         assertEquals(null, last.undo)
+        assertEquals("되돌린 기록 1개", last.note)
+        // 되돌린 것이 없으면(0개) 남기지 않는다 — 아무것도 바뀌지 않았으니 앞의 일회성 조치도 그대로 (리뷰)
+        Fixer.undo(adb, j, null, now = 5)
+        assertEquals(1, j.entries().count { it.id == Fixer.UNDO_ALL })
     }
 
     @Test

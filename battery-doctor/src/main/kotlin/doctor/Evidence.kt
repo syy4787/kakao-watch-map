@@ -160,7 +160,10 @@ object Evidence {
         // 워치 앱이 본 단계(재시작한 뒤에도 다시 나타남 등)는 따로 풀어 적으니 주요 소견에선 뺀다
         val stages = watchStages(f, findings)
         val keyFindings = findings.filter { it.severity != Severity.INFO && it.id !in stages.keys }.take(6).map { "- [${it.severity.label}] ${it.title}" }.ifEmpty { listOf("- $BLANK") }
-        val actions = journal.map { "- ${stamp(it.time, zone)} ${describeLever(it.id)} (${it.id})${if (it.undone) " — 되돌림" else ""}${if (!it.ok) " — 실패" else ""}" }.ifEmpty { listOf("- $BLANK (PC 툴킷으로 한 조치 없음 — 그 밖에 한 일이 있으면 적으세요)") }
+        val actions = journal.map { e ->
+            if (e.id == doctor.fix.Fixer.UNDO_ALL) "- ${stamp(e.time, zone)} 모두 되돌리기 — ${e.note ?: "되돌림"}${if (!e.ok) " (일부 실패)" else ""}"
+            else "- ${stamp(e.time, zone)} ${describeLever(e.id)} (${e.id})${if (e.undone) " — 되돌림" else ""}${if (!e.ok) " — 실패" else ""}"
+        }.ifEmpty { listOf("- $BLANK (PC 툴킷으로 한 조치 없음 — 그 밖에 한 일이 있으면 적으세요)") }
         // 켜짐(부팅) 기록·그 전후 대기 소모·워치 앱이 본 단계는 증상(사실), 사용자가 남긴 '강제 재시작' 표시는 시도한 조치
         val watchFacts = bootLines(f, zone) + stages.values
         val marks = restartMarks(f, zone)
@@ -330,16 +333,17 @@ object Evidence {
     const val RESTART_DAYS = 7
     const val MAX_RESTARTS = 8
     private const val DAY_MS = 86_400_000L
-    /** '강제 재시작' 표시 뒤 이만큼 안에 켜졌으면 그 켜짐은 그 강제 재시작 */
-    private const val MARK_TO_BOOT_MS = 15L * 60_000L
+    /** 켜짐 기록이 '강제 재시작' 표시보다 이만큼 늦게 남을 수 있다 (부팅 기록은 한 번짜리 작업이라 밀린다 — [RestartEffects.BOOT_ROW_LAG_MS]) */
+    private const val MARK_BEFORE_BOOT_MS = RestartEffects.BOOT_ROW_LAG_MS
 
     private fun isMark(s: com.mywatch.battery.core.BatterySample) = s.event == Event.USER_NOTE && s.note == GaugeDriftRule.NOTE_FORCED_RESTART
 
     /**
      * 증상 쪽 사실 — 워치 15분 기록의 켜짐(부팅)을 최근 [RESTART_DAYS]일 안에서 날짜·시각으로(최근 [MAX_RESTARTS]번까지), 마지막 켜짐(이틀 안)
      * 전후 대기 소모(워치 배터리 화면의 '재시작 효과'와 같은 계산). 켜짐은 사용자가 한 재시작만이 아니다(방전 뒤 켜짐·업데이트·멈춤 뒤 재부팅·
-     * adb reboot) — 그래서 '시도한 조치'가 아니라 사실로 적고, 알 수 있는 것만 붙인다: '강제 재시작' 표시 뒤 15분 안이면 그 재시작, 1~3%
-     * 다음에 충전기에 꽂힌 채 켜졌으면 방전 뒤 켜짐 (리뷰: 모든 켜짐을 사용자가 해 본 재시작으로 적으면 하지 않은 조치를 했다고 쓰는 셈)
+     * adb reboot) — 그래서 '시도한 조치'가 아니라 사실로 적고, 본 것만 붙인다: '강제 재시작' 표시가 켜짐 20분 앞 ~ 30분 뒤에 있으면(켜기 전에도
+     * 켠 뒤에도 남길 수 있다 — [GaugeDriftRule.MARKER_WINDOW_MS]) 그 표시, 충전 안 하던 1~3% 기록 다음 충전기에 꽂힌 채 켜졌으면 그 기록
+     * (원인은 단정하지 않는다) (리뷰: 모든 켜짐을 사용자가 해 본 재시작으로 적으면 하지 않은 조치를 했다고 쓰는 셈)
      */
     internal fun bootLines(f: Facts, zone: ZoneId): List<String> {
         val samples = f.watchSamples.sortedBy { it.t }
@@ -351,8 +355,8 @@ object Evidence {
         fun label(b: com.mywatch.battery.core.BatterySample): String {
             val prev = samples.lastOrNull { it.t < b.t && it.event != Event.BOOT }
             val tag = when {
-                marks.any { m -> m <= b.t && b.t - m <= MARK_TO_BOOT_MS } -> "(강제 재시작 표시 뒤)"
-                b.plugged && prev != null && prev.level <= 3 -> "(방전 뒤 충전기에서 켜짐)"
+                marks.any { m -> b.t - m in 0..MARK_BEFORE_BOOT_MS || m - b.t in 0..GaugeDriftRule.MARKER_WINDOW_MS } -> "(강제 재시작 표시)"
+                b.plugged && prev != null && !prev.plugged && prev.level <= 3 -> "(직전 기록 ${prev.level}% · 충전기에서 켜짐)"
                 else -> ""
             }
             return day(b.t, zone) + tag
@@ -383,8 +387,9 @@ object Evidence {
     }
 
     /**
-     * 워치 앱 지킴이가 앱별 통계로 본 단계 — 처음 짚은 뒤 재시작(Play 서비스는 PC 치료도)을 했는데도 다시 나타났거나 계속인 알려진 문제
-     * (소견 id → 한 줄). 워치가 아는 것만: 재시작 횟수는 알지만 캐시를 지웠는지는 모른다
+     * 워치 앱 지킴이가 앱별 통계로 본 단계 — 처음 짚은 뒤 워치가 다시 켜졌는데도(Play 서비스는 PC 치료 뒤에도) 또 나타났거나 계속인 알려진
+     * 문제 (소견 id → 한 줄). 워치가 아는 말로만: 다시 켜진 횟수는 알지만 사용자가 재시작했는지(방전 뒤 켜짐일 수도), 캐시를 지웠는지는
+     * 모른다 (리뷰)
      */
     internal fun watchStages(f: Facts, findings: List<Finding>): Map<String, String> {
         val out = LinkedHashMap<String, String>()
@@ -392,9 +397,9 @@ object Evidence {
             if (findings.none { it.id == id }) return
             val stage = f.watchMetrics[key] ?: 0.0
             val how = when {
-                stage >= 2.0 && id == "watch-gms" -> "처음 짚은 뒤 재시작을 두 번 이상 하거나 PC 치료(캐시 정리·Play 서비스 다시 시작)를 한 뒤에도 계속"
-                stage >= 2.0 -> "처음 짚은 뒤 재시작을 두 번 이상 한 뒤에도 계속"
-                stage >= 1.0 -> "처음 짚은 뒤 재시작한 뒤에도 다시 나타남"
+                stage >= 2.0 && id == "watch-gms" -> "처음 짚은 뒤 워치가 두 번 이상 다시 켜졌거나 PC 치료(캐시 정리·Play 서비스 다시 시작)를 한 뒤에도 계속"
+                stage >= 2.0 -> "처음 짚은 뒤 워치가 두 번 이상 다시 켜진 뒤에도 계속"
+                stage >= 1.0 -> "처음 짚은 뒤 워치가 다시 켜진 뒤에도 또 나타남"
                 else -> return
             }
             out[id] = "- 워치 앱 지킴이(앱별 통계, 최근 2시간): $name — $how"

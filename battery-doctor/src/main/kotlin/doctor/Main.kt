@@ -328,7 +328,12 @@ object Main {
                 else -> {
                     io.println(" 번호  시각              상태        조치")
                     entries.forEachIndexed { i, e ->
-                        val state = when { e.id == Fixer.UNDO_ALL -> "기록"; e.undone -> "되돌림"; e.undo == null -> "되돌릴 수 없음"; !e.ok -> "적용 실패"; else -> "적용됨" }
+                        if (e.id == Fixer.UNDO_ALL) {
+                            // '모두 되돌리기'를 한 기록 — 되돌릴 조치가 아니다
+                            io.println(String.format(" %3d   %s  %-8s  %s — %s%s", i + 1, stamp(e.time), "기록", Evidence.describeLever(e.id), e.note ?: "", if (e.ok) "" else " (일부 실패)"))
+                            return@forEachIndexed
+                        }
+                        val state = when { e.undone -> "되돌림"; e.undo == null -> "되돌릴 수 없음"; !e.ok -> "적용 실패"; else -> "적용됨" }
                         io.println(String.format(" %3d   %s  %-8s  %s (%s)%s", i + 1, stamp(e.time), state, Evidence.describeLever(e.id), e.id, e.before?.let { "  이전 값: $it" } ?: ""))
                     }
                     val typed = io.readLine("되돌릴 번호 (all = 전부 역순, 엔터 = 취소): ")?.trim().orEmpty()

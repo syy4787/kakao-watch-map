@@ -40,8 +40,8 @@ object Fixer {
     }
 
     /**
-     * [index] 가 null 이면 기록 역순으로 전부(끝에 [UNDO_ALL] 기록을 남김), 아니면 그 번호(0부터) 하나만. 이미 되돌렸거나 되돌릴 수 없는
-     * 기록은 건너뛴다. 되돌린 기록 수를 돌려준다.
+     * [index] 가 null 이면 기록 역순으로 전부(하나라도 되돌렸으면 끝에 [UNDO_ALL] 기록을 남김), 아니면 그 번호(0부터) 하나만. 이미 되돌렸거나
+     * 되돌릴 수 없는 기록은 건너뛴다. 되돌린 기록 수를 돌려준다.
      */
     fun undo(adb: AdbRunner, journal: Journal, index: Int?, now: Long = System.currentTimeMillis()): Int {
         val entries = journal.entries()
@@ -68,7 +68,8 @@ object Fixer {
             }
             if (ok) { journal.markUndone(i); n++ }
         }
-        if (index == null) journal.append(JournalEntry(now, UNDO_ALL, null, emptyList(), null, undone = false, ok = lastError == null, note = "되돌린 기록 ${n}개"))
+        // 되돌린 것이 없으면 남기지 않는다 — 아무것도 바뀌지 않았으니 앞의 일회성 조치도 그대로 조치 (리뷰)
+        if (index == null && n > 0) journal.append(JournalEntry(now, UNDO_ALL, null, emptyList(), null, undone = false, ok = lastError == null, note = "되돌린 기록 ${n}개"))
         return n
     }
 }

@@ -182,6 +182,12 @@ class CollectTest {
         assertEquals(a.dir, Collect.baseline(tmp.root, c, allUndone(run.filterNot { it.id.startsWith("grant:") }))!!.dir)
         // 효과가 남는 조치(앱 데이터 삭제)는 모두 되돌린 뒤에도 조치
         assertEquals(a.dir, Collect.baseline(tmp.root, c, allUndone(run + e(t0 + 64_000L, "clear:com.example.drain", null)) + undoAll)!!.dir)
+        // 모두 되돌리기 뒤에 다시 한 캐시 정리는 조치 — 마지막 '모두 되돌리기' 앞의 것만 끝난다 (리뷰)
+        val d = snapAt("20261014-150000", t0 + 5 * h)
+        val later = snapAt("20261015-130000", t0 + 27 * h)
+        assertEquals("다시 한 캐시 정리 전 수집(d)과", d.dir.name,
+            Collect.baseline(tmp.root, later, allUndone(run) + undoAll + e(t0 + 6 * h, "trim-caches", null))!!.dir.name)
+        assertEquals("그게 없으면 바로 앞 수집(c)과", c.dir.name, Collect.baseline(tmp.root, later, allUndone(run) + undoAll)!!.dir.name)
     }
 
     @Test

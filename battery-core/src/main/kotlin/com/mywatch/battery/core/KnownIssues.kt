@@ -52,7 +52,7 @@ object KnownIssues {
      * 남는다. 워치 앱과 PC 툴킷이 같은 말을 쓴다
      */
     const val REPORT = "오류 보내기 — 폰의 Galaxy Wearable 앱 › 대시보드 › ⋮ › 설정 › 문의하기 › 오류 보내기 또는 Samsung Members › 도움 받기 › " +
-        "질문/오류 보내기 ('시스템 로그 데이터 보내기' 체크, 삼성 안내: 증상 2~3분 안에)"
+        "질문/오류 보내기 › 보내기 › 오류 보내기 (기기는 워치로, '시스템 로그 데이터 보내기' 체크, 삼성 안내: 증상 2~3분 안에)"
 
     /** 삼성·구글 기본 시계 화면과 Watch Face Format 렌더러 — 시계 화면 문제로 짚지 않는다 */
     private val SYSTEM_FACES = listOf(
@@ -190,7 +190,7 @@ object KnownIssues {
                                 "새 소프트웨어 확인: 폰의 Galaxy Wearable 앱 › 워치 설정 › 워치 소프트웨어 업데이트 — 고쳐질 때까지 밤엔 지킴이 밤 모드",
                             ),
                             grade,
-                            todo = "홈 과소모 계속" to "오류 보내기(Wearable 앱 › 문의하기) · 워치 업데이트 확인",
+                            todo = "홈 과소모 계속" to "오류 보내기 · 워치 소프트웨어 업데이트 확인",
                             tile = "One UI Watch 홈 과소모 계속 — 오류 보내기",
                             stage = 2,
                         )

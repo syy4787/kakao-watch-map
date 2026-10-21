@@ -212,6 +212,19 @@ class MainTest {
         assertFalse(entries[1].undone)
     }
 
+    /** 메뉴 5 목록에서 '모두 되돌리기'는 되돌릴 조치가 아니라 기록으로 — 몇 개를 되돌렸는지와 함께 (리뷰) */
+    @Test
+    fun theUndoListShowsTheUndoAllMarkerAsARecord() {
+        val data = tmp.newFolder("data")
+        sampleSnapshot(data)
+        val adb = fakeAdb()
+        run(adb, data, "fix", "--apply", "wifi-scan-off")
+        run(adb, data, "undo", "--all")
+        val (_, out) = run(adb, data, "undo", answers = listOf(""))
+        val row = out.lines().single { it.contains("모두 되돌리기") }
+        assertTrue(row, row.contains("기록") && row.contains("되돌린 기록 1개") && !row.contains("되돌릴 수 없음"))
+    }
+
     @Test
     fun evidenceBuildsZipFromLatestSnapshot() {
         val data = tmp.newFolder("data")
