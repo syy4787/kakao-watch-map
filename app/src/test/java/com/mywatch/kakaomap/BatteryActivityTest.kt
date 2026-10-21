@@ -161,4 +161,20 @@ class BatteryActivityTest {
         click(a, adapter, BatteryActivity.A_TOGGLE + BatteryActivity.T_NIGHT_LOCATION)
         assertTrue(com.mywatch.kakaomap.battery.Guardian.config(context).nightLocationOff)
     }
+
+    /** 사용 정보 접근은 PC 없이 워치 설정에서 허용할 수 있게 그 화면을 연다 */
+    @Test
+    fun usageAccessCanBeOpenedFromTheWatch() {
+        val ops = context.getSystemService(android.app.AppOpsManager::class.java)
+        shadowOf(ops).setMode(android.app.AppOpsManager.OPSTR_GET_USAGE_STATS, android.os.Process.myUid(), context.packageName, android.app.AppOpsManager.MODE_IGNORED)
+        val (a, adapter) = open()
+        assertTrue(rows(adapter).filterIsInstance<Row.Action>().any { it.id == BatteryActivity.A_USAGE_ACCESS })
+        click(a, adapter, BatteryActivity.A_USAGE_ACCESS)
+        val started = shadowOf(a).nextStartedActivity
+        assertEquals(android.provider.Settings.ACTION_USAGE_ACCESS_SETTINGS, started.action)
+        // 허용되면 버튼이 사라진다
+        shadowOf(ops).setMode(android.app.AppOpsManager.OPSTR_GET_USAGE_STATS, android.os.Process.myUid(), context.packageName, android.app.AppOpsManager.MODE_ALLOWED)
+        val (_, adapter2) = open()
+        assertFalse(rows(adapter2).filterIsInstance<Row.Action>().any { it.id == BatteryActivity.A_USAGE_ACCESS })
+    }
 }

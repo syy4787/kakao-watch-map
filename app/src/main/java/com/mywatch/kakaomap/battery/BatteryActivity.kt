@@ -38,6 +38,8 @@ class BatteryActivity : ComponentActivity() {
     private var insights: Insights? = null
     /** "지금 페이스(시간당 4.0%)면 오후 10:05에 15%, …" */
     private var forecast: String? = null
+    /** 마지막으로 그릴 때 사용 통계를 읽을 수 있었나 */
+    private var usageShown = false
     private var live: BatterySample? = null
     private var picking = false
     private var notice: String? = null
@@ -64,6 +66,8 @@ class BatteryActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         handler.post(tick)
+        // 사용 정보 접근 설정에서 돌아왔으면 새 권한으로 다시 계산
+        if (analysis != null && ScreenUsage(this).available != usageShown) reload()
     }
 
     override fun onPause() {
@@ -162,6 +166,13 @@ class BatteryActivity : ComponentActivity() {
         val stats = HealthReader(this).available
         val st = Guardian.state(this)
         val cfg = Guardian.config(this)
+        val usage = ScreenUsage(this).available
+        usageShown = usage
+        if (!usage) {
+            // 사용 통계(화면 켜짐·알림·앱 사용 시간)는 워치 설정에서 바로 허용할 수 있을 때가 있다 — PC 없이
+            rows += Row.Note("사용 정보 접근을 허용하면 화면 켜짐·알림 횟수까지 나눠 봅니다 (PC 없이 워치 설정에서)")
+            rows += Row.Action(A_USAGE_ACCESS, R.drawable.ic_edit, "사용 정보 접근 허용", accent = true)
+        }
         if (!levers.canWriteSecure && !stats) {
             rows += Row.Note("PC 툴킷에서 메뉴 7(권한 주기)을 한 번 실행하면 켜집니다 — 앱별 소모를 읽고, 밤과 비정상 소모 때 절전 모드·AOD 를 스스로 조절합니다")
         } else {
@@ -341,6 +352,14 @@ class BatteryActivity : ComponentActivity() {
                 Guardian.saveConfig(this, next)
                 render()
             }
+            row.id == A_USAGE_ACCESS -> {
+                val opened = runCatching {
+                    startActivity(android.content.Intent(android.provider.Settings.ACTION_USAGE_ACCESS_SETTINGS, android.net.Uri.parse("package:$packageName")))
+                }.recoverCatching {
+                    startActivity(android.content.Intent(android.provider.Settings.ACTION_USAGE_ACCESS_SETTINGS))
+                }.isSuccess
+                if (!opened) { notice = "이 워치에는 그 설정 화면이 없어요 — PC 툴킷 메뉴 7(권한 주기)이 함께 허용합니다"; render() }
+            }
             row.id.startsWith(A_APP_INFO) -> {
                 val pkg = row.id.removePrefix(A_APP_INFO)
                 runCatching {
@@ -414,6 +433,7 @@ class BatteryActivity : ComponentActivity() {
         const val A_TOGGLE = "g:toggle:"
         const val A_FORCED_RESTART = "drift:restart"
         const val A_APP_INFO = "appinfo:"
+        const val A_USAGE_ACCESS = "usage:access"
         const val A_CAL_START = "cal:start"
         const val A_CAL_STOP = "cal:stop"
         const val T_NIGHT_SAVER = "nightSaver"
