@@ -5,9 +5,11 @@ import android.content.Context
 import com.mywatch.battery.core.BatterySample
 import com.mywatch.battery.core.UidUse
 import com.mywatch.kakaomap.battery.BatteryLog
+import com.mywatch.kakaomap.battery.Guardian
 import com.mywatch.kakaomap.battery.HealthStore
 import com.mywatch.kakaomap.tile.BatteryTileService
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -48,7 +50,9 @@ class BatteryTileTest {
         val s = BatteryTileService.snapshot(context, now, zone)
         assertEquals("배터리 55%", s.title)
         assertTrue(s.rate, s.rate.contains("시간당 4."))
-        assertTrue(s.forecast, s.forecast.startsWith("이 페이스") && s.forecast.contains("15%"))
+        // 소모율은 위 줄에 있으니 언제 15%·0% 인지만 짧게 — 작은 글씨 두 줄에 0% 시각이 잘리지 않게 (점검에서 찾음)
+        assertTrue(s.forecast, s.forecast.contains("15% ") && s.forecast.contains("0% ") && !s.forecast.contains("시간당"))
+        assertTrue(s.forecast, com.mywatch.battery.core.ChangeFinder.width(s.forecast) <= 22)
         assertTrue(s.status, s.status.contains("지킴이"))
     }
 
@@ -61,16 +65,32 @@ class BatteryTileTest {
         assertTrue(s.rate, s.rate.contains("충전 중"))
     }
 
+    /** 알려진 문제는 15분 기록(지킴이)이 찾아 적어 둔 것을 보인다 — 타일이 앱별 통계 파일을 읽지 않게 (점검에서 찾음) */
     @Test
     fun aKnownIssueTakesTheStatusLine() {
-        shadowOf(context as Application).grantPermissions("android.permission.BATTERY_STATS")
         val now = at(12)
         drain(now, 9, 63.0, 4.0)
-        val store = HealthStore(context)
-        store.record(now - 2 * 3_600_000L, mapOf("com.google.android.gms" to UidUse("com.google.android.gms")))
-        store.record(now - 60_000L, mapOf("com.google.android.gms" to UidUse("com.google.android.gms", cpuMs = 40 * 60_000L)))
+        var cpu = 0L
+        val stats = com.mywatch.kakaomap.battery.UidStatsSource { mapOf("com.google.android.gms" to UidUse("com.google.android.gms", cpuMs = cpu)) }
+        Guardian.tick(context, log, now - 2 * 3_600_000L, stats = stats, zone = zone)
+        cpu = 40 * 60_000L
+        Guardian.tick(context, log, now - 60_000L, stats = stats, zone = zone)
         val s = BatteryTileService.snapshot(context, now, zone)
         assertTrue(s.status, s.status.contains("Play 서비스") && s.status.contains("캐시"))
+        // 오래된 것(3시간 넘게 다시 확인 못 함)은 보이지 않는다
+        assertFalse(BatteryTileService.snapshot(context, now + 4 * 3_600_000L, zone).status.contains("캐시"))
+    }
+
+    /** 지킴이가 지금 설정을 바꿔 둔 상태(밤 모드·비정상 절전)는 '언제부터 더 닳음' 줄보다 먼저 — 지금 무엇이 바뀌어 있는지가 급하다 */
+    @Test
+    fun theGuardiansCurrentStateComesBeforeTheTrendLine() {
+        val now = at(12)
+        drain(now, 9, 63.0, 1.0)
+        context.getSharedPreferences(BatteryLog.PREFS, Context.MODE_PRIVATE).edit()
+            .putString(com.mywatch.kakaomap.battery.BatteryAlerts.KEY_TREND_LINE, "소프트웨어 업데이트 뒤 더 닳음")
+            .putLong(com.mywatch.kakaomap.battery.BatteryAlerts.KEY_TREND_UNTIL, now + 3_600_000L).commit()
+        Guardian.saveState(context, Guardian.state(context).copy(abnormalActive = true))
+        assertTrue(BatteryTileService.snapshot(context, now, zone).status.contains("비정상 소모"))
     }
 
     @Test

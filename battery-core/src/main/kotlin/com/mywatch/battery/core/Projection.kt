@@ -12,7 +12,22 @@ data class Forecast(val level: Int, val pph: Double, val at15: Long?, val at0: L
         return p + (at15?.let { "${clock(it, zone)}에 15%, " } ?: "") + zero
     }
 
+    /**
+     * 타일 한 줄용 짧은 글 (소모율은 위 줄에 있으니 빼고): "15% 오후 10:05 · 0% 내일 새벽 2:10".
+     * 둘 다 같은 날(내일 등)이면 그 날짜는 앞에 한 번: "내일 15% 새벽 3:24 · 0% 오전 7:40"
+     */
+    fun short(zone: ZoneId, now: Long = System.currentTimeMillis()): String {
+        val zero = clock(at0, zone, now)
+        val fifteen = at15?.let { clock(it, zone, now) } ?: return "0% $zero"
+        val day15 = fifteen.substringBefore(' ', "").takeIf { it.isNotEmpty() && it !in AMPM }
+        val day0 = zero.substringBefore(' ', "").takeIf { it.isNotEmpty() && it !in AMPM }
+        return if (day15 != null && day15 == day0) "$day15 15% ${fifteen.removePrefix("$day15 ")} · 0% ${zero.removePrefix("$day0 ")}"
+        else "15% $fifteen · 0% $zero"
+    }
+
     companion object {
+        private val AMPM = setOf("밤", "새벽", "오전", "오후")
+
         /** "오후 10:05" — 내일이면 앞에 "내일 ". 자정은 '밤 12:03', 1~5시는 '새벽 3:24' ('오전 12:03'은 헷갈림) */
         fun clock(t: Long, zone: ZoneId, now: Long = System.currentTimeMillis()): String {
             val z = Instant.ofEpochMilli(t).atZone(zone)

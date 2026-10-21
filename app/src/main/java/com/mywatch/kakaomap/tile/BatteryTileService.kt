@@ -24,7 +24,6 @@ import androidx.wear.tiles.tile
 import com.mywatch.battery.core.DrainAnalyzer
 import com.mywatch.battery.core.Event
 import com.mywatch.battery.core.Grade
-import com.mywatch.battery.core.KnownIssues
 import com.mywatch.battery.core.Projection
 import com.mywatch.battery.core.WatchModels
 import com.mywatch.kakaomap.R
@@ -33,7 +32,8 @@ import com.mywatch.kakaomap.battery.BatteryLog
 import com.mywatch.kakaomap.battery.BatteryProbe
 import com.mywatch.kakaomap.battery.Guardian
 import java.time.ZoneId
-import kotlin.time.Duration.Companion.minutes
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /**
  * 타일 '배터리': 지금 잔량 · 최근 소모율과 판정 · 지금 페이스면 언제 15%·0% · 지킴이 상태(또는 알려진 문제).
@@ -42,10 +42,13 @@ import kotlin.time.Duration.Companion.minutes
 class BatteryTileService : Material3TileService() {
 
     override suspend fun MaterialScope.tileResponse(requestParams: TileRequest): Tile {
-        val layout = runCatching { main(snapshot(this@BatteryTileService)) }
+        // 기록 읽기·배터리 값·분석은 메인 스레드 밖에서 (지도·유튜브 화면이 떠 있을 때 버벅이지 않게) — 15분 기록마다 다시 그리라고
+        // 알리므로 따로 새로 고침 주기(freshness)는 두지 않는다
+        val s = withContext(Dispatchers.IO) { runCatching { snapshot(this@BatteryTileService) } }
+        val layout = s.mapCatching { main(it) }
             .onFailure { Log.w(TAG, "타일 그리기 실패", it) }
             .getOrElse { fallback() }
-        return tile(timeline = Timeline.fromLayoutElement(layout), freshness = 15.minutes)
+        return tile(timeline = Timeline.fromLayoutElement(layout))
     }
 
     private fun MaterialScope.main(s: Snapshot): LayoutElement = primaryLayout(
@@ -98,17 +101,20 @@ class BatteryTileService : Material3TileService() {
                         (if (g == Grade.UNKNOWN) "" else " · ${g.label}")
                 }
             }
-            val forecast = Projection.forecast(samples, now)?.label(zone)?.removePrefix("지금 페이스")?.let { "이 페이스$it" }
+            // 소모율은 위 줄에 있으니 언제 15%·0% 인지만 (작은 글씨 두 줄에 0% 시각이 잘리지 않게)
+            val forecast = Projection.forecast(samples, now)?.short(zone, now)
                 ?: if (last?.plugged == true) "충전기에서 빼면 다시 잽니다" else "앞날은 2시간 기록 뒤부터"
-            val issue = runCatching { KnownIssues.detect(Guardian.culprits(c, now)).firstOrNull() }.getOrNull()
+            // 알려진 문제는 15분 기록(지킴이)이 찾아 적어 둔 것 — 타일이 앱별 통계 파일을 읽지 않게
+            val issue = runCatching { Guardian.tileIssue(c, now) }.getOrNull()
             val st = Guardian.state(c)
             val trendLine = runCatching { com.mywatch.kakaomap.battery.BatteryAlerts.trendLine(c, now) }.getOrNull()
             val status = when {
-                issue != null -> issue.title.substringBefore(" —") + " — 캐시 지우기"
-                // 최근 며칠 대기 소모가 늘었으면 그 무렵 바뀐 것 (하루 요약이 정해 둔 줄)
-                trendLine != null -> trendLine
+                issue != null -> issue.substringBefore(" —") + " — 캐시 지우기"
+                // 지금 바꿔 둔 것이 먼저 — 무엇이 꺼져 있는지 알아야 한다
                 st.nightActive -> "지킴이: 밤 모드 중 (아침·충전 때 원래대로)"
                 st.abnormalActive -> "지킴이: 비정상 소모 — 절전 켬"
+                // 최근 며칠 대기 소모가 늘었으면 그 무렵 바뀐 것 (하루 요약이 정해 둔 줄)
+                trendLine != null -> trendLine
                 else -> a?.drift?.takeIf { it.suspicious }?.headline?.substringAfter("— ")?.let { "잔량 표시: $it" } ?: "지킴이: 대기 중"
             }
             return Snapshot(title, rate, forecast, status)

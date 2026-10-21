@@ -62,4 +62,15 @@ class ProjectionTest {
         assertEquals("내일 오전 7:05", Forecast.clock(t(7, 5), zone, now))
         assertEquals("내일 오후 1:00", Forecast.clock(t(13, 0), zone, now))
     }
+
+    /** 타일용 짧은 글: 소모율 없이 언제 15%·0% — 같은 날이면 날짜는 한 번 (작은 글씨 두 줄에 0% 시각이 잘리지 않게) */
+    @Test
+    fun theTileLineIsShort() {
+        fun t(d: Int, h: Int, m: Int) = LocalDateTime.of(2026, 10, d, h, m).atZone(zone).toInstant().toEpochMilli()
+        val now = at(22)
+        assertEquals("내일 15% 새벽 3:24 · 0% 오전 7:40", Forecast(40, 4.0, t(22, 3, 24), t(22, 7, 40)).short(zone, now))
+        assertEquals("15% 오후 10:05 · 0% 내일 새벽 2:10", Forecast(20, 4.0, t(21, 22, 5), t(22, 2, 10)).short(zone, at(21, 50)))
+        assertEquals("0% 오후 11:30", Forecast(10, 4.0, null, t(21, 23, 30)).short(zone, now))
+        assertTrue(ChangeFinder.width(Forecast(40, 4.0, t(22, 3, 24), t(22, 7, 40)).short(zone, now)) <= 22)
+    }
 }

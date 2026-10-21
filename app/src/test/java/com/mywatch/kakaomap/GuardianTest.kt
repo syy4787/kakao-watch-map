@@ -278,6 +278,28 @@ class GuardianTest {
         assertFalse("안내 직후엔 다시 켜지 않음", Guardian.state(context).nightActive)
     }
 
+    /**
+     * 앱별 통계(시스템 전체 통계 동기화 — 무선·모뎀까지 부름)는 1시간에 한 번만. 최근 2시간 대기 소모가 높으면(범인을 바로 알아야)
+     * 15분마다 (점검에서 찾음: 15분마다 모든 앱 스냅샷 + 파일 두 번 읽기가 이 앱의 배터리 소모)
+     */
+    @Test
+    fun appStatsAreSnapshottedHourlyUnlessDrainingFast() {
+        var takes = 0
+        val stats = UidStatsSource { takes++; emptyMap() }
+        fill(at(10, 0), 9, 80.0, 1.0)
+        Guardian.tick(context, log, at(10, 0), stats = stats, zone = zone)
+        Guardian.tick(context, log, at(10, 15), stats = stats, zone = zone)
+        Guardian.tick(context, log, at(10, 45), stats = stats, zone = zone)
+        assertEquals(1, takes)
+        Guardian.tick(context, log, at(11, 0), stats = stats, zone = zone)
+        assertEquals(2, takes)
+        // 대기 소모가 시간당 4% 면 15분 뒤에도
+        log.file.delete()
+        fill(at(11, 15), 9, 80.0, 4.0)
+        Guardian.tick(context, log, at(11, 15), stats = stats, zone = zone)
+        assertEquals(3, takes)
+    }
+
     @Test
     fun bedtimeChargeReminder() {
         grant()

@@ -72,6 +72,7 @@ class HealthReader(context: Context) : UidStatsSource {
  */
 class HealthStore(context: Context) {
     private val dir = BatteryLog(context).dir
+    private val prefs = context.applicationContext.getSharedPreferences(BatteryLog.PREFS, Context.MODE_PRIVATE)
     private val last = File(dir, "health_last.json")
     private val deltas = File(dir, "health_deltas.jsonl")
 
@@ -82,6 +83,7 @@ class HealthStore(context: Context) {
         val prev = readLast()
         val d = if (prev == null) emptyList() else AppDrain.delta(prev.second, snapshot)
         writeLast(now, snapshot)
+        prefs.edit().putLong(K_LAST_AT, now).apply()
         if (prev != null && d.isNotEmpty()) {
             val top = d.sortedByDescending { it.wakelockMs + it.cpuMs * 2 + it.sensorMs / 2 + it.gpsMs * 3 }.take(MAX_PER_ROW)
             val row = JSONObject().put("t", now).put("ms", now - prev.first).put("d", JSONArray(top.map { toJson(it) }))
@@ -90,6 +92,9 @@ class HealthStore(context: Context) {
         }
         return d
     }
+
+    /** 마지막으로 스냅샷을 남긴 때 (없으면 0) — 파일을 열지 않고 */
+    fun lastAt(): Long = prefs.getLong(K_LAST_AT, 0L)
 
     /** 최근 [hours]시간의 차를 앱별로 합친 것과 실제로 덮인 시간(ms) */
     @Synchronized
@@ -145,7 +150,8 @@ class HealthStore(context: Context) {
     }
 
     private fun pruneIfBig(now: Long) {
-        if (deltas.length() < 400_000L) return
+        // 1시간에 한 줄(소모가 높으면 15분)이라 하루치는 수십 KB — 화면·지킴이가 읽는 파일이 커지지 않게 일찍 자른다
+        if (deltas.length() < PRUNE_BYTES) return
         val keepFrom = now - 24 * 3_600_000L
         val kept = deltas.readLines().filter { l -> runCatching { JSONObject(l).optLong("t") >= keepFrom }.getOrDefault(false) }
         deltas.writeText(kept.joinToString("\n", postfix = if (kept.isEmpty()) "" else "\n"))
@@ -161,6 +167,8 @@ class HealthStore(context: Context) {
 
     companion object {
         const val MAX_PER_ROW = 25
+        private const val K_LAST_AT = "health_last_at"
+        private const val PRUNE_BYTES = 120_000L
         private val T_PREFIX = Regex("^\\{\"t\":(-?\\d+)[,}]")
 
         /** 줄 맨 앞 '{"t":숫자' 의 시각 — 우리가 쓴 줄은 늘 t 가 먼저다. 모양이 다르면 null (그땐 통째로 푼다) */

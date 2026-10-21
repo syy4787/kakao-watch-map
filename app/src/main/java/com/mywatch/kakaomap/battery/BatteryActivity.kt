@@ -86,6 +86,8 @@ class BatteryActivity : ComponentActivity() {
         lifecycleScope.launch {
             val (ins, last) = withContext(Dispatchers.IO) {
                 runCatching {
+                    // 앱별 통계는 1시간에 한 번 남기므로, 화면을 열 때 묵었으면 하나 더 (최근 2시간 앱별 소모가 늦지 않게)
+                    runCatching { Guardian.snapshotIfStale(this@BatteryActivity) }
                     val all = log.readAll()
                     forecast = Projection.forecast(all, System.currentTimeMillis())?.label(java.time.ZoneId.systemDefault())
                     BatteryInsights.compute(this@BatteryActivity, all) to all.maxByOrNull { it.t }

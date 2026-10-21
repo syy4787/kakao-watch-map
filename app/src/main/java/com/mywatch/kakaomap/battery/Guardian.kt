@@ -156,9 +156,10 @@ object Guardian {
         // '사람이 봤다'(아침 기상)는 알림이 잠깐 켠 화면을 빼고 본다 — 새벽 알림 한 번에 밤 모드가 끝나지 않게
         val looked = usage?.let { u -> Wakes.withoutNotificationFlashes(u.screen, u.notifications.map { it.second }) }
 
-        // 앱별 누적 사용량 → 이번 구간 사용량 (권한이 있을 때만)
+        // 앱별 누적 사용량 → 이번 구간 사용량 (권한이 있을 때만). 시스템 통계 동기화(무선·모뎀까지)를 부르므로 1시간에 한 번 —
+        // 최근 2시간 대기 소모가 높을 때만 15분마다(범인을 바로 알아야 하므로)
         val source = stats ?: HealthReader(c).takeIf { it.available }
-        if (source != null) {
+        if (source != null && snapshotDue(c, now, samples)) {
             runCatching { HealthStore(c).record(now, source.take()) }.onFailure { ErrorLog.record("배터리·앱별 통계", it) }
             runCatching { checkKnownIssues(c, now, zone) }.onFailure { ErrorLog.record("배터리·알려진 문제", it) }
         }
@@ -240,6 +241,41 @@ object Guardian {
         runCatching { nm.notify(N_RELEASE, n) }
     }
 
+    /** 앱별 통계 스냅샷 간격 (15분 기록 넷에 한 번, 시각이 조금 밀려도) */
+    const val SNAPSHOT_EVERY_MS = 55L * 60_000L
+
+    /** 앱별 통계를 지금 남길 때인가: 1시간이 지났거나, 최근 2시간 대기 소모가 대기 기준(시간당 3.2%)을 넘을 때 */
+    private fun snapshotDue(c: Context, now: Long, samples: List<com.mywatch.battery.core.BatterySample>): Boolean {
+        val last = HealthStore(c).lastAt()
+        if (last <= 0L || now < last || now - last >= SNAPSHOT_EVERY_MS) return true
+        val idle = com.mywatch.battery.core.Rates.idleWindow(samples, now, 2).percentPerHour
+        return idle != null && idle >= com.mywatch.battery.core.Thresholds.IDLE_NORMAL
+    }
+
+    /**
+     * 배터리 화면을 열 때: 앱별 통계가 [maxAgeMs] 보다 묵었으면 지금 하나 남긴다 (1시간 간격이라 '최근 2시간 앱별 소모'가 늦지 않게).
+     * 권한이 없으면 아무것도 안 한다
+     */
+    fun snapshotIfStale(context: Context, now: Long = System.currentTimeMillis(), maxAgeMs: Long = 15L * 60_000L) {
+        val c = context.applicationContext
+        val reader = HealthReader(c).takeIf { it.available } ?: return
+        val store = HealthStore(c)
+        if (now - store.lastAt() < maxAgeMs && now >= store.lastAt()) return
+        runCatching { store.record(now, reader.take()) }.onFailure { ErrorLog.record("배터리·앱별 통계", it) }
+    }
+
+    /** 타일에 보일 알려진 문제 제목 — 15분 기록이 찾아 적어 둔 것 (3시간 넘게 다시 확인 못 했으면 null) */
+    fun tileIssue(c: Context, now: Long): String? {
+        val p = prefs(c)
+        val at = p.getLong(K_TILE_ISSUE_AT, 0L)
+        if (at <= 0L || now - at > TILE_ISSUE_MAX_AGE_MS || now < at) return null
+        return p.getString(K_TILE_ISSUE, null)
+    }
+
+    private const val K_TILE_ISSUE = "gs_tile_issue"
+    private const val K_TILE_ISSUE_AT = "gs_tile_issue_at"
+    private const val TILE_ISSUE_MAX_AGE_MS = 3L * 3_600_000L
+
     /** 화면 켜짐 구간으로 본 '지금까지 꺼져 있던 시간' — 지금 켜져 있으면 0, 창 안에 켜진 적이 없으면 창 길이 */
     internal fun screenOffFor(spans: List<Span>, now: Long): Long {
         val last = spans.maxByOrNull { it.end } ?: return SCREEN_LOOKBACK_MS
@@ -253,7 +289,10 @@ object Guardian {
     private fun checkKnownIssues(c: Context, now: Long, zone: ZoneId) {
         val (ranks, window) = culpritsInWindow(c, now)
         val face = runCatching { BatteryInsights.watchFace(c) }.getOrNull()
-        val issue = KnownIssues.detect(ranks, face, window.takeIf { it > 0 }).firstOrNull { it.grade == Grade.ABNORMAL } ?: return
+        val found = KnownIssues.detect(ranks, face, window.takeIf { it > 0 })
+        // 타일은 이 결과를 읽는다 (타일이 통계 파일을 읽고 분석하지 않게)
+        prefs(c).edit().putString(K_TILE_ISSUE, found.firstOrNull()?.title).putLong(K_TILE_ISSUE_AT, now).apply()
+        val issue = found.firstOrNull { it.grade == Grade.ABNORMAL } ?: return
         val p = prefs(c)
         val last = p.getLong(K_S_ISSUE_AT, 0L)
         if (last > 0 && now - last < ISSUE_COOLDOWN_MS) return
