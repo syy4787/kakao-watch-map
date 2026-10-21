@@ -1197,8 +1197,9 @@ class GuardianTest {
         grant()
         com.mywatch.kakaomap.battery.ShellRestoreReceiver().onReceive(context,
             android.content.Intent(Guardian.ACTION_SHELL_TREATED).putExtra(Guardian.EXTRA_DID, "trim-caches,gms-restart"))
-        val until = System.currentTimeMillis() + 5_000
-        while (System.currentTimeMillis() < until && !Guardian.treatPending(context)) Thread.sleep(20)
+        // 받는 곳은 뒤에서 처리한다 — 마지막에 적는 '한 일'까지 기다린다 (치료 표시만 보고 넘어가면 바쁠 때 '한 일'이 아직 비어 있었다)
+        val until = System.currentTimeMillis() + 20_000
+        while (System.currentTimeMillis() < until && Guardian.lastAction(context)?.contains("PC 자동 치료") != true) Thread.sleep(20)
         assertTrue(Guardian.treatPending(context))
         val action = Guardian.lastAction(context).orEmpty()
         assertTrue(action, action.contains("PC 자동 치료") && action.contains("Play 서비스 다시 시작"))
