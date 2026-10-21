@@ -59,6 +59,9 @@ class BatteryAndAccessTest {
         // 배터리 15% 이하: 간격을 넓힌다 (회전 앞도 2초)
         assertEquals(2_000L, LocationPolicy.navigation(nav(toNext = 50), false, 1.3f, 0, lowBattery = true).intervalMs)
         assertEquals(8_000L, LocationPolicy.navigation(nav(toNext = 900), false, 1.3f, 0, lowBattery = true).intervalMs)
+        // 저전력 화면에 '지도에서 보기' 경로만 띄워 둠(안내 아님): 아무도 안 보니 GPS 대신 Wi-Fi·기지국 30초
+        assertEquals(LocPower.BALANCED, LocationPolicy.AMBIENT_VIEW_ONLY.power)
+        assertEquals(30_000L, LocationPolicy.AMBIENT_VIEW_ONLY.intervalMs)
     }
 
     @Test

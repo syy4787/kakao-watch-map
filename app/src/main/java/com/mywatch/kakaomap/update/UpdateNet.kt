@@ -73,6 +73,10 @@ object UpdateNet {
         }
     }
 
+    /** 충전 중인지 — 자동 업데이트가 Wi-Fi 를 다시 켜 보는 때 (보통 집) */
+    fun charging(context: Context): Boolean =
+        runCatching { context.getSystemService(android.os.BatteryManager::class.java)?.isCharging == true }.getOrDefault(false)
+
     /** 지금 쓰는 망이 이미 Wi-Fi(또는 유선)인지 — 그럼 따로 부탁할 것 없이 그대로 받아도 된다 */
     fun onWifiNow(context: Context): Boolean = runCatching {
         val cm = context.getSystemService(ConnectivityManager::class.java) ?: return false

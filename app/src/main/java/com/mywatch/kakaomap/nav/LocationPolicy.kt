@@ -42,8 +42,11 @@ object LocationPolicy {
     /** 화면을 보고 있을 때 */
     val INTERACTIVE = LocPlan(LocPower.HIGH, 1_000)
 
-    /** 저전력 화면에서 '지도에서 보기'만 한 경로를 띄워 둔 경우 (안내 서비스 없음) */
-    val AMBIENT_VIEW_ONLY = LocPlan(LocPower.HIGH, 10_000, maxDelayMs = 20_000, minDistanceM = 5f)
+    /**
+     * 저전력 화면에서 '지도에서 보기'만 한 경로를 띄워 둔 경우 (안내 서비스 없음) — 아무도 보지 않으니 GPS 대신
+     * Wi-Fi·기지국 위치 30초 (손목을 올리면 바로 1초 GPS)
+     */
+    val AMBIENT_VIEW_ONLY = LocPlan(LocPower.BALANCED, 30_000, maxDelayMs = 60_000, minDistanceM = 10f)
 
     const val STILL_MPS = 0.4f
     /** 경로 밖에 이만큼 넘게 있으면 GPS 대신 Wi-Fi·기지국 위치(멈춰 있을 때) */

@@ -964,7 +964,8 @@ class MainActivity : ComponentActivity() {
             LocPower.PASSIVE -> Priority.PRIORITY_PASSIVE
         }
         val request = LocationRequest.Builder(priority, plan.intervalMs)
-            .setMinUpdateIntervalMillis(minOf(plan.intervalMs, 1_000L))
+            // 다른 앱이 받은 위치도 이 간격보다 자주 받지 않는다 (저전력 화면에서 1초마다 깨지 않게)
+            .setMinUpdateIntervalMillis(plan.intervalMs)
             .setMaxUpdateDelayMillis(plan.maxDelayMs)
             .setMinUpdateDistanceMeters(plan.minDistanceM)
             .build()

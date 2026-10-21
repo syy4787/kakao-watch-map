@@ -107,6 +107,7 @@ object UpdateManager {
     private const val KEY_BAD_SHA = "bad_sha"
     private const val KEY_BAD_SHA_COUNT = "bad_sha_count"
     private const val KEY_WAITING = "waiting_since"
+    private const val KEY_WIFI_MISS = "wifi_miss_at"
     private const val KEY_INSTALLED_SHA = "installed_sha"
     private const val KEY_PATCH_BAD = "patch_bad"
 
@@ -264,6 +265,16 @@ object UpdateManager {
     /** 워치가 저장된 Wi-Fi 를 켜고 붙는 데 걸리는 시간만큼은 기다려 준다 (찾고·붙고·주소 받기 몇 초) */
     const val WIFI_WAIT_MS = 10_000L
 
+    /** 자동 업데이트가 Wi-Fi 를 못 찾은 뒤 이만큼은 다시 켜 보지 않는다 (충전 중 빼고) */
+    const val WIFI_RETRY_AFTER_MS = 2 * 3_600_000L
+
+    private fun wifiMissedRecently(c: Context): Boolean {
+        val at = prefs(c).getLong(KEY_WIFI_MISS, 0L)
+        if (at <= 0L) return false
+        val since = clock() - at
+        return since in 0 until WIFI_RETRY_AFTER_MS
+    }
+
     /** '지금 업데이트'(사람이 기다림)는 조금만 */
     const val MANUAL_WIFI_WAIT_MS = 6_000L
 
@@ -321,10 +332,17 @@ object UpdateManager {
             // 그 밖의 오류(연결이 끊김·저장 공간 부족·멈춤)는 그대로 알린다 — 받은 데까지는 남겨 다음에 이어받고,
             // 105MB 전체 APK 를 폰으로 대신 받지 않는다 (끊긴 것은 패치 탓이 아니다)
         }
+        // 밖에서 Wi-Fi 를 못 찾은 지 얼마 안 됐으면 다시 켜 보지 않는다 — 앱을 닫을 때마다 워치가 Wi-Fi 를 켜고 10초씩 찾지 않게
+        // (충전 중이면 보통 집이라 바로 해 보고, 이미 Wi-Fi 에 붙어 있으면 그대로 받는다)
+        if (wifiOnly && wifiMissedRecently(c) && !UpdateNet.onWifiNow(c) && !UpdateNet.charging(c)) {
+            startWaitingForWifi(c)
+            throw NeedsWifi()
+        }
         val wifi = UpdateNet.wifi(c, wifiWaitMs)
         try {
             if (wifi == null) {
                 if (wifiOnly && !UpdateNet.onWifiNow(c)) {
+                    prefs(c).edit { putLong(KEY_WIFI_MISS, clock()) }
                     startWaitingForWifi(c)
                     throw NeedsWifi()
                 }

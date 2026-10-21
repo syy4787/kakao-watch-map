@@ -426,12 +426,44 @@ class UpdateOutsideTest {
         assertEquals(ListenableWorker.Result.success(), runBlocking { TestListenableWorkerBuilder<UpdateInstallWorker>(context).build().doWork() })
         assertEquals("Wi-Fi 가 없으면 받지 않고 다음 확인 때", 0, server.apkRequests.size)
         assertTrue("실패로 남기지 않는다", UpdateManager.lastError(context) == null)
-        // 집: 워치가 Wi-Fi 를 켤 수 있으면 받는다
+        // 집(두 시간 뒤): 워치가 Wi-Fi 를 켤 수 있으면 받는다
+        val start = System.currentTimeMillis()
+        UpdateManager.clock = { start + UpdateManager.WIFI_RETRY_AFTER_MS + 60_000L }
         val wifi = FakeWifi()
         UpdateNet.override = { _, _ -> wifi }
         runBlocking { TestListenableWorkerBuilder<UpdateInstallWorker>(context).build().doWork() }
         assertEquals(1, server.apkRequests.size)
         assertEquals(1, wifi.opened.get())
+    }
+
+    /**
+     * 밖에서 Wi-Fi 를 못 찾았으면 두 시간은 다시 켜 보지 않는다 — 앱을 닫을 때마다 워치가 Wi-Fi 를 켜고 10초씩 찾지 않게.
+     * 충전 중이면(보통 집) 바로 다시 해 본다
+     */
+    @Test
+    fun afterMissingWifiItDoesNotTurnWifiOnAgainForTwoHoursUnlessCharging() {
+        val start = System.currentTimeMillis()
+        UpdateManager.clock = { start }
+        server.updateJson = server.updateJsonFor(999, size = 105_000_000)
+        UpdateManager.check(context)
+        val asked = java.util.concurrent.atomic.AtomicInteger()
+        UpdateNet.override = { _, _ -> asked.incrementAndGet(); null }
+        autoInstallOnce()
+        assertEquals(1, asked.get())
+        UpdateManager.clock = { start + 30 * 60_000L }
+        autoInstallOnce()
+        autoInstallOnce()
+        assertEquals("두 시간 안엔 Wi-Fi 를 다시 켜지 않는다", 1, asked.get())
+        assertEquals(0, server.apkRequests.size)
+        // 충전기에 올리면 바로
+        shadowOf(context.getSystemService(android.os.BatteryManager::class.java)).setIsCharging(true)
+        autoInstallOnce()
+        assertEquals(2, asked.get())
+        shadowOf(context.getSystemService(android.os.BatteryManager::class.java)).setIsCharging(false)
+        // 두 시간 뒤엔 다시
+        UpdateManager.clock = { start + 30 * 60_000L + UpdateManager.WIFI_RETRY_AFTER_MS + 60_000L }
+        autoInstallOnce()
+        assertEquals(3, asked.get())
     }
 
     @Test

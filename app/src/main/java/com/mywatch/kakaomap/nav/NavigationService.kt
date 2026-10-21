@@ -130,6 +130,10 @@ class NavigationService : Service() {
     private val finishWake by lazy { Wake("kakaomap:finish") { finishIfStillArrived() } }
     /** 저전력(Wi-Fi·기지국) 위치로 쉬는 동안 몇 분마다 GPS 로 한 번 확인 — 기지국 위치만 잡히면 걷기 시작해도 모르므로 */
     private val probeWake by lazy { Wake("kakaomap:probe") { probeGps() } }
+    /** GPS 확인 간격 (못 잡으면 늘림) */
+    private val probeBackoff = ProbeBackoff()
+    /** 하고 있는 GPS 확인 — 안내를 끝내면 거둔다 */
+    private var probeCancel: CancellationTokenSource? = null
     private var finishVersion = -1
 
     private val callback = object : LocationCallback() {
@@ -265,9 +269,10 @@ class NavigationService : Service() {
                 val st = Navigator.state.value
                 // (기차·고속버스 안·역에서 기다리는 중 저전력으로 쉬는 건 일부러 — GPS 확인을 하지 않는다)
                 if (p.power == LocPower.BALANCED && !st.arrived && !st.onSubway && !st.onLongRide && !st.waitingLongRide) {
-                    probeWake.schedule(now + PROBE_EVERY_MS)
+                    probeWake.schedule(now + probeBackoff.nextDelayMs())
                 } else {
                     probeWake.cancel()
+                    probeBackoff.found()
                 }
             }
             .onFailure { Log.w(MapApp.TAG, "안내 위치 요청 실패", it) }
@@ -281,21 +286,31 @@ class NavigationService : Service() {
     private fun probeGps() {
         val p = plan ?: return
         if (!tracking || p.power != LocPower.BALANCED || !Locator.hasPermission(this)) return
-        probeWake.schedule(SystemClock.elapsedRealtime() + PROBE_EVERY_MS)
         val request = CurrentLocationRequest.Builder()
             .setPriority(Priority.PRIORITY_HIGH_ACCURACY)
             .setDurationMillis(PROBE_TIMEOUT_MS)
             .setMaxUpdateAgeMillis(5_000)
             .build()
+        probeCancel?.cancel()
+        val cancel = CancellationTokenSource().also { probeCancel = it }
         runCatching {
-            fused.getCurrentLocation(request, CancellationTokenSource().token)
-                .addOnSuccessListener { loc ->
+            fused.getCurrentLocation(request, cancel.token)
+                .addOnCompleteListener { task ->
+                    val loc = if (task.isSuccessful) task.result else null
+                    // 실내라 못 잡으면 다음 확인을 늦춘다 (4→8→16분), 잡히면 4분부터
+                    if (loc == null) probeBackoff.missed() else probeBackoff.found()
+                    if (running && tracking && plan?.power == LocPower.BALANCED) probeWake.schedule(SystemClock.elapsedRealtime() + probeBackoff.nextDelayMs())
                     if (loc != null && running && tracking) callback.onLocationResult(LocationResult.create(listOf(loc)))
                 }
-        }.onFailure { Log.w(MapApp.TAG, "GPS 확인 실패", it) }
+        }.onFailure {
+            Log.w(MapApp.TAG, "GPS 확인 실패", it)
+            probeWake.schedule(SystemClock.elapsedRealtime() + probeBackoff.nextDelayMs())
+        }
     }
 
     private fun stopTracking() {
+        probeCancel?.cancel()
+        probeCancel = null
         probeWake.cancel()
         if (!tracking) return
         tracking = false
@@ -684,13 +699,17 @@ class NavigationService : Service() {
         return b.build()
     }
 
-    /** 문구가 바뀌었을 때만, 너무 잦지 않게(5초) 알림을 고친다 — 배터리 절약 */
+    /**
+     * 문구가 바뀌었을 때만, 너무 잦지 않게 알림을 고친다 — 화면을 보는 중 5초, 꺼져 있으면 30초 ([NavNotice]).
+     * 도착·이탈·다시 찾기·다음 할 일이 바뀐 것은 바로. 남은 거리는 반올림해 위치마다 글이 바뀌지 않게 (배터리 절약)
+     */
     private fun updateNotification(active: ActiveRoute, s: NavState) {
         val text = statusText(active, s)
-        if (text == shownText) return
         val now = SystemClock.elapsedRealtime()
-        val important = s.arrived || s.offRoute || s.rerouting
-        if (!important && now - lastNotifyAt < 5_000) return
+        val guideChanged = text.substringBefore(LEFT_SEP) != shownText?.substringBefore(LEFT_SEP)
+        val important = s.arrived || s.offRoute || s.rerouting || guideChanged
+        val interactive = runCatching { getSystemService(android.os.PowerManager::class.java)?.isInteractive }.getOrNull() ?: true
+        if (!NavNotice.shouldUpdate(text != shownText, now - lastNotifyAt, interactive, important)) return
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) return
@@ -702,11 +721,8 @@ class NavigationService : Service() {
         runCatching { ongoing?.update(applicationContext, statusOf(text)) }
     }
 
-    /** 실시간 업데이트 칩에 넣을 아주 짧은 글 (7자 안쪽): 남은 거리 또는 '도착' */
-    private fun shortText(s: NavState): String? = when {
-        s.arrived -> "도착"
-        else -> s.remainingM?.let { Format.distance(it) }
-    }
+    /** 실시간 업데이트 칩에 넣을 아주 짧은 글 (7자 안쪽): 남은 거리(반올림) 또는 '도착' */
+    private fun shortText(s: NavState): String? = NavNotice.short(s.remainingM, s.arrived)
 
     /** 진행 중 활동의 상태 문구. '#' 은 템플릿 기호라 전각 문자로 바꿔 넣는다 */
     private fun statusOf(text: String): Status = Status.Builder().addTemplate(text.replace('#', '＃')).build()
@@ -714,8 +730,7 @@ class NavigationService : Service() {
     private fun statusText(active: ActiveRoute?, s: NavState): String {
         if (active == null) return getString(R.string.map_name)
         val guide = s.guide?.lineSequence()?.firstOrNull()?.ifBlank { null } ?: active.summary
-        val left = s.remainingM?.takeIf { !s.arrived }?.let { " · 남은 ${Format.distance(it)}" } ?: ""
-        return guide + left
+        return NavNotice.text(guide, s.remainingM, s.arrived)
     }
 
     private fun ensureChannel() {
@@ -731,6 +746,7 @@ class NavigationService : Service() {
 
     private fun shutdown() {
         stopTracking()
+        stallWake.cancel()
         rerouteJob?.cancel()
         passiveWake.cancel()
         finishWake.cancel()
@@ -751,6 +767,8 @@ class NavigationService : Service() {
     }
 
     companion object {
+        /** 알림 글에서 '다음 할 일'과 남은 거리를 가르는 곳 */
+        private const val LEFT_SEP = " · 남은 "
         private const val CHANNEL_ID = "navigation"
         private const val NOTIFICATION_ID = 42
         private const val GAVE_UP_NOTIFICATION_ID = 43
@@ -759,7 +777,6 @@ class NavigationService : Service() {
         private const val PLAN_DWELL_MS = 5_000L
         private const val SIGNAL_LOST_AFTER_MS = 10_000L
         private const val BATTERY_CHECK_MS = 60_000L
-        private const val PROBE_EVERY_MS = 4 * 60_000L
         /** 이 정확도 안의 위치면 '위치를 받고 있음' (엔진도 50m 넘는 위치는 버린다) */
         private const val USABLE_FIX_M = 50f
         /** 목적지 바로 옆인지 볼 때 쓸 위치의 나이 */
