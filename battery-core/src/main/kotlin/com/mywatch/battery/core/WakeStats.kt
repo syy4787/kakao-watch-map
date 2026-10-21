@@ -54,13 +54,15 @@ data class WakeStats(
 
     /**
      * 알림이 화면을 켠 일이 많을 때 (폰의 Galaxy Wearable 앱). 삼성 안내(배터리가 빨리 닳을 때·알림 설정): 웨어러블 앱 › 워치 설정 ›
-     * 알림 › 고급 설정 › '알림 받으면 화면 켜기'를 끄면 알림은 그대로 오고 화면만 안 켜진다 — 앱 알림을 통째로 끄는 것보다 먼저
+     * 알림 › 고급 설정 › '알림 받으면 화면 켜기'를 끄면 알림은 그대로 오고 화면만 안 켜진다 — 앱 알림을 통째로 끄는 것보다 먼저.
+     * 삼성 배터리 안내는 같은 곳의 '알림 수신 8초 내 확인 시 상세 내용 바로보기'(영문 'Show details automatically …')도 끄라고 한다
      */
     fun notificationAdvice(label: (String) -> String = { it }): String? {
         if (notificationWakes < Wakes.NOTIF_ADVICE) return null
         val top = topNotifiers.take(2).joinToString(", ") { "${label(it.first)} ${it.second}번" }
         return "알림이 화면을 ${notificationWakes}번 켬 (많이 보낸 앱: $top) — 폰의 Galaxy Wearable 앱 › 워치 설정 › 알림 › 고급 설정에서 " +
             "'알림 받으면 화면 켜기'를 끄면(알림은 그대로 옴) 하루 약 ${DrainAnalyzer.fmt(notificationCostPercent)}% 아낍니다. " +
+            "같은 곳의 '알림 수신 8초 내 확인 시 상세 내용 바로보기'도 끄면 알림을 볼 때 화면이 덜 켜져 있습니다(삼성 배터리 안내). " +
             "한 앱이 대부분이면 그 앱의 워치 알림만 꺼도 됩니다"
     }
 

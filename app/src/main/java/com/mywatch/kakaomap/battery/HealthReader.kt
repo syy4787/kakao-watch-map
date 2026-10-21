@@ -56,7 +56,7 @@ class HealthReader(context: Context) : UidStatsSource {
         fun groupKey(packages: List<String>): String {
             val names = packages.sorted()
             if (names.size == 1) return names[0]
-            val base = if ("android" in names) names[0] else NAMED.firstOrNull { it in names } ?: names[0]
+            val base = if ("android" in names) "android" else NAMED.firstOrNull { it in names } ?: names[0]
             return base + "+" + (names.size - 1)
         }
 

@@ -464,6 +464,22 @@ class AnalyzerTest {
         assertEquals(Cause.INSUFFICIENT, Analyzer.verdict(f, fs).cause)
     }
 
+    /**
+     * One UI Watch 홈이 시스템 uid(1000)를 같이 쓰면 앱별 통계에서 홈만 따로 셀 수 없다 — 보고서가 그렇다고 알려 준다
+     * (워치 앱의 '홈 과소모'도 못 짚음 → 워치 배터리 사용량 화면에서 직접 보라고). 따로 쓰면 조용히
+     */
+    @Test
+    fun aHomeOnTheSystemUidIsReported() {
+        val home = Analyzer.HOME
+        val shared = Analyzer.findings(Facts(packages = listOf(PackageInfo("android", 1000, true, false), PackageInfo(home, 1000, true, false))))
+            .firstOrNull { it.id == "home-uid" }
+        assertNotNull(shared)
+        assertEquals(Severity.INFO, shared!!.severity)
+        assertTrue(shared.title, shared.title.contains("시스템과 같은 uid"))
+        assertTrue(shared.evidence.toString(), shared.evidence.any { it.contains("배터리 사용량") })
+        assertTrue(Analyzer.findings(Facts(packages = listOf(PackageInfo(home, 10123, true, false)))).none { it.id == "home-uid" })
+    }
+
     /** uid 하나에 패키지가 여럿이면 알려진 문제를 보는 패키지(홈·Play 서비스)를 대표로 — 시스템 uid('android')는 그대로 (리뷰에서 찾음) */
     @Test
     fun aSharedUidIsNamedAfterTheKnownPackage() {
