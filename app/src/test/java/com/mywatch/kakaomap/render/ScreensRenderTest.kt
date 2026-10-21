@@ -619,6 +619,37 @@ class ScreensRenderTest {
         shoot("battery_chart", rows, pages = 2)
     }
 
+    /** 실제 배터리 화면: 하루 반 기록(밤 충전 포함)으로 맨 위 지금 줄·그래프·지금 할 일·소모율·지킴이 칸 */
+    @Test
+    fun batteryScreen() {
+        val app = org.robolectric.RuntimeEnvironment.getApplication()
+        val log = com.mywatch.kakaomap.battery.BatteryLog(app)
+        log.dir.deleteRecursively()
+        val now = System.currentTimeMillis()
+        val q = 15 * 60_000L
+        var level = 70.0
+        var t = now - 30 * 3_600_000L
+        while (t <= now) {
+            val hour = java.time.Instant.ofEpochMilli(t).atZone(java.time.ZoneId.systemDefault()).hour
+            val plugged = hour in 1..2
+            level = if (plugged) minOf(100.0, level + 12) else maxOf(5.0, level - (if (hour in 12..13) 2.5 else 0.6))
+            log.append(com.mywatch.battery.core.BatterySample(t = t, level = level.toInt(), plugged = plugged, voltageMv = 3900, tempDeciC = 320, currentUa = -60_000))
+            t += q
+        }
+        val controller = Robolectric.buildActivity(com.mywatch.kakaomap.battery.BatteryActivity::class.java)
+        val activity = controller.get()
+        activity.requestWindowFeature(Window.FEATURE_NO_TITLE)
+        controller.setup()
+        val deadline = System.currentTimeMillis() + 5_000
+        while (System.currentTimeMillis() < deadline && rowsOf(activity).none { it is Row.Chart }) {
+            Thread.sleep(20)
+            shadowOf(Looper.getMainLooper()).idle()
+        }
+        capture(activity, "battery_screen", pages = 4)
+        controller.pause().stop().destroy()
+        log.dir.deleteRecursively()
+    }
+
     /** 실제 화면(액티비티)을 둥근 워치 크기로 — [shoot] 와 같은 모양 */
     private fun capture(activity: android.app.Activity, name: String, pages: Int) {
         val list = activity.findViewById<androidx.recyclerview.widget.RecyclerView>(R.id.list)

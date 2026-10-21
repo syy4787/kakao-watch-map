@@ -37,10 +37,16 @@ class BatteryActivityTest {
         log.dir.deleteRecursively()
     }
 
+    /** 화면을 열고 기록 분석(다른 스레드)이 끝나 줄이 그려질 때까지 기다린다 (기록이 많으면 한 번 돌리는 것으로는 모자람) */
     private fun open(): Pair<BatteryActivity, RowAdapter> {
         val a = Robolectric.buildActivity(BatteryActivity::class.java).setup().get()
-        shadowOf(Looper.getMainLooper()).idle()
         val adapter = a.findViewById<RecyclerView>(R.id.list).adapter as RowAdapter
+        val until = System.currentTimeMillis() + 10_000
+        do {
+            shadowOf(Looper.getMainLooper()).idle()
+            if (adapter.rows.any { it is Row.Header && it.title == "소모율" }) break
+            Thread.sleep(20)
+        } while (System.currentTimeMillis() < until)
         return a to adapter
     }
 

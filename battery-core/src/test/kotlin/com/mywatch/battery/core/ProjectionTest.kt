@@ -50,4 +50,15 @@ class ProjectionTest {
         assertNull(f.at15)
         assertTrue(f.label(zone), f.label(zone).contains("0%"))
     }
+    /** 자정·새벽은 '오전 12:03'(헷갈림) 대신 '밤 12:03'·'새벽 3:24' */
+    @Test
+    fun midnightAndSmallHoursReadNaturally() {
+        val zone = java.time.ZoneId.of("Asia/Seoul")
+        fun t(h: Int, m: Int) = java.time.LocalDateTime.of(2026, 10, 22, h, m).atZone(zone).toInstant().toEpochMilli()
+        val now = java.time.LocalDateTime.of(2026, 10, 21, 20, 0).atZone(zone).toInstant().toEpochMilli()
+        assertEquals("내일 밤 12:03", Forecast.clock(t(0, 3), zone, now))
+        assertEquals("내일 새벽 3:24", Forecast.clock(t(3, 24), zone, now))
+        assertEquals("내일 오전 7:05", Forecast.clock(t(7, 5), zone, now))
+        assertEquals("내일 오후 1:00", Forecast.clock(t(13, 0), zone, now))
+    }
 }

@@ -26,7 +26,7 @@ object BatteryTodo {
         ins.wakes?.advice(label)?.forEach { out += split(it, Grade.CAUTION) }
         ins.night?.advice?.forEach { out += split(it, Grade.CAUTION) }
         if (!permitted) {
-            out += Todo("지킴이 권한 주기", "PC 툴킷 메뉴 8(자동 치료)을 한 번 — 밤·비정상 소모 때 워치가 스스로 절전·AOD·손목 올림을 조절하고 앱별 소모를 봅니다", Grade.UNKNOWN)
+            out += Todo("지킴이 권한 주기", "PC 툴킷 메뉴 8(자동 치료)을 한 번 — 밤·과소모 때 워치가 스스로 조절", Grade.UNKNOWN)
         }
         ins.charging?.advice?.forEach { out += split(it, Grade.CAUTION) }
         return out.distinctBy { it.title }.take(MAX)

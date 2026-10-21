@@ -13,7 +13,7 @@ data class Forecast(val level: Int, val pph: Double, val at15: Long?, val at0: L
     }
 
     companion object {
-        /** "오후 10:05" — 내일이면 앞에 "내일 " */
+        /** "오후 10:05" — 내일이면 앞에 "내일 ". 자정은 '밤 12:03', 1~5시는 '새벽 3:24' ('오전 12:03'은 헷갈림) */
         fun clock(t: Long, zone: ZoneId, now: Long = System.currentTimeMillis()): String {
             val z = Instant.ofEpochMilli(t).atZone(zone)
             val today = Instant.ofEpochMilli(now).atZone(zone).toLocalDate()
@@ -23,7 +23,7 @@ data class Forecast(val level: Int, val pph: Double, val at15: Long?, val at0: L
                 else -> "${z.monthValue}/${z.dayOfMonth} "
             }
             val h = z.hour
-            val ampm = if (h < 12) "오전" else "오후"
+            val ampm = when (h) { 0 -> "밤"; in 1..5 -> "새벽"; in 6..11 -> "오전"; else -> "오후" }
             val h12 = if (h % 12 == 0) 12 else h % 12
             return "$day$ampm $h12:${"%02d".format(z.minute)}"
         }
