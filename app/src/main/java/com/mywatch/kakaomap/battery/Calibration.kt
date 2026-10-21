@@ -52,7 +52,7 @@ object Calibration {
 
     /** 알림에서 시작했을 때 — 첫 단계 할 일을 알린다 */
     fun notifyStarted(c: Context) = runCatching {
-        show(c, "게이지 보정 시작 — 충전기에 올리세요", "${CalibrationRule.stepLabel(1)}. 단계마다 알려 드립니다. (배터리 보호(85% 제한)는 보정 동안 꺼 두세요 — 100%에 닿아야 합니다)")
+        show(c, "게이지 보정 시작 — 충전기에 올리세요", "${CalibrationRule.stepLabel(1)}. 단계마다 알려 드립니다. (배터리 보호(90%에서 멈춤)는 보정 동안 꺼 두세요 — 100%에 닿아야 합니다)")
     }
 
     private fun notify(c: Context, a: CalibrationAction) {

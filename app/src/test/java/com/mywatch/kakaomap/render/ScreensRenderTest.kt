@@ -654,14 +654,19 @@ class ScreensRenderTest {
         val shift = t.shift!!
         fun line(c: com.mywatch.battery.core.Change) = "· ${com.mywatch.kakaomap.battery.BatterySummary.time(c.t)} ${com.mywatch.battery.core.ChangeFinder.label(c) { null }}"
         val near = t.suspects.take(3)
+        val (todoTitle, todoDetail) = t.advice { null }!!
         val rows = listOf(
+            // 맨 위 '지금 할 일' 줄 — 세 줄 안에 할 일이 다 들어가는지
+            Row.Header("지금 할 일"),
+            Row.Step(0xFFFFC107.toInt(), R.drawable.ic_warning, "1", todoTitle, todoDetail, key = "todo:0"),
             Row.Header("최근 며칠", "대기(화면 꺼짐) 시간당 %"),
             Row.Trend("days", t.bars!!),
             Row.Step(0xFFFFC107.toInt(), R.drawable.ic_warning, null, com.mywatch.battery.core.ChangeFinder.title(shift), com.mywatch.battery.core.ChangeFinder.numbers(shift), key = "trend"),
             Row.Note("그 무렵 바뀐 것:\n" + near.joinToString("\n", transform = ::line)),
+            Row.Note("할 일: $todoTitle — $todoDetail"),
             Row.Note("최근 바뀐 것:\n" + t.recent.filter { it !in near }.take(5).joinToString("\n", transform = ::line)),
         )
-        shoot("battery_trend", rows, pages = 3)
+        shoot("battery_trend", rows, pages = 4)
     }
 
     /** 실제 배터리 화면: 하루 반 기록(밤 충전 포함)으로 맨 위 지금 줄·그래프·지금 할 일·소모율·지킴이 칸 */

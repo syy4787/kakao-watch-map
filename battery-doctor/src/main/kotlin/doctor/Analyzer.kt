@@ -2,7 +2,6 @@ package doctor
 
 import com.mywatch.battery.core.AnomalyKind
 import com.mywatch.battery.core.ChangeFinder
-import com.mywatch.battery.core.ChangeKind
 import com.mywatch.battery.core.DayTrend
 import com.mywatch.battery.core.DrainAnalyzer
 import com.mywatch.battery.core.Gauge
@@ -37,6 +36,10 @@ import java.util.Locale
 object Analyzer {
     const val GMS = "com.google.android.gms"
 
+    private const val DAY_MS = 24 * 3_600_000L
+    /** '언제부터' 소견의 갈래 — 범인 앱을 정하지 않는다 ([Finding.blames]) */
+    const val TREND = "trend"
+
     fun facts(snapshot: Snapshot, zone: ZoneId = ZoneId.systemDefault()): Facts {
         val getprop = snapshot.text("getprop") ?: ""
         val model = Collect.propOf(getprop, "ro.product.model") ?: snapshot.meta.getProperty("model")
@@ -69,6 +72,7 @@ object Analyzer {
             watchSummary = snapshot.watchSummary,
             watchMetrics = com.mywatch.battery.core.SummaryMetrics.parse(snapshot.watchSummary),
             watchTrend = if (samples.isNotEmpty()) runCatching { TrendReport.of(samples, snapshot.time, zone) }.getOrNull() else null,
+            zone = zone,
             collectedAt = snapshot.time,
             missing = snapshot.failed(),
             snapshotDir = snapshot.dir.path,
@@ -216,7 +220,7 @@ object Analyzer {
             val sev = if (hard.isNotEmpty()) Severity.ABNORMAL else Severity.CAUTION
             val kinds = list.groupBy { it.kind }.entries.joinToString(", ") { "${it.value.first().label} ${it.value.size}회" }
             out += Finding("gauge-watch", sev, "워치 기록의 잔량 표시 이상 ${list.size}회 ($kinds) — ${sev.label}",
-                list.takeLast(8).map { "${time(it.t)} ${it.label}: ${it.detail}" } + listOf("기준: 충전 없이 +5포인트, 부팅 뒤 +10포인트, 20분 안에 −15포인트, 계수기와 10포인트 차이"),
+                list.takeLast(8).map { "${time(it.t, f.zone)} ${it.label}: ${it.detail}" } + listOf("기준: 충전 없이 +5포인트, 부팅 뒤 +10포인트, 20분 안에 −15포인트, 계수기와 10포인트 차이"),
                 source = "battery-core Gauge 규칙 — 잔량 점프·급락은 셀이 아니라 게이지(잔량 추정 펌웨어)의 문제일 때가 많음(2026년 워치8 '재부팅 한 번에 30% 손실' 사례)", category = "gauge")
         }
 
@@ -234,7 +238,7 @@ object Analyzer {
         f.watch?.recoveries?.firstOrNull { it.userMarked }?.let { r ->
             out += Finding("gauge-restart-mark", if (r.gained >= Gauge.REBOOT_JUMP_MIN) Severity.CAUTION else Severity.INFO,
                 "사용자가 표시한 강제 재시작: 잔량 ${r.before}% → ${r.after}% (${if (r.gained >= 0) "+" else ""}${r.gained})",
-                listOf("${time(r.t)} 워치 배터리 화면 '강제 재시작 표시 남기기'", "재시작으로 잔량이 뛰면 그만큼은 게이지 드리프트였다는 뜻"), source = Rules.SOURCE_DRIFT, category = "gauge")
+                listOf("${time(r.t, f.zone)} 워치 배터리 화면 '강제 재시작 표시 남기기'", "재시작으로 잔량이 뛰면 그만큼은 게이지 드리프트였다는 뜻"), source = Rules.SOURCE_DRIFT, category = "gauge")
         }
         f.watch?.takeIf { it.hotIdleCount >= DrainAnalyzer.HOT_MIN_SAMPLES }?.let { w ->
             out += Finding("watch-hot", Severity.CAUTION, "워치 기록: 충전 안 하고 화면 꺼진 채 ${DrainAnalyzer.HOT_DECI_C / 10}℃ 이상이 ${w.hotIdleCount}회(15분 표본, 최근 24시간) — 백그라운드 과열",
@@ -246,17 +250,30 @@ object Analyzer {
                 source = Rules.SOURCE_DRIFT, category = "gauge")
         }
 
-        // 7-1. 언제부터 — 최근 7일 안에 대기 소모가 늘어 꺾였으면 그 무렵 바뀐 것과 할 일 (워치 앱이 표본에 남긴 '바뀐 것' 표시)
+        // 7-1. 언제부터 — 최근 7일 안에 대기 소모가 늘어 꺾였으면 그 무렵 바뀐 것과 할 일 (워치 앱이 표본에 남긴 '바뀐 것' 표시).
+        // 그 무렵 업데이트된 앱은 우연일 수 있으므로 packages 에 넣지 않는다 — 자동 치료·범인 표가 그 앱을 범인으로 삼지 않게 (글로만)
         f.watchTrend?.takeIf { it.fresh }?.let { t ->
             val s0 = t.shift ?: return@let
-            val (todo, how) = ChangeFinder.advice(s0, t.suspects.firstOrNull()) { null }
+            val (todo, how) = t.advice { null } ?: return@let
             out += Finding("watch-shift", Severity.CAUTION, "워치 기록: ${ChangeFinder.headline(s0)}",
                 listOf("날마다 대기 시간당 %: " + t.shownDays.joinToString(" · ") { d -> "${ChangeFinder.day(d.date)} ${d.pph?.let { fmt1(it) } ?: "-"}" }) +
-                    (if (t.suspects.isEmpty()) listOf("그 무렵 워치 앱이 아는 변화(소프트웨어·앱·시계 화면·주요 설정)는 없음")
-                    else t.suspects.take(5).map { "그 무렵: ${time(it.t)} ${ChangeFinder.label(it) { null }}" }) +
+                    when {
+                        t.suspects.isNotEmpty() -> t.suspects.take(5).map { "그 무렵: ${time(it.t, f.zone)} ${ChangeFinder.label(it) { null }}" }
+                        !t.known -> listOf("그때는 워치가 아직 바뀐 것을 적기 전이라 그 무렵 변화는 모름")
+                        else -> listOf("그 무렵 워치 앱이 아는 변화(소프트웨어·앱·시계 화면·주요 설정)는 없음")
+                    } +
                     listOf("할 일: $todo — $how", "기준: 날마다 대기 %/h 중앙값이 ${DayTrend.RATIO}배·${DayTrend.MIN_DIFF}%p 넘게, 양쪽 ${DayTrend.MIN_SIDE_DAYS}일 이상이 같은 쪽"),
-                packages = t.suspects.filter { it.kind == ChangeKind.APP && it.to != "-" }.map { it.subject }.distinct().take(3),
-                category = "trend")
+                category = TREND)
+        }
+
+        // 7-2. 오래 켜 둔 워치 — 대기 소모가 높으면 재시작부터 (2026년 광탈 글들의 공통 해결담: 재시작 → 캐시 → 초기화)
+        f.alarmElapsedMs?.takeIf { it >= Rules.UPTIME_DAYS * DAY_MS }?.let { up ->
+            val idleGrade = Thresholds.idle(f.watch?.idle24?.percentPerHour)
+            val awakeHigh = (s?.screenOffAwakeRatio ?: 0.0) > Rules.AWAKE_CAUTION
+            val high = idleGrade == Grade.CAUTION || idleGrade == Grade.ABNORMAL || awakeHigh
+            out += Finding("uptime-long", if (high) Severity.CAUTION else Severity.INFO, "워치를 재시작한 지 ${up / DAY_MS}일" + (if (high) " — 대기 소모가 높으니 재시작부터" else ""),
+                listOf("부팅 뒤 ${Durations.human(up)} (dumpsys alarm 의 경과 시간)", Rules.FORCED_RESTART + " — 오래 켜 둔 워치는 재시작으로 멈춘 서비스가 풀리는 일이 많습니다"),
+                category = "info")
         }
 
         // 8. 용량
@@ -298,7 +315,7 @@ object Analyzer {
                 val pph = e.rate.percentPerHour ?: continue
                 val state = if (e.end == null) "진행 중" else "끝"
                 out += Finding("watch-experiment:${e.name}", sevOf(e.grade), "실험 '${e.name}'($state) 시간당 ${fmt1(pph)}% — ${e.grade.label}(경험칙 ${Thresholds.EXPERIMENT_ABNORMAL}%/h)",
-                    listOf("${time(e.start)} ~ ${e.end?.let { time(it) } ?: "진행 중"}, ${fmt1(e.rate.hours)}시간, ${fmt1(e.rate.dropPercent)}포인트", "기준: ${Thresholds.EXPERIMENT_NORMAL}%/h 이하 정상, ${Thresholds.EXPERIMENT_ABNORMAL}%/h 초과 비정상"),
+                    listOf("${time(e.start, f.zone)} ~ ${e.end?.let { time(it, f.zone) } ?: "진행 중"}, ${fmt1(e.rate.hours)}시간, ${fmt1(e.rate.dropPercent)}포인트", "기준: ${Thresholds.EXPERIMENT_NORMAL}%/h 이하 정상, ${Thresholds.EXPERIMENT_ABNORMAL}%/h 초과 비정상"),
                     source = Thresholds.SOURCE_EXPERIMENT, category = "drain")
             }
             if (w.samples > 0) {

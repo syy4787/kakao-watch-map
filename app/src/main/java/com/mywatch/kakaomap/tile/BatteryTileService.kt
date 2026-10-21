@@ -102,8 +102,11 @@ class BatteryTileService : Material3TileService() {
                 ?: if (last?.plugged == true) "충전기에서 빼면 다시 잽니다" else "앞날은 2시간 기록 뒤부터"
             val issue = runCatching { KnownIssues.detect(Guardian.culprits(c, now)).firstOrNull() }.getOrNull()
             val st = Guardian.state(c)
+            val trendLine = runCatching { com.mywatch.kakaomap.battery.BatteryAlerts.trendLine(c, now) }.getOrNull()
             val status = when {
                 issue != null -> issue.title.substringBefore(" —") + " — 캐시 지우기"
+                // 최근 며칠 대기 소모가 늘었으면 그 무렵 바뀐 것 (하루 요약이 정해 둔 줄)
+                trendLine != null -> trendLine
                 st.nightActive -> "지킴이: 밤 모드 중 (아침·충전 때 원래대로)"
                 st.abnormalActive -> "지킴이: 비정상 소모 — 절전 켬"
                 else -> a?.drift?.takeIf { it.suspicious }?.headline?.substringAfter("— ")?.let { "잔량 표시: $it" } ?: "지킴이: 대기 중"

@@ -71,4 +71,34 @@ class BatteryAlertTest {
         BatteryAlerts.check(context, log, now)
         assertEquals(0, shadowOf(nm).allNotifications.size)
     }
+
+    /** 최근 며칠 대기 소모가 늘어 꺾였으면 꺾인 날마다 한 번 알린다 — 할 일과 함께, 같은 꺾임은 다시 안 알림, 타일 한 줄도 정해 둔다 */
+    @Test
+    fun aFreshRiseIsNotifiedOncePerShiftAndPutOnTheTile() {
+        val zone = java.time.ZoneId.of("Asia/Seoul")
+        val shift = com.mywatch.battery.core.Shift(java.time.LocalDate.of(2026, 10, 17), java.time.LocalDate.of(2026, 10, 18), 1.0, 2.5, 4, 3)
+        val fw = com.mywatch.battery.core.Change(1L, com.mywatch.battery.core.ChangeKind.FIRMWARE, "fw", "A", "L350XXU1AZI1")
+        val trend = com.mywatch.battery.core.TrendReport(emptyList(), shift, listOf(fw), emptyList(), null, fresh = true)
+        BatteryAlerts.trend(context, trend, { null }, zone)
+        val all = shadowOf(nm).allNotifications
+        assertEquals(1, all.size)
+        assertEquals("소프트웨어 업데이트 뒤 더 닳음", all[0].extras.getCharSequence(android.app.Notification.EXTRA_TITLE).toString())
+        val text = all[0].extras.getCharSequence(android.app.Notification.EXTRA_TEXT).toString()
+        assertTrue(text, text.contains("10/18부터 대기 소모가 늘었습니다") && text.contains("1.0% → 2.5%") && text.contains("할 일"))
+        // 다음 날 요약에서 같은 꺾임 — 다시 알리지 않는다
+        nm.cancelAll()
+        BatteryAlerts.trend(context, trend, { null }, zone)
+        assertEquals(0, shadowOf(nm).allNotifications.size)
+        // 타일 줄: 꺾인 첫날부터 7일 뒤까지
+        val oct20 = java.time.LocalDateTime.of(2026, 10, 20, 9, 0).atZone(zone).toInstant().toEpochMilli()
+        assertEquals("소프트웨어 업데이트 뒤 더 닳음", BatteryAlerts.trendLine(context, oct20))
+        val nov1 = java.time.LocalDateTime.of(2026, 11, 1, 9, 0).atZone(zone).toInstant().toEpochMilli()
+        assertEquals(null, BatteryAlerts.trendLine(context, nov1))
+        // 꺾임이 사라지면 타일 줄도 지운다
+        BatteryAlerts.trend(context, trend.copy(fresh = false), { null }, zone)
+        assertEquals(null, BatteryAlerts.trendLine(context, oct20))
+        // 새 꺾임이면 다시 알린다
+        BatteryAlerts.trend(context, trend.copy(shift = shift.copy(lastBefore = java.time.LocalDate.of(2026, 10, 24), firstAfter = java.time.LocalDate.of(2026, 10, 25))), { null }, zone)
+        assertEquals(1, shadowOf(nm).allNotifications.size)
+    }
 }

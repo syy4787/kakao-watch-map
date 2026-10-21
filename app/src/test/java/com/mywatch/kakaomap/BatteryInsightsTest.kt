@@ -96,6 +96,53 @@ class BatteryInsightsTest {
         assertEquals(listOf(Span(at(18), at(18, 10))), screen)
     }
 
+    /** 며칠 단위 추세용: 화면 이벤트만 — 시스템이 보관한 가장 이른 이벤트부터 믿는다 (없으면 null) */
+    @Test
+    fun theScreenRecordForTheTrendStartsAtTheEarliestKeptEvent() {
+        allowUsage()
+        assertNull("기록이 없으면 null", ScreenUsage(context).readScreen(at(0, d = 11), at(18)))
+        event("com.example.app", at(9, d = 13), UsageEvents.Event.ACTIVITY_RESUMED)
+        event("android", at(9, 30, d = 13), UsageEvents.Event.SCREEN_NON_INTERACTIVE)   // 기록이 시작될 때 이미 켜져 있던 화면
+        event("android", at(12, d = 14), UsageEvents.Event.SCREEN_INTERACTIVE)
+        event("android", at(12, 5, d = 14), UsageEvents.Event.SCREEN_NON_INTERACTIVE)
+        val cover = ScreenUsage(context).readScreen(at(0, d = 11), at(18))!!
+        assertEquals(at(9, d = 13), cover.from)
+        assertEquals(listOf(Span(at(9, d = 13), at(9, 30, d = 13)), Span(at(12, d = 14), at(12, 5, d = 14))), cover.spans)
+    }
+
+    /**
+     * 사용 통계가 있으면 '최근 며칠'은 화면이 한 번도 안 켜진 구간만 대기로 — 매시 몇 분씩 본 날들이 대기 소모를 부풀려
+     * '꺾임'으로 읽히지 않는다
+     */
+    @Test
+    fun theTrendUsesTheScreenRecordSoBusyDaysAreNotAShift() {
+        allowUsage()
+        val samples = ArrayList<BatterySample>()
+        for (i in 0 until 7) {
+            val d = 13 + i
+            val busy = i >= 4
+            var t = at(0, d = d)
+            var level = 100
+            while (t <= at(10, d = d)) {
+                samples += BatterySample(t = t, level = level)
+                val onTheHour = ((t - at(0, d = d)) / 60_000L) % 60 == 0L
+                level -= 1 + (if (busy && onTheHour) 3 else 0)
+                if (busy && onTheHour) {
+                    event("android", t + 2 * 60_000L, UsageEvents.Event.SCREEN_INTERACTIVE)
+                    event("android", t + 7 * 60_000L, UsageEvents.Event.SCREEN_NON_INTERACTIVE)
+                }
+                t += q
+            }
+            while (t < at(0, d = d + 1)) { samples += BatterySample(t = t, level = 100, plugged = true); t += q }
+        }
+        // 기록이 첫날부터 있음을 알리는 이벤트
+        event("com.example.app", at(0, 1, d = 13), UsageEvents.Event.ACTIVITY_RESUMED)
+        val now = at(0, d = 20) - 1
+        val trend = com.mywatch.kakaomap.battery.BatteryInsights.compute(context, samples, now, zone).trend!!
+        assertTrue(trend.exact)
+        assertNull("바쁜 날은 꺾임이 아니다: ${trend.days.map { it.pph }}", trend.shift)
+    }
+
     @Test
     fun journalPairsNightOnAndOff() {
         val j = GuardianJournal(context)
@@ -253,7 +300,7 @@ class BatteryInsightsTest {
         val todo = rows.filterIsInstance<Row.Step>().filter { it.key.startsWith("wake:") }
         assertEquals(2, todo.size)
         assertTrue(todo[0].title, todo[0].title.contains("120번"))
-        assertTrue(todo[0].sub ?: "", (todo[0].sub ?: "").contains("손목 올려 화면 켜기"))
+        assertTrue(todo[0].sub ?: "", (todo[0].sub ?: "").contains("손목 올려 켜기"))
         assertTrue(todo[1].title, todo[1].title.contains("알림이 화면을 60번"))
     }
 

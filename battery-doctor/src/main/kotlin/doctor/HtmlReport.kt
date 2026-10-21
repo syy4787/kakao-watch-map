@@ -170,14 +170,14 @@ object HtmlReport {
         val s = f.stats
         val pkgs = LinkedHashSet<String>()
         pkgs += v.culprits
-        findings.filter { it.severity != Severity.INFO }.forEach { pkgs += it.packages }
+        findings.filter { it.blames }.forEach { pkgs += it.packages }
         s?.powerItems?.sortedByDescending { it.mah }?.take(5)?.mapNotNull { it.pkg }?.let { pkgs += it }
         if (pkgs.isEmpty()) { sb.append("<p>범인으로 지목된 앱이 없습니다.</p>"); return }
         val hours = s?.onBatteryHours
         val alarmHours = (f.alarmElapsedMs ?: s?.onBatteryMs)?.takeIf { it > 0 }?.let { it / 3_600_000.0 }
         sb.append("<table><tr><th>패키지</th><th>소견</th><th>추정 전력</th><th>웨이크락</th><th>깨움 알람</th><th>센서</th></tr>")
         for (p in pkgs) {
-            val fs = findings.filter { p in it.packages && it.severity != Severity.INFO }
+            val fs = findings.filter { p in it.packages && it.blames }
             val power = s?.powerItems?.filter { it.pkg == p }?.sumOf { it.mah }?.takeIf { it > 0 }
             val wl = s?.partialWakeLocks?.filter { (it.pkg ?: f.packageByUid(it.uid)) == p }
             val wlMs = wl?.sumOf { it.totalMs }?.takeIf { it > 0 }
@@ -206,7 +206,7 @@ object HtmlReport {
             Check("global", "bluetooth_on", "", "블루투스"),
             Check("secure", "ambient_enabled", "", "AOD(ambient)"),
             Check("global", "ambient_enabled", "", "AOD(ambient, Wear 전역)"),
-            Check("global", "ambient_tilt_to_wake", "", "손목 올려 화면 켜기(1=켬)"),
+            Check("global", "ambient_tilt_to_wake", "", "손목 올려 켜기(1=켬)"),
             Check("global", "ambient_touch_to_wake", "", "화면 터치로 켜기(1=켬)"),
             Check("global", "hotword_detection_enabled", "", "'Hey Google' 음성 호출(1=켬)"),
             Check("global", "battery_saver_mode", "", "Wear 절전 방식(0 없음·1 가볍게·2 시계만·3 시간만·4 제조사)"),
@@ -268,16 +268,16 @@ object HtmlReport {
         val shift = t.shift
         if (shift != null) {
             sb.append("<p class=\"${if (shift.worse) "bad" else "good"}\"><b>${esc(ChangeFinder.headline(shift))}</b></p>")
-            if (t.suspects.isEmpty()) sb.append("<p>그 무렵 워치 앱이 아는 변화(소프트웨어·앱·시계 화면·주요 설정)는 없습니다.</p>")
-            else {
-                sb.append("<p>그 무렵 바뀐 것 (가능성 높은 순):</p><ul>")
-                t.suspects.take(5).forEach { sb.append("<li>${esc(stamp(it.t, zone))} ${esc(ChangeFinder.label(it) { null })}</li>") }
-                sb.append("</ul>")
+            when {
+                t.suspects.isNotEmpty() -> {
+                    sb.append("<p>그 무렵 바뀐 것 (가능성 높은 순):</p><ul>")
+                    t.suspects.take(5).forEach { sb.append("<li>${esc(stamp(it.t, zone))} ${esc(ChangeFinder.label(it) { null })}</li>") }
+                    sb.append("</ul>")
+                }
+                !t.known -> sb.append("<p>그때는 워치가 아직 바뀐 것을 적기 전이라 그 무렵 변화는 모릅니다.</p>")
+                else -> sb.append("<p>그 무렵 워치 앱이 아는 변화(소프트웨어·앱·시계 화면·주요 설정)는 없습니다.</p>")
             }
-            if (shift.worse) {
-                val (todo, how) = ChangeFinder.advice(shift, t.suspects.firstOrNull()) { null }
-                sb.append("<p>할 일: <b>${esc(todo)}</b> — ${esc(how)}</p>")
-            }
+            t.advice { null }?.let { (todo, how) -> sb.append("<p>할 일: <b>${esc(todo)}</b> — ${esc(how)}</p>") }
         } else if (t.validDays < 2 * DayTrend.MIN_SIDE_DAYS) {
             sb.append("<p>날마다 견주려면 대기 기록이 3시간 넘는 날이 ${2 * DayTrend.MIN_SIDE_DAYS}일 필요합니다 (지금 ${t.validDays}일).</p>")
         } else {
@@ -370,7 +370,7 @@ object HtmlReport {
     private val stampFmt = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
 
     /** 화면 켜기·AOD·절전에 관한 설정 키 이름 (삼성 고유 키 찾기용) */
-    private val RELATED_KEY = Regex("aod|ambient|always_on|wake|tilt|wrist|raise|gesture|hotword|bedtime|power_sav|battery_saver|low_power|doze", RegexOption.IGNORE_CASE)
+    private val RELATED_KEY = Regex("aod|ambient|always_on|wake|tilt|wrist|raise|gesture|hotword|talk|assistant|theater|bedtime|power_sav|battery_saver|low_power|doze", RegexOption.IGNORE_CASE)
     private fun stamp(t: Long, zone: ZoneId) = Instant.ofEpochMilli(t).atZone(zone).format(stampFmt)
 
     private const val CSS = """

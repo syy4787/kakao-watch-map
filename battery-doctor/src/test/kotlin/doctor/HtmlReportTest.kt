@@ -137,7 +137,7 @@ class HtmlReportTest {
         ))
         val html = HtmlReport.render(f, emptyList(), DoctorVerdict(Cause.NORMAL, "낮음", "h", emptyList(), listOf("1", "2", "3"), emptyList()), emptyMap(), zone)
         val section = Regex("<h2>설정 점검.*?</section>", RegexOption.DOT_MATCHES_ALL).find(html)!!.value
-        assertTrue(section.contains("손목 올려 화면 켜기"))
+        assertTrue(section.contains("손목 올려 켜기"))
         assertTrue(section.contains("global/ambient_tilt_to_wake"))
         assertTrue(section.contains("Hey Google"))
         assertTrue(section.contains("화면 켜기·AOD·절전 관련 키"))

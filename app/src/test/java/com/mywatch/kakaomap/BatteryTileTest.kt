@@ -79,4 +79,17 @@ class BatteryTileTest {
         assertTrue(s.title.startsWith("배터리"))
         assertTrue(s.rate.isNotBlank() && s.forecast.isNotBlank() && s.status.isNotBlank())
     }
+
+    /** 하루 요약이 정해 둔 '언제부터 더 닳음' 줄이 있으면 지킴이 상태 대신 그것 (알려진 문제 다음 차례) */
+    @Test
+    fun aRecentRiseShowsOnTheTile() {
+        val now = at(12)
+        drain(now, 9, 63.0, 1.0)
+        context.getSharedPreferences(BatteryLog.PREFS, Context.MODE_PRIVATE).edit()
+            .putString(com.mywatch.kakaomap.battery.BatteryAlerts.KEY_TREND_LINE, "소프트웨어 업데이트 뒤 더 닳음")
+            .putLong(com.mywatch.kakaomap.battery.BatteryAlerts.KEY_TREND_UNTIL, now + 3_600_000L).commit()
+        assertEquals("소프트웨어 업데이트 뒤 더 닳음", BatteryTileService.snapshot(context, now, zone).status)
+        // 기한이 지나면 다시 지킴이 상태
+        assertTrue(BatteryTileService.snapshot(context, now + 2 * 3_600_000L, zone).status.contains("지킴이"))
+    }
 }

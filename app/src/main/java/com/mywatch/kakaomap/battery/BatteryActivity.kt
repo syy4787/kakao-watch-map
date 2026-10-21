@@ -105,7 +105,7 @@ class BatteryActivity : ComponentActivity() {
         insights?.chart?.let { rows += Row.Chart("day", it) }
         insights?.let { ins ->
             val permitted = Levers(this).canWriteSecure && HealthReader(this).available
-            val todo = BatteryTodo.pick(ins, permitted) { HealthStore.label(this, it) }
+            val todo = BatteryTodo.pick(ins, permitted, { ins.appNames[it] ?: HealthStore.label(this, it) }, now)
             if (todo.isNotEmpty()) {
                 rows += Row.Header("지금 할 일")
                 todo.forEachIndexed { i, t ->
@@ -267,7 +267,7 @@ class BatteryActivity : ComponentActivity() {
                 val nowDrift = d?.let { " → 지금 ${it.driftPoints}포인트" } ?: ""
                 rows += Row.Note("보정 끝 ${BatterySummary.time(cs.finishedAt)}$before$nowDrift")
             }
-            rows += Row.Note("보정 루틴: 완충 + 1시간 → ${CalibrationRule.DRAIN_TO}% 아래까지 사용 → 다시 완충 + 1시간. 단계마다 알려 드립니다 (설정 > 배터리 > 배터리 보호(85% 제한)는 보정 동안 꺼 두세요 — 100%에 닿아야 합니다)")
+            rows += Row.Note("보정 루틴: 완충 + 1시간 → ${CalibrationRule.DRAIN_TO}% 아래까지 사용 → 다시 완충 + 1시간. 단계마다 알려 드립니다 (설정 > 배터리 > 배터리 보호(90%에서 멈춤)는 보정 동안 꺼 두세요 — 100%에 닿아야 합니다)")
             rows += Row.Action(A_CAL_START, R.drawable.ic_play, if (cs.step == CalibrationRule.STEP_DONE) "게이지 보정 다시" else "게이지 보정 시작")
         }
         return rows
@@ -459,15 +459,17 @@ class BatteryActivity : ComponentActivity() {
      * 꺾임이 없으면 날마다의 범위, 날이 모자라면 몇 날 더 필요한지
      */
     private fun trendRows(): List<Row> {
-        val t = insights?.trend ?: return emptyList()
-        val names = BatteryInsights.appName(this)
+        val ins = insights ?: return emptyList()
+        val t = ins.trend ?: return emptyList()
+        // 앱 이름은 분석(IO 스레드)이 미리 찾아 둔 것으로 — 그리는 동안 패키지 관리자를 부르지 않게
+        val names: (String) -> String? = { ins.appNames[it] }
         fun line(c: com.mywatch.battery.core.Change) = "· ${BatterySummary.time(c.t)} ${ChangeFinder.label(c, names)}"
         val rows = ArrayList<Row>()
-        rows += Row.Header("최근 며칠", "대기(화면 꺼짐) 시간당 %")
+        rows += Row.Header("최근 며칠", if (t.exact) "대기(화면이 안 켜진 동안) 시간당 %" else "대기(화면 꺼짐) 시간당 %")
         t.bars?.let { rows += Row.Trend("days", it) }
         val shift = t.shift
         val near = t.suspects.take(TREND_SUSPECTS)
-        val valid = t.days.mapNotNull { it.pph }
+        val valid = t.days.mapNotNull { it.forShift }
         when {
             shift != null -> {
                 val g = when {
@@ -477,12 +479,17 @@ class BatteryActivity : ComponentActivity() {
                 }
                 rows += Row.Step(color(g), if (shift.worse) R.drawable.ic_warning else R.drawable.ic_battery, null, ChangeFinder.title(shift), ChangeFinder.numbers(shift), key = "trend")
                 rows += Row.Note(
-                    if (near.isEmpty()) "그 무렵 이 앱이 아는 변화(소프트웨어·앱·시계 화면·주요 설정)는 없었습니다"
-                    else "그 무렵 바뀐 것:\n" + near.joinToString("\n", transform = ::line)
+                    when {
+                        near.isNotEmpty() -> "그 무렵 바뀐 것:\n" + near.joinToString("\n", transform = ::line)
+                        !t.known -> "그때는 아직 바뀐 것을 적기 전이라 그 무렵 변화는 모릅니다"
+                        else -> "그 무렵 이 앱이 아는 변화(소프트웨어·앱·시계 화면·주요 설정)는 없었습니다"
+                    }
                 )
+                // 늘었으면 할 일까지 (지금 할 일 줄은 최근 7일 것만 — 여기엔 늘 전체 글로)
+                t.advice(names)?.let { (title, detail) -> rows += Row.Note("할 일: $title — $detail") }
             }
             valid.size >= MIN_TREND_DAYS -> rows += Row.Note("큰 변화 없음 — 날마다 대기 시간당 ${DrainAnalyzer.fmt(valid.min())}~${DrainAnalyzer.fmt(valid.max())}%")
-            else -> rows += Row.Note("날마다 견주려면 대기 기록이 3시간 넘는 날이 ${MIN_TREND_DAYS}일 필요합니다 (지금 ${valid.size}일)")
+            else -> rows += Row.Note("날마다 견주려면 대기 기록이 ${DrainAnalyzer.fmt(com.mywatch.battery.core.DayTrend.MIN_HOURS)}시간 넘는 날이 ${MIN_TREND_DAYS}일 필요합니다 (지금 ${valid.size}일)")
         }
         val others = t.recent.filter { it !in near }.take(TREND_RECENT)
         if (others.isNotEmpty()) rows += Row.Note("최근 바뀐 것:\n" + others.joinToString("\n", transform = ::line))
@@ -538,7 +545,7 @@ class BatteryActivity : ComponentActivity() {
         const val HELP = "• 잔량 표시 점검: '17%에서 꺼졌는데 켜니 47%'는 배터리가 아니라 잔량 게이지가 낮게 센 것. 쉬는 전압으로 그 오차를 잡아 알려 주고, 강제 재시작·보정 루틴으로 다시 맞춥니다.\n" +
             "• 강제 재시작: 홈 + 뒤로 버튼을 꺼질 때까지(7초 이상) 누르기. 효과 없으면 30초.\n" +
             "• Play 서비스가 1위면: 설정 > 애플리케이션 > Google Play 서비스 > 저장공간 > 캐시 지우기 → 재시작 (2026년에 되풀이된 문제의 알려진 해결)\n" +
-            "• 설정 > 디스플레이: Always On Display 끄기, '손목 올려 화면 켜기' 끄기, 화면 자동 꺼짐 짧게\n" +
+            "• 설정 > 디스플레이: Always On Display 끄기, '손목 올려 켜기' 끄기, 화면 자동 꺼짐 짧게\n" +
             "• Galaxy Wearable 앱 > 워치 설정 > 알림 > 고급 알림 설정: '화면 켜기' 끄기, 필요 없는 앱 알림 끄기\n" +
             "• \"Hey Google\"·빅스비 음성 호출 끄기, 설정 > 버튼 및 제스처 > 손목 올려 말하기 끄기\n" +
             "• 삼성 헬스: 자동 심박 측정 '10분마다', 스트레스 상시 측정 끄기, 수면 중 혈중 산소·피부 온도 끄기(필요한 것만)\n" +

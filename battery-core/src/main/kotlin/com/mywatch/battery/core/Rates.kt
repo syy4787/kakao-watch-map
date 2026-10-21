@@ -58,6 +58,9 @@ object Rates {
     fun between(samples: List<BatterySample>, start: Long, end: Long): Rate =
         rateOfClips(clip(dischargeSegments(samples), start, end))
 
+    /** 이미 고른 방전 구간들([segments]) 중 [start]~[end] 창 안의 몫 */
+    fun rateWithin(segments: List<Segment>, start: Long, end: Long): Rate = rateOfClips(clip(segments, start, end))
+
     /** [start]~[end] 창 중 대기(화면 꺼짐) 구간만 */
     fun idleBetween(samples: List<BatterySample>, start: Long, end: Long): Rate =
         rateOfClips(clip(dischargeSegments(samples).filter { it.idle }, start, end))

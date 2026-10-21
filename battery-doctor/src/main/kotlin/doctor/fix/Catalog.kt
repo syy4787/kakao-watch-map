@@ -68,7 +68,7 @@ object Catalog {
         val global = f.settings["global"] ?: emptyMap()
         val secure = f.settings["secure"] ?: emptyMap()
         val system = f.settings["system"] ?: emptyMap()
-        val culprits = findings.filter { it.severity != Severity.INFO }.flatMap { it.packages }.distinct().filterNot { isDenied(it) }
+        val culprits = findings.filter { it.blames }.flatMap { it.packages }.distinct().filterNot { isDenied(it) }
         val installed = f.packages.map { it.name }.toSet()
         fun known(pkg: String) = installed.isEmpty() || pkg in installed
 
@@ -89,7 +89,7 @@ object Catalog {
             out += disable(p.name, name)
         }
         // 2026년 Play 서비스 과소모의 알려진 해결: 캐시 정리 → Play 서비스 다시 시작 (데이터·로그인은 그대로)
-        val gmsFlagged = findings.any { it.severity != Severity.INFO && GMS in it.packages }
+        val gmsFlagged = findings.any { it.blames && GMS in it.packages }
         out += Lever("trim-caches", "모든 앱 캐시 정리 (Play 서비스 포함)", "pm trim-caches — 로그인·데이터는 그대로 두고 임시 파일만 지웁니다. 2026년 Play 서비스 과소모의 첫 번째 해결책. 되돌릴 것 없음(필요한 캐시는 앱이 다시 만듦)", Tier.SAFE,
             if (gmsFlagged) listOf(GMS) else emptyList(),
             readState = { null }, apply = listOf(listOf("shell", "pm", "trim-caches", "999999999999")), undo = { null }, recommended = gmsFlagged)
@@ -119,7 +119,7 @@ object Catalog {
         // 화면 켜기 제스처·음성 호출 (Wear OS 설정 키 — 켜져 있을 때만). 손목 올림은 워치 앱이 센 '알림 없이 금방 꺼진 화면'이 많으면 추천
         val gestureWakes = f.watchMetrics["gesture_wakes"]
         global["ambient_tilt_to_wake"]?.takeIf { it.trim() == "1" }?.let {
-            out += wearSetting("tilt-wake-off", "ambient_tilt_to_wake", "손목 올려 화면 켜기 끄기",
+            out += wearSetting("tilt-wake-off", "ambient_tilt_to_wake", "손목 올려 켜기 끄기",
                 "global/ambient_tilt_to_wake 를 0 으로 — 손목을 들어도 화면이 저절로 켜지지 않습니다(버튼·터치로 켬)." +
                     (gestureWakes?.let { g -> " 워치 앱 기록: 알림 없이 5초 안에 꺼진 화면 하루 ${g.toInt()}번" } ?: ""),
                 recommended = gestureWakes != null && gestureWakes >= com.mywatch.battery.core.Wakes.GESTURE_ADVICE)

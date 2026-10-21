@@ -29,7 +29,7 @@ data class WakeStats(
         val out = ArrayList<String>()
         if (gestureLikeWakes >= Wakes.GESTURE_ADVICE) {
             out += "알림 없이 5초 안에 꺼진 화면 ${gestureLikeWakes}번 — 손목을 들 때 저절로 켜진 것으로 보입니다. " +
-                "설정 > 디스플레이에서 '손목 올려 화면 켜기'(화면 켜기 제스처)를 끄면 하루 약 ${DrainAnalyzer.fmt(gestureCostPercent)}% 아낍니다"
+                "설정 > 디스플레이에서 '손목 올려 켜기'(화면 켜기 제스처)를 끄면 하루 약 ${DrainAnalyzer.fmt(gestureCostPercent)}% 아낍니다"
         }
         if (notificationWakes >= Wakes.NOTIF_ADVICE) {
             val top = topNotifiers.take(2).joinToString(", ") { "${label(it.first)} ${it.second}번" }

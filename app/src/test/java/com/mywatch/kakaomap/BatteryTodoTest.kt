@@ -42,12 +42,28 @@ class BatteryTodoTest {
         val trend = com.mywatch.battery.core.TrendReport(emptyList(), shift, listOf(gmsUpdate), emptyList(), null, fresh = true)
         val t = BatteryTodo.pick(insights(listOf(face, gms), busyWrist).copy(trend = trend), permitted = true)
         assertEquals("Google Play 서비스 과소모", t[0].title)
-        assertEquals("10/18 Play 서비스 업데이트 뒤 더 닳음", t[1].title)
+        assertEquals("Play 서비스 업데이트 뒤 더 닳음", t[1].title)
         assertTrue(t[1].detail ?: "", (t[1].detail ?: "").contains("캐시 지우기"))
         assertEquals(Grade.CAUTION, t[1].grade)
         // 오래된 꺾임(7일 넘음)·줄어든 꺾임은 할 일이 아니다
         val old = BatteryTodo.pick(insights().copy(trend = trend.copy(fresh = false)), permitted = true)
         assertTrue(old.isEmpty())
+    }
+
+    /** 대기 소모가 높은데 재시작한 지 7일이 넘었으면 '한 번 재시작' — 2026년 광탈 글들의 공통 해결담. 소모가 정상이거나 최근 재시작이면 없음 */
+    @Test
+    fun aLongUptimeWithHighIdleDrainSuggestsARestart() {
+        val now = 1_792_500_000_000L
+        val day = 24 * 3_600_000L
+        fun idle(pph: Double) = com.mywatch.battery.core.DrainAnalyzer(445, java.time.ZoneId.of("Asia/Seoul"))
+            .analyze((0..96).map { i -> com.mywatch.battery.core.BatterySample(t = now - (96 - i) * 15 * 60_000L, level = (100 - pph * i / 4).toInt()) }, now)
+        val high = insights().copy(analysis = idle(4.0), bootAt = now - 9 * day)
+        val t = BatteryTodo.pick(high, permitted = true, now = now)
+        val restart = t.single { it.title.contains("재시작") }
+        assertTrue(restart.title, restart.title.contains("9일"))
+        assertTrue(restart.detail ?: "", (restart.detail ?: "").contains("홈"))
+        assertTrue("재시작한 지 사흘", BatteryTodo.pick(high.copy(bootAt = now - 3 * day), permitted = true, now = now).none { it.title.contains("재시작") })
+        assertTrue("소모가 정상", BatteryTodo.pick(high.copy(analysis = idle(1.0)), permitted = true, now = now).none { it.title.contains("재시작") })
     }
 
     @Test

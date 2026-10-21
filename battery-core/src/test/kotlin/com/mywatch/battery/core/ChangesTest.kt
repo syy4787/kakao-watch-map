@@ -147,7 +147,7 @@ class ChangesTest {
 
     @Test
     fun theFirstSuspectGivesTheThingToDo() {
-        fun advice(c: Change?) = ChangeFinder.advice(worse, c, ::name)
+        fun advice(c: Change?) = ChangeFinder.advice(worse, listOfNotNull(c), ::name)
         val fw = advice(changes[2])
         assertTrue(fw.first, fw.first.contains("소프트웨어 업데이트"))
         assertTrue(fw.second, fw.second.contains("1주") && fw.second.contains("강제 재시작"))
@@ -158,5 +158,75 @@ class ChangesTest {
         val none = advice(null)
         assertTrue(none.first, none.first.startsWith("10/18부터"))
         assertTrue(none.second, none.second.contains("Play 서비스"))
+        // 워치 '지금 할 일' 줄(제목 두 줄·설명 세 줄)에 들어가게 짧게
+        for (c in changes + listOf(null)) {
+            // (이름을 모르는 앱은 패키지 이름이 길 수 있다 — 워치는 앱 이름을 찾아 쓴다)
+            if (c?.subject != "com.example.early") assertTrue(advice(c).first, advice(c).first.length <= 22)
+            assertTrue(advice(c).second, advice(c).second.length <= 50)
+        }
+    }
+
+    /** 늘어난 꺾임인데 그 무렵 바뀐 것이 끈 설정·지운 앱뿐이면 '바뀐 것 없음'이 아니라 '늘릴 만한 것은 없음' — 목록과 어긋나지 않게 */
+    @Test
+    fun adviceSkipsChangesThatCannotExplainTheRise() {
+        val onlyOffs = listOf(
+            Change(at(18, 9), ChangeKind.SETTING, "aod", "1", "0"),
+            Change(at(18, 10), ChangeKind.APP, "com.example.gone", null, "-"),
+            Change(at(18, 11), ChangeKind.CONFIG, "reminder", "1", "0"),   // 충전 알림을 꺼도 대기 소모는 안 는다
+        )
+        assertTrue(onlyOffs.none { ChangeFinder.explains(it, worse = true) })
+        val a = ChangeFinder.advice(worse, ChangeFinder.around(worse, onlyOffs, zone), ::name)
+        assertTrue(a.second, a.second.contains("늘릴 만한 것은 없습니다"))
+        // 설명할 수 있는 것이 뒤에 있으면 그것으로
+        val mixed = ChangeFinder.around(worse, onlyOffs + Change(at(18, 12), ChangeKind.FACE, "face", null, "com.example.face"), zone)
+        assertEquals(ChangeKind.FACE, mixed.first().kind)
+        // 적기 시작 전이면 '모름'
+        assertTrue(ChangeFinder.advice(worse, emptyList(), ::name, known = false).second.contains("모릅니다"))
+        // 지킴이의 절약 설정을 끈 것은 늘어난 까닭이 된다 — 조사는 받침 따라
+        val off = Change(at(18, 13), ChangeKind.CONFIG, "night_aod", "1", "0")
+        assertEquals("지킴이 '밤에 AOD 끄기'를 끈 뒤 더 닳음", ChangeFinder.advice(worse, listOf(off), ::name).first)
+    }
+
+    @Test
+    fun objectParticleFollowsTheLastSound() {
+        assertEquals("손목 올려 켜기를", ChangeFinder.obj("손목 올려 켜기"))
+        assertEquals("'잠자기 전 충전 알림'을", ChangeFinder.obj("'잠자기 전 충전 알림'"))
+        assertEquals("'비정상 소모면 바로 절전'을", ChangeFinder.obj("'비정상 소모면 바로 절전'"))
+        assertEquals("AOD를", ChangeFinder.obj("AOD"))
+        assertEquals("'Hey Google'을", ChangeFinder.obj("'Hey Google'"))
+        assertEquals("위치를", ChangeFinder.obj("위치"))
+        assertEquals("앱 3을", ChangeFinder.obj("앱 3"))
+        assertEquals("앱 2를", ChangeFinder.obj("앱 2"))
+    }
+
+    /** 충전기 위에서 보낸 날이 사이에 끼면 그 어느 날 바뀌었는지 모르므로 '사이부터' */
+    @Test
+    fun aGapBeforeTheFirstWorseDayIsSaidAsARange() {
+        val gap = worse.copy(lastBefore = LocalDate.of(2026, 10, 12), firstAfter = LocalDate.of(2026, 10, 16))
+        assertEquals("10/13~10/16 사이부터 대기 소모가 늘었습니다", ChangeFinder.title(gap))
+        assertTrue(ChangeFinder.headline(gap).startsWith("10/13~10/16 사이부터"))
+    }
+
+    /** 삼성 모드(물놀이 잠금·운동·낮잠)가 잠깐 바꿨다 12시간 안에 되돌린 설정은 짝으로 뺀다 */
+    @Test
+    fun aSettingFlippedBackWithinHalfADayIsDropped() {
+        val list = listOf(
+            Change(at(18, 9), ChangeKind.SETTING, "aod", "0", "1"),
+            Change(at(18, 15), ChangeKind.SETTING, "aod", "1", "0"),
+            Change(at(18, 10), ChangeKind.SETTING, "tilt", "1", "0"),
+            Change(at(19, 11), ChangeKind.SETTING, "tilt", "0", "1"),      // 하루 넘게 — 둘 다 남음
+            Change(at(18, 11), ChangeKind.APP, gms, null, "26.40.31"),
+        )
+        assertEquals(listOf("tilt", gms, "tilt"), ChangeNote.settled(list).map { it.subject })
+    }
+
+    @Test
+    fun theStartOfTrackingIsKeptApartFromTheChanges() {
+        val start = BatterySample(at(17, 9), 80, note = ChangeNote.encode(listOf(Item(ChangeKind.TRACKING, "on"))))
+        val later = BatterySample(at(18, 9), 70, note = ChangeNote.encode(listOf(Item(ChangeKind.APP, gms, to = "26.40.31"))))
+        assertEquals("chg:on=1", start.note)
+        assertEquals(at(17, 9), ChangeNote.trackedSince(listOf(later, start)))
+        assertEquals(listOf(ChangeKind.APP), ChangeNote.all(listOf(start, later)).map { it.kind })
+        assertEquals(null, ChangeNote.trackedSince(listOf(later)))
     }
 }

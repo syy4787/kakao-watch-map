@@ -23,10 +23,13 @@ class BatterySampleWorker(context: Context, params: WorkerParameters) : Worker(c
         val given = inputData.getString(KEY_NOTE) ?: ""
         try {
             val log = BatteryLog(applicationContext)
-            // 15분·부팅 표본엔 지난번 뒤에 바뀐 것(소프트웨어·앱·시계 화면·설정)을 붙인다 — '최근 며칠'의 그 무렵 바뀐 것
-            val note = if (given.isEmpty() && (event == Event.PERIODIC || event == Event.BOOT))
-                runCatching { ChangeWatcher.collect(applicationContext) }.getOrDefault("") else given
-            BatteryProbe.read(applicationContext, event, note)?.let { log.append(it) }
+            // 15분·부팅 표본엔 지난번 뒤에 바뀐 것(소프트웨어·앱·시계 화면·설정)을 붙인다 — '최근 며칠'의 그 무렵 바뀐 것.
+            // 표본이 실제로 저장됐을 때만 본 값을 기억한다 (저장에 실패하면 다음 표본에 다시)
+            fun save(note: String): Boolean = BatteryProbe.read(applicationContext, event, note)?.let { log.append(it); true } ?: false
+            if (given.isEmpty() && (event == Event.PERIODIC || event == Event.BOOT)) {
+                // 바뀐 것을 읽다 실패했어도 표본은 남긴다
+                if (runCatching { ChangeWatcher.record(applicationContext) { n -> save(n) } }.isFailure) save("")
+            } else save(given)
             if (event == Event.PERIODIC) {
                 log.pruneIfDue()
                 // 지킴이: 밤·비정상 소모 대응과 알림 (권한이 없으면 알림만)

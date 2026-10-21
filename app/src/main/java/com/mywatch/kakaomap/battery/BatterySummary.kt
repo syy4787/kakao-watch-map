@@ -11,8 +11,6 @@ import com.mywatch.battery.core.Status
 import com.mywatch.battery.core.SummaryMetrics
 import com.mywatch.battery.core.Thresholds
 import com.mywatch.battery.core.TrendReport
-import java.text.SimpleDateFormat
-import java.util.Date
 import java.util.Locale
 
 /** 배터리 화면과 summary.txt 가 같이 쓰는 글 만들기 */
@@ -31,13 +29,16 @@ object BatterySummary {
         p.edit().putLong(K_SUMMARY_AT, now).apply()
         val all = log.readAll()
         val ins = BatteryInsights.compute(context, all, now)
+        // 최근 며칠 대기 소모가 늘었으면 알림 한 번·타일 한 줄 (배터리 화면을 열지 않아도 알게)
+        runCatching { BatteryAlerts.trend(context, ins.trend, { ins.appNames[it] }) }
         val a = ins.analysis ?: return
         log.writeSummary(text(a, null, android.os.Build.MODEL ?: "", now, ins))
     }
 
-    private val clock = SimpleDateFormat("M/d HH:mm", Locale.KOREA)
+    /** 여러 스레드(화면·기록 작업)가 같이 쓰므로 스레드에 안전한 java.time 으로 */
+    private val clock = java.time.format.DateTimeFormatter.ofPattern("M/d HH:mm", Locale.KOREA)
 
-    fun time(t: Long): String = clock.format(Date(t))
+    fun time(t: Long): String = java.time.Instant.ofEpochMilli(t).atZone(java.time.ZoneId.systemDefault()).format(clock)
 
     /** "57% · 3.91V · 33.1℃ · −84mA · 방전 중" — 게이지 드리프트가 의심되면 "(전압 기준 약 N%)" 를 덧붙인다 */
     fun nowLine(s: BatterySample?, drift: GaugeDrift? = null): String {
@@ -96,7 +97,7 @@ object BatterySummary {
     /** "10/12 1.0 · 10/13 1.1 · 10/14 - · …" (대기 %/h, 기록이 모자란 날은 -) — 기록 있는 날이 없으면 null */
     fun trendLine(t: TrendReport): String? {
         if (t.days.none { it.pph != null }) return null
-        return t.shownDays.joinToString(" · ") { d -> ChangeFinder.day(d.date) + " " + (d.pph?.let { DrainAnalyzer.fmt(it) } ?: "-") } + " (대기 %/h)"
+        return t.shownDays.joinToString(" · ") { d -> ChangeFinder.day(d.date) + " " + (d.pph?.let { DrainAnalyzer.fmt(it) } ?: "-") } + if (t.exact) " (대기 %/h, 사용 통계 기준)" else " (대기 %/h, 15분 기록 기준)"
     }
 
     /** PC 툴킷이 읽는 숫자 한 줄 (조치 추천·치료 전후 비교) — [SummaryMetrics] */
@@ -140,6 +141,7 @@ object BatterySummary {
             w.advice().forEach { appendLine(" · $it") }
         }
         insights?.watchFace?.let { appendLine("[시계 화면] $it") }
+        insights?.bootAt?.let { appendLine("[재시작] 마지막 부팅 ${time(it)} (${(now - it) / (24 * 3_600_000L)}일 전)") }
         insights?.trend?.let { t ->
             trendLine(t)?.let { appendLine("[최근 며칠] $it") }
             t.shift?.let { s -> appendLine("[꺾임] ${ChangeFinder.headline(s)}" + (if (t.suspects.isEmpty()) "" else " — 그 무렵: " + t.suspects.take(3).joinToString(" · ") { ChangeFinder.label(it) { null } })) }

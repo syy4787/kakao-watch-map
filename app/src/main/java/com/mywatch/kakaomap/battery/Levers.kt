@@ -53,7 +53,7 @@ class Levers(context: Context) {
     val aodKey: Key? get() = AOD_KEYS.firstOrNull { read(it) != null }
     val locationKey: Key get() = LOCATION
     val hasLocationKey: Boolean get() = read(LOCATION) != null
-    /** 손목 올려 화면 켜기 · 화면 터치로 켜기 · 'Hey Google' 음성 호출 — 이 워치에 있으면 그 키 */
+    /** 손목 올려 켜기 · 화면 터치로 켜기 · 'Hey Google' 음성 호출 — 이 워치에 있으면 그 키 */
     val tiltKey: Key? get() = TILT.takeIf { read(it) != null }
     val touchKey: Key? get() = TOUCH.takeIf { read(it) != null }
     val hotwordKey: Key? get() = HOTWORD.takeIf { read(it) != null }
@@ -208,7 +208,7 @@ class Levers(context: Context) {
         /** Wear OS 의 Always On Display 키 후보 — 있는 것을 쓴다 */
         val AOD_KEYS = listOf(Key(Table.GLOBAL, "ambient_enabled"), Key(Table.SECURE, "ambient_enabled"), Key(Table.SYSTEM, "ambient_enabled"))
         val LOCATION = Key(Table.SECURE, "location_mode")
-        /** Settings.Global.Wearable.AMBIENT_TILT_TO_WAKE — 손목 올려 화면 켜기 */
+        /** Settings.Global.Wearable.AMBIENT_TILT_TO_WAKE — 손목 올려 켜기 */
         val TILT = Key(Table.GLOBAL, "ambient_tilt_to_wake")
         /** Settings.Global.Wearable.AMBIENT_TOUCH_TO_WAKE — 화면을 눌러 켜기 */
         val TOUCH = Key(Table.GLOBAL, "ambient_touch_to_wake")

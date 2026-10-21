@@ -26,6 +26,22 @@ class CatalogTest {
 
     private fun List<Lever>.id(id: String) = firstOrNull { it.id == id }
 
+    /**
+     * '언제부터'(watch-shift) 소견의 '그 무렵 업데이트된 앱'은 우연일 수 있다 — 자동 치료가 그 앱을 제한하거나 Play 서비스 캐시를
+     * 지우는 근거가 되면 안 된다 (리뷰에서 찾음: 카카오톡이 그날 업데이트됐다는 것만으로 백그라운드 제한)
+     */
+    @Test
+    fun aWhenItStartedFindingNeverMakesAnAppACulprit() {
+        val f = Facts(packages = listOf(doctor.parse.PackageInfo("com.kakao.talk", 10200, true, true), doctor.parse.PackageInfo(Analyzer.GMS, 10045, true, false)))
+        val shift = Finding("watch-shift", Severity.CAUTION, "워치 기록: 10/16부터 대기 소모가 늘었습니다", listOf("그 무렵: 카카오톡 업데이트"),
+            packages = listOf("com.kakao.talk", Analyzer.GMS), category = "trend")
+        val levers = Catalog.levers(f, listOf(shift))
+        assertTrue(levers.filter { "com.kakao.talk" in it.packages }.none { it.recommended })
+        assertFalse(levers.id("trim-caches")!!.recommended)
+        val plan = Treat.decide(levers, strong = false)
+        assertTrue(plan.apply.map { it.id }.toString(), plan.apply.none { "com.kakao.talk" in it.packages || it.id == "trim-caches" || it.id == "gms-restart" })
+    }
+
     @Test
     fun denyListBlocksCoreSystemPackages() {
         listOf("com.google.android.gms", "com.google.android.gsf", "com.android.vending", "com.samsung.android.wear.shealth", "com.samsung.android.wearable.sysui",

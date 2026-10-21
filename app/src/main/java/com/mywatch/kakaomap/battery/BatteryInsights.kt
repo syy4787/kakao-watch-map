@@ -6,6 +6,7 @@ import com.mywatch.battery.core.Analysis
 import com.mywatch.battery.core.AppDrainRank
 import com.mywatch.battery.core.BatterySample
 import com.mywatch.battery.core.ChargeHabits
+import com.mywatch.battery.core.DayTrend
 import com.mywatch.battery.core.DrainAnalyzer
 import com.mywatch.battery.core.DrainChart
 import com.mywatch.battery.core.DrainChartModel
@@ -48,6 +49,10 @@ data class Insights(
     val charging: ChargeHabits? = null,
     /** 최근 며칠 대기 소모·꺾인 날·그 무렵 바뀐 것 */
     val trend: TrendReport? = null,
+    /** 마지막으로 켜진(부팅한) 때 (epoch ms, 모르면 null) */
+    val bootAt: Long? = null,
+    /** '최근 며칠'에 나오는 패키지의 앱 이름 (분석하는 IO 스레드에서 미리 — 화면은 이것만 본다) */
+    val appNames: Map<String, String> = emptyMap(),
 )
 
 
@@ -83,8 +88,21 @@ object BatteryInsights {
             DrainChart.buildOrNull(samples, now, zone, screen = usage?.screen, hot = breakdown?.steepest.orEmpty().map { it.start to it.end })
         }.onFailure { ErrorLog.record("배터리·그래프", it) }.getOrNull()
         val charging = runCatching { ChargeHabits.analyze(samples, now) }.getOrNull()
-        val trend = runCatching { TrendReport.of(samples, now, zone) }.onFailure { ErrorLog.record("배터리·추세", it) }.getOrNull()
-        return Insights(analysis, breakdown, culprits, issues, effect, wakes, night, levers, chart, face, charging, trend)
+        // 며칠 단위 추세: 사용 통계가 있으면 화면이 한 번도 안 켜진 구간만 대기로 (없으면 15분 표본의 화면 상태로)
+        val cover = runCatching { ScreenUsage(c).readScreen(now - DayTrend.DAYS * 24 * 3_600_000L, now) }.getOrNull()
+        val trend = runCatching { TrendReport.of(samples, now, zone, cover) }.onFailure { ErrorLog.record("배터리·추세", it) }.getOrNull()
+        val bootAt = (System.currentTimeMillis() - android.os.SystemClock.elapsedRealtime()).takeIf { it > 0 }
+        val names = trend?.let { t ->
+            val label = appName(c)
+            (t.suspects + t.recent).flatMap { ch ->
+                when (ch.kind) {
+                    com.mywatch.battery.core.ChangeKind.APP -> listOf(ch.subject)
+                    com.mywatch.battery.core.ChangeKind.FACE -> listOfNotNull(ch.to)
+                    else -> emptyList()
+                }
+            }.distinct().mapNotNull { pkg -> label(pkg)?.let { pkg to it } }.toMap()
+        }.orEmpty()
+        return Insights(analysis, breakdown, culprits, issues, effect, wakes, night, levers, chart, face, charging, trend, bootAt, names)
     }
 
     /** 패키지 → 앱 이름 (모르면 null — 지운 앱 등) */

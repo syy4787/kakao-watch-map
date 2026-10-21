@@ -28,7 +28,10 @@ data class Finding(
     /** 기준치의 출처 한 줄 */
     val source: String? = null,
     val category: String = "info",
-)
+) {
+    /** 이 소견이 [packages] 를 범인으로 지목하나 — '언제부터'(그 무렵 바뀐 것)는 우연일 수 있어 아니다 */
+    val blames: Boolean get() = category != Analyzer.TREND && severity != Severity.INFO
+}
 
 enum class Cause { INSUFFICIENT, GAUGE, SOFTWARE, USAGE, HARDWARE, NORMAL;
     val label: String get() = when (this) {
@@ -79,6 +82,8 @@ data class Facts(
     val watchMetrics: Map<String, Double> = emptyMap(),
     /** 워치 기록의 날마다 대기 소모·꺾인 날·그 무렵 바뀐 것 (워치 앱이 표본에 남긴 '바뀐 것' 표시로) */
     val watchTrend: com.mywatch.battery.core.TrendReport? = null,
+    /** 분석에 쓴 시간대 (시각 글자를 같은 시간대로) */
+    val zone: java.time.ZoneId = java.time.ZoneId.systemDefault(),
     val collectedAt: Long? = null,
     /** 수집에 실패한 항목 이름 */
     val missing: List<String> = emptyList(),
@@ -135,5 +140,7 @@ object Rules {
     const val RADIO_SHARE = 0.10
     const val DRAIN_GAP_RATIO = 0.30
 
+    /** 이만큼 넘게 재시작하지 않았으면 소견 */
+    const val UPTIME_DAYS = 7L
     const val FORCED_RESTART = "홈 + 뒤로 가기 버튼을 꺼질 때까지(7초 이상) 눌러 강제 재시작하세요. 효과가 없으면 30초까지 누르고 있으세요"
 }

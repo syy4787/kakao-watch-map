@@ -8,6 +8,7 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Process
 import com.mywatch.battery.core.AppSpan
+import com.mywatch.battery.core.ScreenCover
 import com.mywatch.battery.core.Span
 
 /**
@@ -39,6 +40,41 @@ class ScreenUsage(context: Context) {
 
     /** 화면 켜짐 구간 · 화면에 떠 있던 앱 구간 · 화면을 켤 수 있는 알림(앱, 때) */
     data class Usage(val screen: List<Span>, val apps: List<AppSpan>, val notifications: List<Pair<String, Long>>)
+
+    /**
+     * 며칠 단위 추세용 화면 켜짐 구간 — 화면 이벤트만 모은다. 시스템은 이벤트를 며칠만 보관하므로, 가장 이른 이벤트(종류 무관)
+     * 때부터 믿는다([ScreenCover.from]). 이벤트가 하나도 없으면 null
+     */
+    fun readScreen(from: Long, to: Long): ScreenCover? {
+        if (!available || to <= from) return null
+        val usm = app.getSystemService(UsageStatsManager::class.java) ?: return null
+        val events = runCatching { usm.queryEvents(from, to) }.getOrNull() ?: return null
+        val e = UsageEvents.Event()
+        val screen = ArrayList<Span>()
+        var first: Long? = null
+        var screenStart: Long? = null
+        var sawScreenEvent = false
+        while (events.hasNextEvent()) {
+            if (!events.getNextEvent(e)) break
+            val t = e.timeStamp.coerceIn(from, to)
+            if (first == null) first = t
+            when (e.eventType) {
+                UsageEvents.Event.SCREEN_INTERACTIVE -> {
+                    if (screenStart == null) screenStart = t
+                    sawScreenEvent = true
+                }
+                UsageEvents.Event.SCREEN_NON_INTERACTIVE -> {
+                    // 기록이 시작될 때 이미 켜져 있었으면 기록 처음부터 (창 처음이 아니라 — 그 앞은 기록이 없다)
+                    val s = screenStart ?: if (!sawScreenEvent) first else null
+                    if (s != null && t > s) screen += Span(s, t)
+                    screenStart = null
+                    sawScreenEvent = true
+                }
+            }
+        }
+        screenStart?.let { if (to > it) screen += Span(it, to) }
+        return first?.let { ScreenCover(screen, it) }
+    }
 
     fun readAll(from: Long, to: Long): Usage? {
         if (!available || to <= from) return null

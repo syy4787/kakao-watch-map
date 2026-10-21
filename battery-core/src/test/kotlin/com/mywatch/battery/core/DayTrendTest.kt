@@ -112,6 +112,73 @@ class DayTrendTest {
         assertNull("오늘 2시간뿐이면 비움", DayTrend.days(samples, at(15, 2), zone, days = 6).last().pph)
     }
 
+    /**
+     * 사용 통계(화면 켜짐 구간)가 있으면 화면이 한 번도 안 켜진 구간만 대기로 — 15분 사이에 몇 분씩 본 날(주말)이 대기 소모를
+     * 부풀려 '꺾임'으로 읽히지 않게. 시스템이 며칠만 보관하므로 [ScreenCover.from] 앞의 날은 비운다
+     */
+    @Test
+    fun exactScreenSpansKeepBusyDaysFromLookingLikeAShift() {
+        // 날마다 0~10시: 대기는 15분에 1%(시간당 4%), 그런데 마지막 사흘은 매시 정각 지나 5분씩 화면을 보며 그 15분에 3%를 더 씀
+        val samples = ArrayList<BatterySample>()
+        val screen = ArrayList<Span>()
+        for (i in 0 until 7) {
+            val d = 10 + i
+            val busy = i >= 4
+            var t = at(d, 0)
+            var level = 100
+            while (t <= at(d, 10)) {
+                samples += BatterySample(t, level)
+                val onTheHour = ((t - at(d, 0)) / 60_000L) % 60 == 0L
+                level -= 1 + (if (busy && onTheHour) 3 else 0)
+                if (busy && onTheHour) screen += Span(t + 2 * 60_000L, t + 7 * 60_000L)
+                t += q
+            }
+            while (t < at(d + 1, 0)) { samples += BatterySample(t, 100, plugged = true, status = Status.CHARGING); t += q }
+        }
+        val now = at(17, 0) - 1
+        // 표본만으로는 바쁜 날이 대기 7%/h 로 보여 꺾임
+        val sampled = DayTrend.days(samples, now, zone, days = 7)
+        assertEquals(7.0, sampled[5].pph!!, 0.1)
+        assertNotNull(DayTrend.shift(sampled))
+        // 화면 구간을 주면 바쁜 날도 대기 4%/h — 꺾임 없음
+        val exact = DayTrend.days(samples, now, zone, days = 7, screen = ScreenCover(screen, at(10, 0)))
+        assertTrue(exact.all { it.exact })
+        assertEquals(4.0, exact[5].pph!!, 0.1)
+        assertEquals(4.0, exact[0].pph!!, 0.1)
+        assertNull(DayTrend.shift(exact))
+    }
+
+    @Test
+    fun daysBeforeTheScreenRecordStartsUseTheSamplesForEveryDay() {
+        val samples = days(listOf(1.0, 1.0, 1.0, 2.5, 2.5, 2.5))
+        val now = at(16, 0) - 1
+        // 화면 기록이 14일부터뿐 (사흘) — 정확한 날이 4일이 안 되면 섞지 않고 모두 표본으로
+        val d = DayTrend.days(samples, now, zone, days = 6, screen = ScreenCover(emptyList(), at(13, 0)))
+        assertTrue(d.none { it.exact })
+        assertNotNull(DayTrend.shift(d))
+        // 넷째 날부터 기록이 있으면 그 앞날은 비우고 정확한 날만
+        val e = DayTrend.days(samples, now, zone, days = 6, screen = ScreenCover(emptyList(), at(12, 0)))
+        assertEquals(listOf(false, false, true, true, true, true), e.map { it.exact })
+        assertNull(e[0].pph)
+        assertEquals(2.5, e[5].pph!!, 0.1)
+    }
+
+    /**
+     * 어제 하루 나빴고 오늘은 아직 아침 — 끝나지 않은 오늘(대기 12시간 미만)은 꺾임 판단에 넣지 않는다
+     * (넣으면 하루 중에도 꺾임이 생겼다 사라지며 '지금 할 일'이 깜빡인다 — 리뷰에서 찾음)
+     */
+    @Test
+    fun aBadYesterdayAndAPartialTodayAreNotAShift() {
+        val samples = days(listOf(1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 2.5, 2.5))   // 10/10~10/19, 오늘 = 10/19
+        val morning = DayTrend.days(samples, at(19, 8), zone)
+        assertEquals(2.5, morning.last().pph!!, 0.1)   // 막대는 그린다
+        assertNull(morning.last().forShift)
+        assertNull("오늘 아침 8시간뿐 — 어제 하루만 나쁨", DayTrend.shift(morning))
+        // 오늘 대기가 12시간을 넘으면 넣는다 → 이틀째 나쁨 = 꺾임
+        val evening = DayTrend.days(samples, at(19, 20), zone)
+        assertEquals(LocalDate.of(2026, 10, 18), DayTrend.shift(evening)!!.firstAfter)
+    }
+
     @Test
     fun withTwoChangesTheBiggerOneWins() {
         // 1.0 → 1.6 (작게) → 3.0 (크게): 3.0 쪽 경계

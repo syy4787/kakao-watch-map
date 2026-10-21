@@ -52,6 +52,8 @@ data class TrendReport(
     val recent: List<Change>,
     val bars: TrendBarsModel?,
     val fresh: Boolean,
+    /** 꺾인 무렵에 워치가 이미 바뀐 것을 적고 있었나 (아니면 '바뀐 것 없음'이 아니라 '모름') */
+    val known: Boolean = true,
 ) {
     /** 보여 줄 날들 — 기록이 시작되기 전의 빈 날은 뺀다 */
     val shownDays: List<DayRate> get() = days.dropWhile { it.pph == null }
@@ -59,14 +61,24 @@ data class TrendReport(
     /** 기록 있는 날 수 — [DayTrend.MIN_SIDE_DAYS] 의 두 배는 있어야 꺾임을 본다 */
     val validDays: Int get() = days.count { it.pph != null }
 
+    /** 사용 통계의 화면 켜짐으로 센 날들인가 (아니면 15분 표본의 화면 상태로) */
+    val exact: Boolean get() = days.any { it.exact }
+
+    /** 늘어난 꺾임의 할 일 (제목, 설명) — 꺾임이 없거나 줄었으면 null */
+    fun advice(names: (String) -> String?): Pair<String, String>? =
+        shift?.takeIf { it.worse }?.let { ChangeFinder.advice(it, suspects, names, known) }
+
     companion object {
         const val RECENT_MS = 7 * 24 * 3_600_000L
         const val FRESH_DAYS = 7L
 
-        fun of(samples: List<BatterySample>, now: Long, zone: ZoneId): TrendReport {
-            val days = DayTrend.days(samples, now, zone)
+        /** [screen] = 사용 통계의 화면 켜짐 구간 (있으면 날마다 대기를 화면이 안 켜진 구간만으로) */
+        fun of(samples: List<BatterySample>, now: Long, zone: ZoneId, screen: ScreenCover? = null): TrendReport {
+            val days = DayTrend.days(samples, now, zone, screen = screen)
             val shift = DayTrend.shift(days)
-            val changes = ChangeNote.all(samples).filter { it.t <= now }
+            // 잠깐 바뀌었다 되돌아간 설정·시계 화면(삼성 모드 등)은 뺀다
+            val changes = ChangeNote.settled(ChangeNote.all(samples).filter { it.t <= now })
+            val since = ChangeNote.trackedSince(samples)
             val today = Instant.ofEpochMilli(now).atZone(zone).toLocalDate()
             return TrendReport(
                 days = days,
@@ -75,6 +87,7 @@ data class TrendReport(
                 recent = changes.filter { it.t >= now - RECENT_MS }.sortedByDescending { it.t },
                 bars = TrendBars.build(days.dropWhile { it.pph == null }, shift, changes, zone, today),
                 fresh = shift != null && shift.worse && !shift.firstAfter.isBefore(today.minusDays(FRESH_DAYS)),
+                known = shift == null || (since != null && since <= ChangeFinder.window(shift, zone).first),
             )
         }
     }

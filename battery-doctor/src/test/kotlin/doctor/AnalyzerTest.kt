@@ -91,10 +91,34 @@ class AnalyzerTest {
         assertTrue(shift.title, shift.title.contains("10/16부터 대기 소모가 시간당 1.0% → 2.5%로 늘었습니다"))
         assertTrue(shift.evidence.joinToString(), shift.evidence.any { it.contains("워치 소프트웨어 업데이트 (L350XXU1AZI1)") })
         assertTrue(shift.evidence.joinToString(), shift.evidence.any { it.contains("1주") })
+        // 그 무렵 업데이트된 앱은 글로만 — 범인(자동 치료 대상)으로 삼지 않는다
+        assertTrue(shift.packages.isEmpty())
+        // 바뀐 것을 적기 전(이 기능 전의 기록)이고 그 무렵 표시도 없으면 '없음'이 아니라 '모름'
+        val old = days(listOf(1.0, 1.0, 1.1, 1.0, 2.6, 2.5, 2.4))
+        val unknown = Analyzer.findings(facts(watchSamples = old).copy(watchTrend = com.mywatch.battery.core.TrendReport.of(old, now, zone))).single { it.id == "watch-shift" }
+        assertTrue(unknown.evidence.joinToString(), unknown.evidence.any { it.contains("적기 전이라") })
+        assertTrue(unknown.packages.isEmpty())
+        // 적기 시작한 뒤라면 '없음'
+        val tracked = days(listOf(1.0, 1.0, 1.1, 1.0, 2.6, 2.5, 2.4), at(2026, 10, 12, 1) to com.mywatch.battery.core.ChangeNote.Item(com.mywatch.battery.core.ChangeKind.TRACKING, "on"))
+        val none = Analyzer.findings(facts(watchSamples = tracked).copy(watchTrend = com.mywatch.battery.core.TrendReport.of(tracked, now, zone))).single { it.id == "watch-shift" }
+        assertTrue(none.evidence.joinToString(), none.evidence.any { it.contains("변화(소프트웨어·앱·시계 화면·주요 설정)는 없음") })
         // 꺾임이 없으면 소견도 없다
         val flat = days(listOf(1.0, 1.1, 1.0, 1.0, 1.1, 1.0, 1.0))
         val g = facts(watchSamples = flat).copy(watchTrend = com.mywatch.battery.core.TrendReport.of(flat, now, zone))
         assertTrue(Analyzer.findings(g).none { it.id == "watch-shift" })
+    }
+
+    /** 재시작한 지 7일이 넘었으면 소견 — 대기 소모가 높으면 주의(재시작부터), 아니면 참고 */
+    @Test
+    fun aLongUptimeIsAFindingAndACautionWhenIdleDrainIsHigh() {
+        val day = 24 * 3_600_000L
+        val high = Analyzer.findings(facts(watchSamples = watch(4.0, hours = 24)).copy(alarmElapsedMs = 9 * day + 3_600_000L)).single { it.id == "uptime-long" }
+        assertEquals(Severity.CAUTION, high.severity)
+        assertTrue(high.title, high.title.contains("9일"))
+        assertTrue(high.evidence.joinToString(), high.evidence.any { it.contains("강제 재시작") })
+        val calm = Analyzer.findings(facts(watchSamples = watch(1.0)).copy(alarmElapsedMs = 9 * day)).single { it.id == "uptime-long" }
+        assertEquals(Severity.INFO, calm.severity)
+        assertTrue(Analyzer.findings(facts().copy(alarmElapsedMs = 3 * day)).none { it.id == "uptime-long" })
     }
 
     // ── 판정 가지 6개 ──
