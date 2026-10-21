@@ -301,9 +301,22 @@ Kotlin/JVM 17 CLI, 의존성은 kotlin-stdlib + battery-core만(JSON은 직접 �
 - 지킴이: 최근 3일 기록만 파일 끝에서 읽음(이 앱의 15분 작업을 가볍게), 화면 꺼짐 시간·최근 2시간 화면 켜짐을 사용 통계로(하루 동안 화면 기록이 없으면 믿지 않고 표본으로).
 - PC 툴킷: `trim-caches`(안전, `pm trim-caches`) — Play 서비스가 짚이면 추천·자동 치료에 포함, `gms-restart`(주의, `am force-stop` → 시스템이 바로 다시 띄움) — 같은 조건. 둘 다 되돌릴 것 없는 일회성. Play 서비스는 여전히 끄기·데이터 삭제·제한 대상 아님.
 
+## 5-4. 레버 넓히기·그래프·시계 화면·충전 습관·이 앱 자체 절약·전후 비교 (5차, 2026-10-21)
+
+조사(2026-10): 워치9 = Wear OS 7(Android 17, API 37) · One UI 9 Watch · Snapdragon Wear Elite · 40mm 390mAh / 44mm 445mAh. 10월 20~21일에도 워치9 광탈 글(AOD·손목 올려 켜기가 켜진 채)이 이어지나 펌웨어 수정 소식은 확인되지 않음. AOSP `Settings.Global.Wearable` 의 @Readable 키(앱이 읽을 수 있음): `ambient_enabled`·`ambient_tilt_to_wake`·`ambient_touch_to_wake`·`hotword_detection_enabled`·`bedtime_mode`·`battery_saver_mode`. 설정 클래스에 없는 키(제조사 고유)도 읽을 수 있다(SettingsProvider: '정의되지 않은 키는 읽기 가능'). 시계 화면 = `WallpaperManager.getWallpaperInfo()` — QUERY_ALL_PACKAGES 로 패키지를 볼 수 있으면 돌려줌. 배터리 보호(워치8부터) = 90%에서 멈추고 85% 아래면 다시 충전.
+
+- 지킴이 밤 모드: 손목 올림·터치로 켜기 끄기(기본 켬), 'Hey Google' 끄기(선택). `Levers.pull/putBack` — 바꾸기 전 값을 한 번만 기억, 이미 그 값이면 쓰지 않고 이름에도 넣지 않음, 되돌릴 때 이미 원래 값이면 쓰지 않음. 아침 기상은 표본의 화면 켜짐 또는 사용 통계상 15분 안에 화면을 봤으면(`GuardianRules.WAKE_SEEN_MS`, 끝 2시간 안).
+- 레버 점검 `Levers.check/checkLine`: 레버마다 키·권한·지금 값 → 화면과 요약의 `[레버 점검] perm=… saver=… aod=… tilt=… touch=- …`.
+- 요약 `[지표] 이름=값` (`SummaryMetrics`): idle_pph·day_pph·night_pph·screen_pph·screen_share·wakes·short_wakes·gesture_wakes·notif_wakes·notifications·drift. PC 툴킷이 조치 추천(손목 올림 끄기: gesture_wakes ≥ 80)과 전후 비교에 씀.
+- 그래프 `DrainChart` (battery-core) + `DrainChartView`: 24시간 창, 40분 넘게 빈 곳에서 선을 끊음, 충전 = 꽂힌 표본부터 다음 빠진 표본까지, 화면 켜짐은 사용 통계가 있을 때만, 6시간마다 시각(지금 90분 안은 뺌), 세로는 늘 0~100%.
+- 시계 화면 `KnownIssues.WATCH_FACE_HEAVY`: 지금 시계 화면이 타사(삼성·구글·WFF 렌더러 아님)이고 등급이 주의 이상이거나 CPU 시간당 3분 초과(시계 화면은 늘 '보이는' 상태라 화면 밖 CPU 표시가 안 붙어 따로 셈).
+- 충전 습관 `ChargeHabits`: 최근 7일, 100%(99 이상)로 꽂혀 있던 시간 하루 2시간 이상이면 배터리 보호 권함 — 2시간 넘게 꽂은 충전이 모두 85~91%에서 1시간 넘게 머물렀으면 이미 켜진 것으로 봄. 충전 중 42℃ 이상이면 안내.
+- 이 앱 자체 감사(별도 에이전트, 2026-10-21) 반영: 지도 엔진 지연 초기화(`MapApp.ensureMapSdk`), 업데이트 확인 예약 KEEP(예약 내용 버전이 바뀔 때만 UPDATE), 종료 기록은 첫 화면 때, 하루 요약 시각 먼저 기록, HealthStore 창 밖 줄은 `{"t":` 앞부분만 보고 건너뜀, 지킴이 사용 통계 6시간, 버스 정류장 대기 3분 뒤 GPS 20초(실시간 도착 2분 안이면 5초), HTTP 응답을 다 읽으면 연결 유지, 유튜브 재생 화면 `PlayerWatchdog`(2분 어둡게·45분 멈춤), 큰 업데이트 Wi-Fi 재시도 2시간(충전 중 예외), 안내 알림 `NavNotice`(50/100m 반올림, 화면 꺼짐 30초), GPS 확인 `ProbeBackoff`(4→8→16분), 저전력 화면 '지도에서 보기'는 BALANCED 30초·최소 간격 = 간격.
+- PC 툴킷 `Compare`: 이 수집 바로 앞 수집(`Collect.before`)과 비교 — dumpsys 2시간 이상일 때 전체·화면 꺼짐 %/h·깨어 있던 비율·Play 서비스 몫, 워치 지표 대기·밤사이·금방 꺼진 화면. 15% 넘게, 항목별 최소 차이(0.2%/h·3%p·10번) 넘어야 변화. 사이에 적용해 되돌리지 않은 조치 id. 콘솔(collect/analyze/treat)과 보고서 '치료 전후 비교'(지금 할 일 다음). 조치 `tilt-wake-off`·`touch-wake-off`·`hotword-off`(주의), 설정 점검에 화면 켜기·AOD·절전 관련 키 전부.
+
 ## 6. 열린 가정 (첫 실제 수집으로 확정)
 
 - 워치가 `BATTERY_PROPERTY_CHARGE_COUNTER`를 앱에 주는지(없으면 mAh/h·용량 추정은 "측정 불가"로 표시).
-- One UI 9 Watch의 `settings` 키 이름(AOD·화면 꺼짐 시간)과 선택 앱의 패키지명 — 수집 결과에 맞춰 카탈로그 갱신.
+- One UI 9 Watch의 `settings` 키 이름(AOD·손목 올림·터치·음성 호출·화면 꺼짐 시간)과 선택 앱의 패키지명 — 수집 보고서의 '화면 켜기·AOD·절전 관련 키'와 워치 요약의 `[레버 점검]`으로 확인해 카탈로그·레버 갱신.
 - `dumpsys batterystats` 텍스트의 정확한 섹션 문구(Wear OS 7) — 파서는 관대하게, 실제 덤프로 테스트 교체.
 - `dumpsys battery`에 삼성 확장 필드가 있는지.
