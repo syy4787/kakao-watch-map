@@ -12,6 +12,8 @@ import com.mywatch.battery.core.LeverEffect
 import com.mywatch.battery.core.LeverEffects
 import com.mywatch.battery.core.UsageBreakdown
 import com.mywatch.battery.core.UsageSplit
+import com.mywatch.battery.core.WakeStats
+import com.mywatch.battery.core.Wakes
 import com.mywatch.battery.core.WatchModels
 import com.mywatch.kakaomap.data.ErrorLog
 import java.time.ZoneId
@@ -26,6 +28,8 @@ data class Insights(
     val issues: List<KnownIssue>,
     /** 밤 모드 효과 */
     val nightEffect: LeverEffect,
+    /** 화면이 켜진 횟수·알림이 켠 횟수 (사용 통계가 있을 때) */
+    val wakes: WakeStats? = null,
 )
 
 object BatteryInsights {
@@ -34,15 +38,16 @@ object BatteryInsights {
         val c = context.applicationContext
         val analysis = runCatching { DrainAnalyzer(WatchModels.nominalMah(Build.MODEL), zone).analyze(samples, now) }
             .onFailure { ErrorLog.record("배터리·분석", it) }.getOrNull()
+        // 하루 동안 화면 기록이 하나도 없으면 기록을 안 남기는 기기로 보고 표본으로 어림
+        val usage = runCatching { ScreenUsage(c).readAll(now - 24 * 3_600_000L, now) }.getOrNull()?.takeIf { it.screen.isNotEmpty() }
         val breakdown = runCatching {
-            // 하루 동안 화면 기록이 하나도 없으면 기록을 안 남기는 기기로 보고 표본으로 어림
-            val usage = ScreenUsage(c).read(now - 24 * 3_600_000L, now)?.takeIf { it.first.isNotEmpty() }
-            UsageSplit.analyze(samples, usage?.first, usage?.second.orEmpty(), HealthStore(c).windows(24, now), now, zone, ownPkg = c.packageName)
+            UsageSplit.analyze(samples, usage?.screen, usage?.apps.orEmpty(), HealthStore(c).windows(24, now), now, zone, ownPkg = c.packageName)
         }.onFailure { ErrorLog.record("배터리·사용 내역", it) }.getOrNull()
+        val wakes = usage?.let { u -> runCatching { Wakes.analyze(u.screen, u.notifications, now - 24 * 3_600_000L, now, breakdown?.screenPph) }.getOrNull() }
         val culprits = runCatching { Guardian.culprits(c, now) }.getOrDefault(emptyList())
         val issues = KnownIssues.detect(culprits)
         val effect = runCatching { LeverEffects.nightMode(samples, GuardianJournal(c).nightSessions(now), now, zone) }
             .getOrDefault(LeverEffect(emptyList(), emptyList()))
-        return Insights(analysis, breakdown, culprits, issues, effect)
+        return Insights(analysis, breakdown, culprits, issues, effect, wakes)
     }
 }

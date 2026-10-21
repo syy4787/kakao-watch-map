@@ -84,6 +84,11 @@ object BatterySummary {
                     (h.culprit?.let { " 뒤에서 ${it.use.pkg}: ${it.summary}" } ?: ""))
             }
         }
+        insights?.wakes?.let { w ->
+            appendLine("[화면 켜짐] ${w.wakes}번 (5초 안에 꺼짐 ${w.shortWakes}, 알림이 켬 ${w.notificationWakes}, 알림 ${w.notifications}개: " +
+                w.topNotifiers.take(3).joinToString(", ") { "${it.first} ${it.second}" } + ")")
+            w.advice().forEach { appendLine(" · $it") }
+        }
         insights?.issues?.forEach { i ->
             appendLine("[알려진 문제] ${i.title} — ${i.why}")
             i.steps.forEachIndexed { n, st -> appendLine("  ${n + 1}) $st") }

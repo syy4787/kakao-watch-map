@@ -247,6 +247,12 @@ class BatteryActivity : ComponentActivity() {
             rows += Row.Note("화면 켜진 동안: 시간당 ${DrainAnalyzer.fmt(pph)}% — 화면 시간·밝기가 좌우")
         }
         if (!b.exactScreen) rows += Row.Note("PC 툴킷 메뉴 7(권한 주기) 뒤엔 화면 켜짐 시간까지 정확히 나눕니다")
+        insights?.wakes?.let { w ->
+            rows += Row.Note("화면 켜짐 ${w.wakes}번 — 5초 안에 꺼짐 ${w.shortWakes}번 · 알림이 켬 ${w.notificationWakes}번 (알림 ${w.notifications}개)")
+            w.advice { HealthStore.label(this, it) }.forEachIndexed { i, a ->
+                rows += Row.Step(color(Grade.CAUTION), R.drawable.ic_warning, "할 일", a.substringBefore(" — "), a.substringAfter(" — ", ""), key = "wake:$i")
+            }
+        }
         b.steepest.forEach { h ->
             val on = h.screenOnMs?.let { "화면 ${it / 60_000}분" + (h.topApp?.let { p -> "(${HealthStore.label(this, p)})" } ?: "") }
             val bg = h.culprit?.takeIf { it.score > 0 }?.let { "뒤에서: ${HealthStore.label(this, it.use.pkg)} ${it.summary}" }

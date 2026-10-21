@@ -200,4 +200,38 @@ class BatteryInsightsTest {
         assertTrue(issue.sub ?: "", (issue.sub ?: "").contains("캐시 지우기"))
         assertTrue(rows.filterIsInstance<Row.Action>().any { it.id == BatteryActivity.A_APP_INFO + "com.google.android.gms" })
     }
+
+    /** 화면이 하루 수백 번 켜졌다 금방 꺼지면(손목 올려 켜기 오작동) 그 횟수와 끌 설정을 알려 준다. 알림이 켠 것은 앱별로 */
+    @Test
+    fun manyShortWakesAndNotificationWakesGetAdvice() {
+        allowUsage()
+        val now = System.currentTimeMillis()
+        var t = now - 20 * 3_600_000L
+        repeat(120) {          // 손목을 들 때 켜졌다 2초 만에 꺼짐
+            event("android", t, UsageEvents.Event.SCREEN_INTERACTIVE)
+            event("android", t + 2_000L, UsageEvents.Event.SCREEN_NON_INTERACTIVE)
+            t += 5 * 60_000L
+        }
+        repeat(60) {           // 카카오톡 알림이 화면을 켬
+            event("com.kakao.talk", t, ScreenUsage.NOTIFICATION_INTERRUPTION)
+            event("android", t + 400L, UsageEvents.Event.SCREEN_INTERACTIVE)
+            event("android", t + 8_000L, UsageEvents.Event.SCREEN_NON_INTERACTIVE)
+            t += 3 * 60_000L
+        }
+        val u = ScreenUsage(context).readAll(now - 24 * 3_600_000L, now)!!
+        assertEquals(60, u.notifications.size)
+        assertEquals(180, u.screen.size)
+        // 표본: 화면 기록과 상관없이 하루치
+        var level = 95.0
+        var s = now - 22 * 3_600_000L
+        while (s <= now) { log.append(BatterySample(s, level.toInt())); level -= 0.6; s += q }
+        val (_, adapter) = open()
+        val rows = adapter.rows
+        assertTrue(rows.filterIsInstance<Row.Note>().any { it.text.startsWith("화면 켜짐 180번") })
+        val todo = rows.filterIsInstance<Row.Step>().filter { it.key.startsWith("wake:") }
+        assertEquals(2, todo.size)
+        assertTrue(todo[0].title, todo[0].title.contains("120번"))
+        assertTrue(todo[0].sub ?: "", (todo[0].sub ?: "").contains("손목 올려 화면 켜기"))
+        assertTrue(todo[1].title, todo[1].title.contains("알림이 화면을 60번"))
+    }
 }

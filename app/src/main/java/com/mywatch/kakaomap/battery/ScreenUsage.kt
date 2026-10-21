@@ -27,7 +27,20 @@ class ScreenUsage(context: Context) {
         }
 
     /** [from, to) 사이 화면 켜짐 구간과 앱 구간 — 권한이 없거나 못 읽으면 null */
-    fun read(from: Long, to: Long): Pair<List<Span>, List<AppSpan>>? {
+    fun read(from: Long, to: Long): Pair<List<Span>, List<AppSpan>>? = readAll(from, to)?.let { it.screen to it.apps }
+
+    companion object {
+        /**
+         * 화면을 켤 수 있는(소리·진동·화면) 알림이 왔다 — UsageEvents.Event.NOTIFICATION_INTERRUPTION(12). SDK 에는 숨겨진 상수지만
+         * 사용 통계 권한이 있는 앱에도 (알림 채널 이름만 가린 채) 그대로 온다
+         */
+        const val NOTIFICATION_INTERRUPTION = 12
+    }
+
+    /** 화면 켜짐 구간 · 화면에 떠 있던 앱 구간 · 화면을 켤 수 있는 알림(앱, 때) */
+    data class Usage(val screen: List<Span>, val apps: List<AppSpan>, val notifications: List<Pair<String, Long>>)
+
+    fun readAll(from: Long, to: Long): Usage? {
         if (!available || to <= from) return null
         val usm = app.getSystemService(UsageStatsManager::class.java) ?: return null
         val events = runCatching { usm.queryEvents(from, to) }.getOrNull() ?: return null
@@ -36,6 +49,7 @@ class ScreenUsage(context: Context) {
         var screenStart: Long? = null
         var sawScreenEvent = false
         val apps = ArrayList<AppSpan>()
+        val notes = ArrayList<Pair<String, Long>>()
         val open = HashMap<String, Long>()
         while (events.hasNextEvent()) {
             if (!events.getNextEvent(e)) break
@@ -52,6 +66,7 @@ class ScreenUsage(context: Context) {
                     screenStart = null
                     sawScreenEvent = true
                 }
+                NOTIFICATION_INTERRUPTION -> notes += e.packageName to t
                 UsageEvents.Event.ACTIVITY_RESUMED -> open.putIfAbsent(e.packageName, t)
                 UsageEvents.Event.ACTIVITY_PAUSED, UsageEvents.Event.ACTIVITY_STOPPED ->
                     open.remove(e.packageName)?.let { s -> if (t > s) apps += AppSpan(e.packageName, s, t) }
@@ -59,6 +74,6 @@ class ScreenUsage(context: Context) {
         }
         screenStart?.let { if (to > it) screen += Span(it, to) }
         open.forEach { (p, s) -> if (to > s) apps += AppSpan(p, s, to) }
-        return screen to apps.sortedBy { it.start }
+        return Usage(screen, apps.sortedBy { it.start }, notes)
     }
 }
