@@ -220,7 +220,7 @@ object Analyzer {
             val sev = if (hard.isNotEmpty()) Severity.ABNORMAL else Severity.CAUTION
             val kinds = list.groupBy { it.kind }.entries.joinToString(", ") { "${it.value.first().label} ${it.value.size}회" }
             out += Finding("gauge-watch", sev, "워치 기록의 잔량 표시 이상 ${list.size}회 ($kinds) — ${sev.label}",
-                list.takeLast(8).map { "${time(it.t, f.zone)} ${it.label}: ${it.detail}" } + listOf("기준: 충전 없이 +5포인트, 부팅 뒤 +10포인트, 20분 안에 −15포인트, 계수기와 10포인트 차이"),
+                list.takeLast(8).map { "${time(it.t, f.zone)} ${it.label}: ${it.detail}" } + listOf("기준: 충전 없이 +5포인트(그 사이 충전으로도 안 될 만큼 — 분당 2포인트 넘게), 부팅 뒤 +10포인트(충전기 위에서 켜졌으면 꺼져 있던 동안 충전으로도 안 될 만큼), 20분 안에 −15포인트, 계수기와 10포인트 차이"),
                 source = "battery-core Gauge 규칙 — 잔량 점프·급락은 셀이 아니라 게이지(잔량 추정 펌웨어)의 문제일 때가 많음(2026년 워치8 '재부팅 한 번에 30% 손실' 사례)", category = "gauge")
         }
 

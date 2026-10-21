@@ -92,6 +92,7 @@ kakao-watch-map/
 
 - `BatterySampleWorker`: WorkManager 주기 작업(15분, 고유 이름 `battery-sample`, KEEP). 표본 하나를 읽어 CSV에 덧붙인다. 제약 없음(충전 중에도 기록 — 충전 곡선이 용량 추정에 필요). `MapApp.onCreate`와 BOOT_COMPLETED에서 예약.
 - `BatteryEventsReceiver`(매니페스트): `ACTION_POWER_CONNECTED`, `ACTION_POWER_DISCONNECTED`, `ACTION_BOOT_COMPLETED`, `ACTION_BATTERY_LOW` → 해당 event로 즉시 표본 1개(OneTimeWorkRequest, expedited 아님 — 수 초 늦어도 됨). 권한 `RECEIVE_BOOT_COMPLETED` 추가.
+  - **v2.40 고침:** 충전기 꽂음·뺌·배터리 부족은 암시적 방송이라 targetSdk 26+ 앱의 매니페스트 수신기로는 오지 않는다(Android 8 제한, 예외 목록에 없음) — 매니페스트엔 `BOOT_COMPLETED` 만 남기고, 충전 시작은 `ChargeWatchWorker`('충전 중' 조건의 한 번짜리 작업, 돌면 POWER_CONNECTED 한 줄·10분 뒤 다시 걸기)가 잡는다. 그래도 놓친 짧은 충전 때문에 게이지 판정이 뒤집히지 않게, 잔량 상승은 그 사이 충전으로 오를 수 없는 만큼(분당 2%p 넘게)일 때만 '충전 없이 상승'·충전기 위 부팅 점프로 센다.
 - `BatteryProbe`: 현재 표본 읽기 — sticky `ACTION_BATTERY_CHANGED` + `BatteryManager.getIntProperty`(CHARGE_COUNTER, CURRENT_NOW; `Int.MIN_VALUE`/0 은 미지원으로 보고 null) + `PowerManager.isInteractive`.
 - `BatteryLog`: 파일 `getExternalFilesDir(null)/battery/log.csv`(ADB `adb pull`이 닿는 곳; 없으면 `filesDir`). 덧붙이기 전용. 30일보다 오래된 줄은 하루 한 번 잘라낸다(임시 파일에 다시 써서 교체). 실험 표시 줄도 같은 파일.
 - 비용: 15분에 한 번 수십 ms, 파일 수백 KB/월. 웨이크락 없음.

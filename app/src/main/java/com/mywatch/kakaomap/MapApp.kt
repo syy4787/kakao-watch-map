@@ -65,6 +65,8 @@ class MapApp : Application() {
         if (UpdateManager.repo(this) != null) runCatching { UpdateWorker.schedule(this) }
         // 배터리 표본 15분마다 (배터리 화면·PC 툴킷의 재료) — 이미 예약돼 있으면 그대로
         BatterySampleWorker.schedule(this)
+        // 충전 시작을 기록하는 작업 (충전기 꽂음 방송은 오지 않는다)
+        com.mywatch.kakaomap.battery.ChargeWatchWorker.arm(this)
         // 화면이 하나라도 떠 있는지 센다 — 쓰는 도중에 업데이트 설치로 앱이 꺼지지 않게,
         // 그리고 화면을 다 닫는 순간 미뤄 둔 업데이트를 바로 설치하려고
         registerActivityLifecycleCallbacks(object : ActivityLifecycleCallbacks {

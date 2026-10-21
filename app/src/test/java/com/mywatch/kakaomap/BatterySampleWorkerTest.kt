@@ -93,12 +93,30 @@ class BatterySampleWorkerTest {
         assertNull(s.currentUa)
     }
 
+    private fun plugIn(level: Int) = context.sendStickyBroadcast(
+        Intent(Intent.ACTION_BATTERY_CHANGED)
+            .putExtra(BatteryManager.EXTRA_LEVEL, level).putExtra(BatteryManager.EXTRA_SCALE, 100)
+            .putExtra(BatteryManager.EXTRA_STATUS, BatteryManager.BATTERY_STATUS_CHARGING)
+            .putExtra(BatteryManager.EXTRA_PLUGGED, BatteryManager.BATTERY_PLUGGED_WIRELESS)
+    )
+
+    /**
+     * 충전기 꽂음 방송은 targetSdk 26+ 앱에 오지 않는다 — 그래서 '충전 중' 조건의 작업이 충전이 시작되면 한 줄 남기고(이미 충전 중
+     * 줄이 있으면 안 씀), 다시 '충전 중' 조건으로 걸어 둔다. 15분 표본 사이의 짧은 충전이 '충전 없이 잔량 상승'으로 읽히지 않게 (점검에서 찾음)
+     */
     @Test
-    fun pluggingInTheChargerWritesAnEventRow() {
-        BatteryEventsReceiver().onReceive(context, Intent(Intent.ACTION_POWER_CONNECTED))
+    fun aChargingJobLogsTheStartOfChargingOnceAndRearms() {
+        plugIn(57)
+        fun run() = TestWorkerBuilder<com.mywatch.kakaomap.battery.ChargeWatchWorker>(context, Executors.newSingleThreadExecutor()).build().doWork()
+        assertEquals(ListenableWorker.Result.success(), run())
         val s = log.readAll().single()
         assertEquals(Event.POWER_CONNECTED, s.event)
-        assertEquals(57, s.level)
+        assertTrue(s.plugged)
+        assertEquals(ListenableWorker.Result.success(), run())
+        assertEquals("이미 충전 중 줄이 있으면 쓰지 않는다", 1, log.readAll().size)
+        val next = WorkManager.getInstance(context).getWorkInfosForUniqueWork(com.mywatch.kakaomap.battery.ChargeWatchWorker.UNIQUE).get()
+        assertTrue(next.isNotEmpty())
+        assertTrue(next.all { it.constraints.requiresCharging() })
     }
 
     @Test
@@ -107,6 +125,9 @@ class BatterySampleWorkerTest {
         // 시험용 WorkManager 는 주기 작업도 곧바로 한 번 돌리므로 BOOT 줄 외에 PERIODIC 줄이 있을 수 있다
         assertTrue(log.readAll().any { it.event == Event.BOOT })
         assertEquals(1, WorkManager.getInstance(context).getWorkInfosForUniqueWork(BatterySampleWorker.UNIQUE).get().size)
+        // 충전 시작을 잡는 작업도 걸려 있다
+        val charge = WorkManager.getInstance(context).getWorkInfosForUniqueWork(com.mywatch.kakaomap.battery.ChargeWatchWorker.UNIQUE).get()
+        assertTrue(charge.single().constraints.requiresCharging())
     }
 
     @Test

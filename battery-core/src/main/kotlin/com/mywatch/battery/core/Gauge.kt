@@ -3,7 +3,7 @@ package com.mywatch.battery.core
 import kotlin.math.abs
 
 enum class AnomalyKind {
-    /** 충전기 없이 잔량이 올라감 */
+    /** 충전기 없이, 그 사이 충전으로도 안 될 만큼 잔량이 올라감 */
     JUMP_UP,
     /** 꺼졌다 켜지며 잔량이 뜀(17% → 꺼짐 → 50% 패턴) */
     REBOOT_JUMP,
@@ -36,6 +36,14 @@ object Gauge {
     const val MISMATCH_POINTS = 10.0
     /** 용량 추정에 쓰는 충전 세션의 최소 잔량 상승폭 */
     const val CAPACITY_MIN_RISE = 40
+    /**
+     * 충전기로 1분에 오를 수 있는 잔량의 넉넉한 위 끝(%p) — 워치 충전은 빈 상태에서도 분당 1%p 안팎. 이보다 덜 오른 것은
+     * 표본 사이의 기록되지 않은 충전(짧은 충전·기록이 밀린 동안)일 수 있어 게이지 이상으로 치지 않는다
+     */
+    const val MAX_CHARGE_PER_MIN = 2.0
+
+    /** [gapMs] 동안 충전으로 [rise] 만큼 오를 수 있었나 */
+    fun couldCharge(gapMs: Long, rise: Int): Boolean = gapMs > 0 && rise <= gapMs / 60_000.0 * MAX_CHARGE_PER_MIN
 
     fun anomalies(samples: List<BatterySample>, nominalMah: Int?): List<GaugeAnomaly> {
         val out = ArrayList<GaugeAnomaly>()
@@ -43,8 +51,12 @@ object Gauge {
             val d = b.level - a.level
             val gap = b.t - a.t
             if (b.event == Event.BOOT && d >= REBOOT_JUMP_MIN) {
-                out += GaugeAnomaly(AnomalyKind.REBOOT_JUMP, b.t, a.level, b.level, "부팅 뒤 ${a.level}% → ${b.level}%")
-            } else if (b.event != Event.BOOT && !a.plugged && !b.plugged && d >= JUMP_UP_MIN) {
+                // 충전기 위에서 켜졌고 꺼져 있던 동안 충전으로 오를 수 있었던 만큼이면 점프가 아니다
+                if (!(b.plugged && couldCharge(gap, d))) {
+                    out += GaugeAnomaly(AnomalyKind.REBOOT_JUMP, b.t, a.level, b.level, "부팅 뒤 ${a.level}% → ${b.level}%")
+                }
+            } else if (b.event != Event.BOOT && !a.plugged && !b.plugged && d >= JUMP_UP_MIN && !couldCharge(gap, d)) {
+                // 충전기 꽂음은 다음 표본까지 기록되지 않을 수 있다 — 그 사이 충전으로 오를 수 있었던 만큼은 점프가 아니다
                 out += GaugeAnomaly(AnomalyKind.JUMP_UP, b.t, a.level, b.level, "충전기 없이 ${a.level}% → ${b.level}%")
             }
             if (!a.plugged && !b.plugged && gap in 1..CLIFF_MAX_GAP_MS && -d >= CLIFF_DROP && !b.interactive) {

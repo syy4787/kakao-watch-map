@@ -160,15 +160,13 @@
         <receiver
             android:name=".battery.GuardianReceiver"
             android:exported="false" />
-        <!-- 충전기 꽂음·뺌, 부팅, 배터리 부족 순간을 배터리 기록에 한 줄 (부팅 뒤 15분 기록도 다시 예약) -->
+        <!-- 부팅 순간을 배터리 기록에 한 줄 (부팅 뒤 15분 기록·충전 시작 기록도 다시 예약).
+             충전기 꽂음·뺌·배터리 부족 방송은 targetSdk 26+ 앱의 매니페스트로는 오지 않는다 — 충전 시작은 '충전 중' 조건 작업이 잡는다 -->
         <receiver
             android:name=".battery.BatteryEventsReceiver"
             android:exported="false">
             <intent-filter>
-                <action android:name="android.intent.action.ACTION_POWER_CONNECTED" />
-                <action android:name="android.intent.action.ACTION_POWER_DISCONNECTED" />
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
-                <action android:name="android.intent.action.BATTERY_LOW" />
             </intent-filter>
         </receiver>
 

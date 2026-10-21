@@ -157,6 +157,22 @@ class AnalyzerTest {
         assertFalse(Analyzer.findings(facts(nowBattery = BatteryNow(48, 100, 3812, 298, "2", "3", 196800, emptyMap()))).any { it.id == "gauge-counter" })
     }
 
+    /**
+     * 15분 표본 사이 8분 충전(샤워하며)은 기록되지 않는다 — 57% → 62% 가 '게이지 고장'이 되어 진짜 범인(웨이크락)을 가리고
+     * 서비스센터를 권하던 것 (점검에서 찾음). 충전으로 오를 수 있었던 만큼은 잔량 표시 이상이 아니다
+     */
+    @Test
+    fun anUnloggedTopUpDoesNotHideTheSoftwareCulprit() {
+        val stats = quietStats().copy(partialWakeLocks = listOf(WakeLock(10123, "com.example.drain", "*job*/x", 70 * 60_000L, 300)))
+        val s = watch(5.5, hours = 16).toMutableList()
+        val i = s.size / 2
+        for (j in i until s.size) s[j] = s[j].copy(level = (s[j].level + 8).coerceAtMost(100))   // 8분 충전 ≈ +8
+        val f = facts(stats = stats, watchSamples = s)
+        val fs = Analyzer.findings(f)
+        assertFalse(fs.joinToString { it.id }, fs.any { it.id == "gauge-watch" })
+        assertEquals(Cause.SOFTWARE, Analyzer.verdict(f, fs).cause)
+    }
+
     @Test
     fun softwareWhenAWakeLockIsAbnormal() {
         val stats = quietStats().copy(partialWakeLocks = listOf(WakeLock(10123, "com.example.drain", "*job*/x", 70 * 60_000L, 300)))

@@ -1,6 +1,7 @@
 package com.mywatch.battery.core
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -48,6 +49,19 @@ class DrainAnalyzerTest {
         assertEquals(Grade.ABNORMAL, a.verdict.grade)
         assertTrue(a.verdict.headline, a.verdict.headline.startsWith("대기 중 시간당 6.0%"))
         assertTrue(a.verdict.reasons.any { it.contains("24시간 평균") })
+    }
+
+    /** 3주 전 한 번의 잔량 점프가 30일 내내 판정을 '잔량 표시 오류 의심'으로 묶어 두지 않는다 — 판정엔 최근 7일 것만 (점검에서 찾음) */
+    @Test
+    fun anOldGaugeJumpDoesNotHoldTheVerdict() {
+        val now = at(2026, 10, 20, 12)
+        val old = now - 21 * 24 * 3_600_000L
+        val s = listOf(BatterySample(t = old, level = 17), BatterySample(t = old + q, level = 47, event = Event.BOOT)) +
+            drain(now - 40 * q, 41, 90.0, 1.0)
+        val a = DrainAnalyzer(445, zone).analyze(s, now)
+        assertEquals(listOf(AnomalyKind.REBOOT_JUMP), a.anomalies.map { it.kind })
+        assertFalse(a.verdict.tags.contains("gauge"))
+        assertFalse(a.verdict.headline, a.verdict.headline.startsWith("잔량 표시 오류 의심"))
     }
 
     @Test

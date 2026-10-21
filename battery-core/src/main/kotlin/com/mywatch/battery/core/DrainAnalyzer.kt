@@ -55,7 +55,9 @@ class DrainAnalyzer(private val nominalMah: Int?, private val zone: ZoneId = Zon
         val drift = GaugeDriftRule.estimate(sorted, now, anomalies)
         val recoveries = GaugeDriftRule.recoveries(sorted, anomalies)
         val hot = sorted.count { it.t >= now - 24 * 3_600_000L && it.t <= now && !it.plugged && !it.interactive && (it.tempDeciC ?: 0) >= HOT_DECI_C }
-        val verdict = verdict(span, w24, idle24, overnight, overnightLabel, anomalies, capacity, experiments, drift, recoveries, hot)
+        // 판정엔 최근 것만 — 3주 전 한 번의 점프가 30일 내내 '잔량 표시 오류 의심'으로 묶어 두지 않게 (목록엔 다 남긴다)
+        val recentAnomalies = anomalies.filter { it.t >= now - RECENT_ANOMALY_MS }
+        val verdict = verdict(span, w24, idle24, overnight, overnightLabel, recentAnomalies, capacity, experiments, drift, recoveries, hot)
         return Analysis(sorted.size, span, w1, w8, w24, idle24, overnight, overnightLabel, anomalies, capacity, experiments, verdict, drift, recoveries, hot)
     }
 
@@ -193,6 +195,8 @@ class DrainAnalyzer(private val nominalMah: Int?, private val zone: ZoneId = Zon
         const val HOT_DECI_C = 400
         /** 뜨거운 표본이 이만큼(1시간어치) 넘어야 말한다 */
         const val HOT_MIN_SAMPLES = 4
+        /** 판정에 쓰는 잔량 표시 이상은 최근 이만큼 안의 것 */
+        const val RECENT_ANOMALY_MS = 7L * 24 * 3_600_000L
         fun fmt(x: Double): String = String.format(Locale.US, "%.1f", x)
         fun overnightDate(now: Long, zone: ZoneId): LocalDate = Instant.ofEpochMilli(now).atZone(zone).toLocalDate()
     }
