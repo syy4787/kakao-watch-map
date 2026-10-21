@@ -756,7 +756,7 @@ class GuardianTest {
         fill(at(14, 0), 9, 76.0, 1.0)
         Guardian.tick(context, log, at(14, 0), stats = UidStatsSource { mapOf(home to com.mywatch.battery.core.UidUse(home, cpuMs = 56 * 60_000L)) }, zone = zone)
         assertEquals("One UI Watch 홈 과소모 — 홈 캐시 지우기", Guardian.tileIssue(context, at(14, 0)))
-        assertTrue(issueTitle(), issueTitle().contains("재시작해도 그대로"))
+        assertTrue(issueTitle(), issueTitle().endsWith("재시작 뒤에도 또 나타남"))
         // 배터리 화면도 같은 판단
         val issue = com.mywatch.kakaomap.battery.BatteryInsights.compute(context, log.readAll(), at(14, 0), zone).issues.single()
         assertTrue(issue.cameBack)
@@ -787,6 +787,73 @@ class GuardianTest {
         fill(at(11, 0), 9, 78.0, 1.0)
         Guardian.tick(context, log, at(11, 0), stats = UidStatsSource { mapOf(home to UidUse(home, cpuMs = 20 * 60_000L)) }, zone = zone)
         assertEquals("One UI Watch 홈 과소모 — 강제 재시작", Guardian.tileIssue(context, at(11, 0)))
+        // 같은 부팅에서 또 보여도 새 일은 이 부팅부터 — 사흘 전 부팅을 '재시작 앞'으로 치지 않는다
+        fill(at(12, 0), 9, 77.0, 1.0)
+        Guardian.tick(context, log, at(12, 0), stats = UidStatsSource { mapOf(home to UidUse(home, cpuMs = 40 * 60_000L)) }, zone = zone)
+        assertEquals("One UI Watch 홈 과소모 — 강제 재시작", Guardian.tileIssue(context, at(12, 0)))
+    }
+
+    /** Play 서비스도: 재시작 뒤에도 또 나타나면 타일이 '캐시·PC 치료'로 (리뷰) */
+    @Test
+    fun playServicesThatComeBackAfterARestartGetTheNextStep() {
+        grant()
+        val gms = "com.google.android.gms"
+        bootCount(1)
+        fill(at(10, 0), 9, 80.0, 1.0)
+        Guardian.tick(context, log, at(10, 0), stats = UidStatsSource { mapOf(gms to UidUse(gms)) }, zone = zone)
+        fill(at(11, 0), 9, 79.0, 1.0)
+        Guardian.tick(context, log, at(11, 0), stats = UidStatsSource { mapOf(gms to UidUse(gms, cpuMs = 20 * 60_000L)) }, zone = zone)
+        assertEquals("Play 서비스 과소모 — 캐시 지우기", Guardian.tileIssue(context, at(11, 0)))
+        restartAndSettle(2)
+        fill(at(11, 30), 9, 78.0, 1.0)
+        Guardian.tick(context, log, at(11, 30), stats = UidStatsSource { mapOf(gms to UidUse(gms, cpuMs = 21 * 60_000L)) }, zone = zone)
+        fill(at(12, 30), 9, 77.0, 1.0)
+        Guardian.tick(context, log, at(12, 30), stats = UidStatsSource { mapOf(gms to UidUse(gms, cpuMs = 41 * 60_000L)) }, zone = zone)
+        assertEquals("Play 서비스 과소모 — 캐시·PC 치료", Guardian.tileIssue(context, at(12, 30)))
+    }
+
+    /**
+     * 부팅 차례를 아직 모르면(업데이트 뒤 첫 스냅샷 전) 본 문제를 적지도 '재시작 뒤 또'로 보지도 않는다. 통계 파일이 사라져 차례가 0 부터
+     * 다시 세어지면 앞의 기억은 새 일로 — 그 앞의 큰 차례 때문에 다음 재시작을 놓치지 않게 (리뷰)
+     */
+    @Test
+    fun anUnknownOrResetBootSequenceDoesNotConfuseTheEscalation() {
+        val home = com.mywatch.battery.core.KnownIssues.HOME
+        assertEquals(-1, HealthStore(context).bootSeq())
+        context.getSharedPreferences(BatteryLog.PREFS, Context.MODE_PRIVATE).edit()
+            .putInt("gs_issue_seen_seq_watch-home-hog", 0).putLong("gs_issue_seen_at_watch-home-hog", at(11, 0)).commit()
+        assertTrue(Guardian.cameBack(context, at(12, 0)).isEmpty())
+        // 통계 파일이 사라짐: 지금 차례 0, 기억은 5
+        bootCount(1)
+        homeHogUntilNoon()
+        context.getSharedPreferences(BatteryLog.PREFS, Context.MODE_PRIVATE).edit().putInt("gs_issue_seen_seq_watch-home-hog", 5).commit()
+        fill(at(13, 0), 9, 77.0, 1.0)
+        Guardian.tick(context, log, at(13, 0), stats = UidStatsSource { mapOf(home to UidUse(home, cpuMs = 50 * 60_000L, fgMs = 2 * 3_600_000L)) }, zone = zone)
+        assertEquals("새 일", "One UI Watch 홈 과소모 — 강제 재시작", Guardian.tileIssue(context, at(13, 0)))
+        // 그 뒤 재시작해도 그대로면 다음 단계
+        restartAndSettle(2)
+        fill(at(13, 20), 9, 76.0, 1.0)
+        Guardian.tick(context, log, at(13, 20), stats = UidStatsSource { mapOf(home to UidUse(home, cpuMs = 51 * 60_000L)) }, zone = zone)
+        fill(at(14, 20), 9, 75.0, 1.0)
+        Guardian.tick(context, log, at(14, 20), stats = UidStatsSource { mapOf(home to UidUse(home, cpuMs = 71 * 60_000L)) }, zone = zone)
+        assertEquals("One UI Watch 홈 과소모 — 홈 캐시 지우기", Guardian.tileIssue(context, at(14, 20)))
+    }
+
+    /** 재시작 뒤에도 또 나타난 문제가 있으면 비정상 소모 알림도 '강제 재시작하세요'가 아니라 다음 단계를 가리킨다 (리뷰) */
+    @Test
+    fun theAbnormalDrainAlertPointsToTheNextStepWhenARestartDidNotHelp() {
+        val home = com.mywatch.battery.core.KnownIssues.HOME
+        bootCount(1)
+        homeHogUntilNoon()
+        restartAndSettle(2)
+        fill(at(13, 0), 9, 77.0, 1.0)
+        Guardian.tick(context, log, at(13, 0), stats = UidStatsSource { mapOf(home to UidUse(home, cpuMs = 36 * 60_000L)) }, zone = zone)
+        fill(at(14, 0), 9, 76.0, 6.0)
+        Guardian.tick(context, log, at(14, 0), stats = UidStatsSource { mapOf(home to UidUse(home, cpuMs = 56 * 60_000L)) }, zone = zone)
+        val n = shadowOf(nm).getNotification(Guardian.N_ABNORMAL)
+        assertNotNull(n)
+        val text = n.extras.getCharSequence(Notification.EXTRA_BIG_TEXT).toString()
+        assertTrue(text, text.contains("다음 단계") && !text.contains("강제 재시작하세요"))
     }
 
     /**

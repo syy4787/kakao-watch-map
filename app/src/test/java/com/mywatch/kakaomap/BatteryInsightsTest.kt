@@ -202,7 +202,7 @@ class BatteryInsightsTest {
         val title = n.extras.getCharSequence(Notification.EXTRA_TITLE).toString()
         val text = n.extras.getCharSequence(Notification.EXTRA_BIG_TEXT).toString()
         assertTrue(title, title.contains("Play 서비스"))
-        assertTrue(text, text.contains("캐시 지우기"))
+        assertTrue(text, text.contains("캐시 삭제"))
         assertTrue(n.actions.map { it.title.toString() }.toString(), n.actions.any { it.title.toString() == "Play 서비스 앱 정보" })
         // 12시간에 한 번
         nm.cancel(Guardian.N_ISSUE)
@@ -254,8 +254,41 @@ class BatteryInsightsTest {
         val hour = rows.filterIsInstance<Row.Step>().first { it.key.startsWith("hour:") }
         assertTrue(hour.sub ?: "", (hour.sub ?: "").contains("화면"))
         val issue = rows.filterIsInstance<Row.Step>().first { it.key == "issue:play-services-loop" }
-        assertTrue(issue.sub ?: "", (issue.sub ?: "").contains("캐시 지우기"))
+        assertTrue(issue.sub ?: "", (issue.sub ?: "").contains("캐시 삭제"))
         assertTrue(rows.filterIsInstance<Row.Action>().any { it.id == BatteryActivity.A_APP_INFO + "com.google.android.gms" })
+    }
+
+    /**
+     * 앱별 소모 칸이 비었거나 짧을 때 왜인지 — 첫 기록 뒤엔 '다음 기록(1시간 안)부터', 재시작 뒤엔 '켜진 지 10분 뒤부터 다시', 기록이
+     * 1시간이 안 되면 '알려진 문제는 1시간쯤 쌓이면' (재시작한 사람이 '문제가 사라졌나?' 헷갈리지 않게)
+     */
+    @Test
+    fun theAppSectionSaysWhyItIsEmptyOrShort() {
+        shadowOf(context as Application).grantPermissions("android.permission.BATTERY_STATS")
+        val now = System.currentTimeMillis()
+        for (i in 0..8) log.append(BatterySample(now - (8 - i) * q, 80 - i / 4))
+        val store = HealthStore(context)
+        fun notes(): List<String> = open().second.rows.filterIsInstance<Row.Note>().map { it.text }
+        // 첫 기록뿐
+        // 같은 부팅(번호 1, 시험의 켜진 뒤 시간은 0 근처)에서 남긴 첫 기록
+        store.record(now - 60_000L, mapOf("a" to UidUse("a", cpuMs = 1_000)), HealthStore.Boot(1, 0L))
+        Settings.Global.putInt(context.contentResolver, Settings.Global.BOOT_COUNT, 1)
+        assertTrue(notes().toString(), notes().any { it.startsWith("앱별 기록을 모으는 중") })
+        // 재시작 뒤 아직 기록 전
+        Settings.Global.putInt(context.contentResolver, Settings.Global.BOOT_COUNT, 2)
+        assertTrue(notes().toString(), notes().any { it.startsWith("재시작 뒤 — 켜진 지 10분이 지나면") })
+    }
+
+    @Test
+    fun aShortWindowSaysWhenKnownIssuesWillBeJudged() {
+        shadowOf(context as Application).grantPermissions("android.permission.BATTERY_STATS")
+        val now = System.currentTimeMillis()
+        for (i in 0..8) log.append(BatterySample(now - (8 - i) * q, 80 - i / 4))
+        val store = HealthStore(context)
+        store.record(now - 30 * 60_000L, mapOf("a" to UidUse("a", cpuMs = 1_000)))
+        store.record(now - 60_000L, mapOf("a" to UidUse("a", cpuMs = 61_000)))
+        val notes = open().second.rows.filterIsInstance<Row.Note>().map { it.text }
+        assertTrue(notes.toString(), notes.any { it == "알려진 문제는 기록이 1시간쯤 쌓이면 봅니다 (지금 29분치)" })
     }
 
     /** 배터리 화면을 열 때도 One UI Watch 홈 과소모를 짚는다 — 사용 통계로 본 화면 켜짐 시간을 빼고 (15분 기록과 같은 판단) */

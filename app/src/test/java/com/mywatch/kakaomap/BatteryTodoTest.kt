@@ -66,7 +66,7 @@ class BatteryTodoTest {
         val t = BatteryTodo.pick(insights(listOf(face, gms), busyWrist).copy(trend = trend), permitted = true)
         assertEquals("Google Play 서비스 과소모", t[0].title)
         assertEquals("Play 서비스 업데이트 뒤 더 닳음", t[1].title)
-        assertTrue(t[1].detail ?: "", (t[1].detail ?: "").contains("캐시 지우기"))
+        assertTrue(t[1].detail ?: "", (t[1].detail ?: "").contains("캐시 삭제"))
         assertEquals(Grade.CAUTION, t[1].grade)
         // 오래된 꺾임(7일 넘음)·줄어든 꺾임은 할 일이 아니다
         val old = BatteryTodo.pick(insights().copy(trend = trend.copy(fresh = false)), permitted = true)

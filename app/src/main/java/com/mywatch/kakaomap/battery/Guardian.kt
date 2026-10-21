@@ -352,19 +352,20 @@ object Guardian {
         return KnownIssues.detect(w.ranks, face, w.windowMs.takeIf { it > 0 }, screenOn, notes, label, cameBack)
     }
 
-    /** 재시작해도 그대로인지 보려고 기억하는 문제 — 첫 단계가 재시작인 것들 */
+    /** 재시작 뒤에도 또 나타나는지 보려고 기억하는 문제 — 해결 단계에 재시작이 있는 것들 */
     private val RESTART_FIRST = listOf(KnownIssues.HOME_HOG, KnownIssues.PLAY_SERVICES_LOOP)
 
     /** 이틀이 넘게 안 보였던 문제가 다시 나타나면 새 일로 (처음 단계부터) */
     const val ISSUE_RECALL_MS = 48L * 3_600_000L
 
     /**
-     * 재시작한 뒤에도 다시 나타난 문제(id) — 이번 일(이틀 안에 계속 보임)에서 처음 본 부팅 차례가 지금보다 앞이면. 시킨 대로 재시작했는데
-     * 그대로면 같은 '재시작'을 되풀이하지 않고 다음 단계를 주려고 (15분 기록·배터리 화면이 같이 씀)
+     * 재시작한 뒤에도 또 나타난 문제(id) — 이번 일(이틀 안에 계속 보임)에서 처음 본 부팅 차례가 지금보다 앞이면. 같은 '재시작'을
+     * 되풀이하지 않고 다음 단계를 주려고 (15분 기록·배터리 화면이 같이 씀). 부팅 차례를 아직 모르면 없음
      */
     fun cameBack(c: Context, now: Long): Set<String> {
         val p = prefs(c)
         val seq = HealthStore(c).bootSeq()
+        if (seq < 0) return emptySet()
         return RESTART_FIRST.filter { id ->
             val at = p.getLong("$K_SEEN_AT$id", 0L)
             val first = p.getInt("$K_SEEN_SEQ$id", -1)
@@ -372,14 +373,18 @@ object Guardian {
         }.toSet()
     }
 
-    /** 이번에 본 문제를 적는다 — 이번 일의 첫 부팅 차례는 그대로 두고(이틀 넘게 안 보였으면 새로) 본 때만 새로 */
+    /**
+     * 이번에 본 문제를 적는다 — 이번 일의 첫 부팅 차례는 그대로 두고 본 때만 새로. 이틀 넘게 안 보였거나 기억한 차례가 지금보다 크면
+     * (통계 파일이 사라져 차례를 0 부터 다시 셈) 새 일. 부팅 차례를 아직 모르면 적지 않는다(업데이트 뒤 첫 스냅샷 전)
+     */
     private fun noteSeen(c: Context, now: Long, found: List<com.mywatch.battery.core.KnownIssue>) {
         val p = prefs(c)
         val seq = HealthStore(c).bootSeq()
+        if (seq < 0) return
         val e = p.edit()
         for (i in found.filter { it.id in RESTART_FIRST }) {
             val at = p.getLong("$K_SEEN_AT${i.id}", 0L)
-            val ongoing = at > 0 && now - at in 0 until ISSUE_RECALL_MS && p.getInt("$K_SEEN_SEQ${i.id}", -1) >= 0
+            val ongoing = at > 0 && now - at in 0 until ISSUE_RECALL_MS && p.getInt("$K_SEEN_SEQ${i.id}", -1) in 0..seq
             if (!ongoing) e.putInt("$K_SEEN_SEQ${i.id}", seq)
             e.putLong("$K_SEEN_AT${i.id}", now)
         }
@@ -499,7 +504,7 @@ object Guardian {
                 val culprits = culprits(c, now).filter { it.use.pkg.substringBefore('+') != c.packageName }
                 noteAction(c, "비정상 소모(시간당 ${DrainAnalyzer.fmt(a.pph)}%) — 절전 모드 ${if (ok) "켬" else "못 켬"}" +
                     culprits.take(2).joinToString(prefix = " · 의심: ") { HealthStore.label(c, it.use.pkg) })
-                if (a.notify) notifyAbnormal(c, a.pph, ok, culprits, phantom, BatteryAlerts.quiet(now, zone))
+                if (a.notify) notifyAbnormal(c, a.pph, ok, culprits, phantom, BatteryAlerts.quiet(now, zone), back = cameBack(c, now).isNotEmpty())
             }
             GuardianAction.AbnormalOff -> { levers.restoreAbnormal(); noteAction(c, "비정상 대응 끝 — 절전 복구") }
             GuardianAction.UserOverride -> { levers.restoreAll(keepSaver = true); noteAction(c, "사용자가 절전을 꺼서 12시간 쉼") }
@@ -529,7 +534,7 @@ object Guardian {
         PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
     )
 
-    private fun notifyAbnormal(c: Context, pph: Double, saverOn: Boolean, culprits: List<AppDrainRank>, phantom: Boolean, quiet: Boolean) {
+    private fun notifyAbnormal(c: Context, pph: Double, saverOn: Boolean, culprits: List<AppDrainRank>, phantom: Boolean, quiet: Boolean, back: Boolean = false) {
         val (nm, channel) = BatteryAlerts.manager(c, quiet) ?: return
         val names = culprits.take(2).map { HealthStore.label(c, it.use.pkg) }
         val text = buildString {
@@ -537,7 +542,9 @@ object Guardian {
             append(if (saverOn) "절전 모드를 켰습니다(충전하면 풀림). " else "절전 모드를 켜지 못했습니다 — 직접 켜 주세요. ")
             if (names.isNotEmpty()) append("의심 앱: ${names.joinToString(", ")}. ")
             if (phantom) append("표시 소모의 일부는 잔량 게이지 오차(가짜 소모)로 보입니다 — 배터리 화면 '잔량 표시 점검'을 보세요. ")
-            append("계속되면 홈+뒤로 버튼을 꺼질 때까지 눌러 강제 재시작하세요.")
+            // 재시작 뒤에도 또 나타난 알려진 문제가 있으면 같은 '재시작'을 시키지 않는다 (그 문제 알림·타일과 엇갈리지 않게)
+            if (back) append("재시작 뒤에도 또 나타난 문제가 있습니다 — 배터리 화면 '알려진 문제'의 다음 단계를 보세요.")
+            else append("계속되면 홈+뒤로 버튼을 꺼질 때까지 눌러 강제 재시작하세요.")
         }
         val b = NotificationCompat.Builder(c, channel)
             .setSmallIcon(R.drawable.ic_warning)

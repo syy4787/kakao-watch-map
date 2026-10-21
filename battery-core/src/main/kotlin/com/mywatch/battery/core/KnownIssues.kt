@@ -46,8 +46,8 @@ object KnownIssues {
 
     /**
      * [watchFace] = 지금 시계 화면의 패키지 (모르면 null), [windowMs] = 순위를 모은 시간 — 시계 화면은 늘 '보이는' 상태라
-     * 화면 밖 CPU 표시가 붙지 않으므로 CPU 를 시간당으로 따로 본다. [cameBack] = 재시작한 뒤에도 다시 나타난 문제(id) — 시킨 대로
-     * 재시작했는데 그대로면 같은 '재시작'을 되풀이하지 않고 다음 단계로
+     * 화면 밖 CPU 표시가 붙지 않으므로 CPU 를 시간당으로 따로 본다. [cameBack] = 재시작한 뒤에도 또 나타난 문제(id) — 그대로였든 몇 시간
+     * 뒤 다시 나타났든 같은 '재시작'을 되풀이하지 않고 다음 단계로 ('재시작해도 그대로'라고 단정하지 않는다)
      */
     fun detect(
         ranks: List<AppDrainRank>, watchFace: String? = null, windowMs: Long? = null, screenOnMs: Long? = null,
@@ -61,16 +61,18 @@ object KnownIssues {
         val out = ArrayList<KnownIssue>()
         ranks.withIndex().firstOrNull { (_, r) -> r.use.pkg.substringBefore('+') == GMS }?.let { (i, r) ->
             if (r.grade != Grade.NORMAL && (i == 0 || r.score >= total * SHARE)) {
-                val cache = "Play 서비스 앱 정보 > 저장공간 > 캐시 지우기 (데이터 지우기는 하지 마세요 — 계정이 다시 동기화됩니다)"
-                val pc = "PC 툴킷 메뉴 8(자동 치료) — 모든 앱 캐시 정리와 Play 서비스 다시 시작을 대신 합니다. 워치 Play 스토어의 업데이트도 확인하세요"
+                // 메뉴 이름은 삼성 한국어 화면 그대로 (저장공간 › 캐시 삭제 / 데이터 삭제)
+                val cache = "Play 서비스 앱 정보 > 저장공간 > 캐시 삭제 (데이터 삭제는 하지 마세요 — 계정이 다시 동기화됩니다)"
+                // PC 툴킷은 자기 보고서(충전 뒤 통계)가 Play 서비스를 짚어야 캐시 정리·다시 시작을 한다 — 늘 해 준다고 하지 않는다 (리뷰)
+                val pc = "PC 툴킷 메뉴 8(자동 치료) — PC 보고서도 Play 서비스를 짚으면 모든 앱 캐시 정리와 Play 서비스 다시 시작을 대신 합니다. 워치 Play 스토어의 업데이트도 확인하세요"
                 val why = (r.flags.filter { it != "이 앱" } + r.summary).joinToString(" · ")
                 out += if (PLAY_SERVICES_LOOP in cameBack) KnownIssue(
                     PLAY_SERVICES_LOOP, GMS,
-                    "Google Play 서비스 과소모 — 재시작해도 그대로",
+                    "Google Play 서비스 과소모 — 재시작 뒤에도 또 나타남",
                     why,
-                    listOf("$cache — 아직 안 했으면", "그래도 그대로면 $pc", "고쳐질 때까지 밤엔 지킴이 밤 모드"),
+                    listOf("아직 안 했으면 $cache", "그래도 그대로면 $pc", "고쳐질 때까지 밤엔 지킴이 밤 모드"),
                     r.grade,
-                    todo = "재시작해도 Play 서비스 과소모" to "캐시만 지우기(아직이면) → 그대로면 PC 툴킷 메뉴 8(자동 치료)",
+                    todo = "재시작 뒤에도 Play 서비스 과소모" to "캐시만 지우기(아직이면) → 그대로면 PC 툴킷 메뉴 8(자동 치료)",
                     tile = "Play 서비스 과소모 — 캐시·PC 치료",
                     cameBack = true,
                 ) else KnownIssue(
@@ -131,15 +133,16 @@ object KnownIssues {
                         (if (notifications > 0) " · 알림 ${notifications}개" else "") + ")"
                     val name = label(HOME) ?: "One UI Watch 홈"
                     val why = (listOf(cpuNote) + r.flags.filter { it != "이 앱" }).joinToString(" · ")
-                    val cache = "설정 › 애플리케이션 › $name › 저장공간 › 캐시 지우기 (데이터 지우기는 하지 마세요 — 홈 화면 배치가 초기화됩니다)"
+                    val cache = "설정 › 애플리케이션 › $name › 저장공간 › 캐시 삭제 (데이터 삭제는 하지 마세요 — 홈 화면 배치가 초기화됩니다)"
                     val report = "계속되면 Samsung Members 앱으로 오류 보고(삼성 안내) — 고쳐질 때까지 밤엔 지킴이 밤 모드"
                     out += if (HOME_HOG in cameBack) KnownIssue(
                         HOME_HOG, HOME,
-                        "One UI Watch 홈이 화면 꺼진 채 많이 씀 — 재시작해도 그대로",
+                        "One UI Watch 홈이 화면 꺼진 채 많이 씀 — 재시작 뒤에도 또 나타남",
                         why,
-                        listOf(cache, "캐시를 지운 뒤 한 번 더 강제 재시작(홈 + 뒤로 7초 이상)", report),
+                        listOf(cache, "캐시를 지운 뒤 한 번 더 강제 재시작(홈 + 뒤로 7초 이상) — 캐시만 지우면 돌고 있는 홈은 그대로라서", report),
                         grade,
-                        todo = "재시작해도 홈 과소모 그대로" to "앱 정보 › 저장공간 › 캐시만 지우기 → 그대로면 Samsung Members 오류 보고",
+                        // 캐시만 지우면 돌고 있는 홈은 그대로 — 할 일 줄에도 강제 재시작을 같이 (리뷰)
+                        todo = "재시작 뒤에도 홈 과소모" to "앱 정보 › 저장공간 › 캐시만 지우고 강제 재시작 → 그대로면 오류 보고",
                         tile = "One UI Watch 홈 과소모 — 홈 캐시 지우기",
                         cameBack = true,
                     ) else KnownIssue(

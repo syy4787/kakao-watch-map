@@ -151,7 +151,7 @@ class ChangesTest {
         val fw = advice(changes[2])
         assertTrue(fw.first, fw.first.contains("소프트웨어 업데이트"))
         assertTrue(fw.second, fw.second.contains("1주") && fw.second.contains("강제 재시작"))
-        assertTrue(advice(changes[3]).second.contains("캐시 지우기"))
+        assertTrue(advice(changes[3]).second.contains("캐시 삭제"))
         assertTrue(advice(changes[4]).first.contains("AOD"))
         assertTrue(advice(changes[6]).second.contains("기본"))
         assertTrue(advice(changes[1]).first.contains("게임"))

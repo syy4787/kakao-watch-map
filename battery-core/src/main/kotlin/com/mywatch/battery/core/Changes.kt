@@ -260,7 +260,7 @@ object ChangeFinder {
             ChangeKind.FIRMWARE -> "소프트웨어 업데이트 뒤 더 닳음" to
                 "길면 1주 적응(삼성) — 그 뒤엔 Play 서비스 캐시 지우기 → 강제 재시작"
             ChangeKind.APP -> when (c.subject) {
-                GMS -> "Play 서비스 업데이트 뒤 더 닳음" to "Play 서비스 앱 정보 › 저장공간 › 캐시 지우기 → 강제 재시작"
+                GMS -> "Play 서비스 업데이트 뒤 더 닳음" to "Play 서비스 앱 정보 › 저장공간 › 캐시 삭제 → 강제 재시작"
                 // 이름이 길면 줄에 들어가게 이름을 줄인다 (전체 이름은 '그 무렵 바뀐 것' 목록에)
                 else -> TodoText.fitTitle(SHORT[c.subject] ?: appName(c.subject, names), " ${if (c.to?.startsWith("+") == true) "설치" else "업데이트"} 뒤 더 닳음") to
                     "그 앱의 동기화·알림·측정 설정을 보거나, 하루 지워 두고 비교"

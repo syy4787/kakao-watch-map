@@ -76,7 +76,7 @@ class HtmlReportTest {
         assertTrue(section.contains("<th>10/12</th>") && section.contains("<td>1.0</td>") && section.contains("<td>2.6</td>"))
         assertTrue(section.contains("10/16부터 대기 소모가 시간당 1.0% → 2.5%로 늘었습니다"))
         assertTrue(section.contains("Google Play 서비스 업데이트 (26.40.31)"))
-        assertTrue(section, section.contains("캐시 지우기"))
+        assertTrue(section, section.contains("캐시 삭제"))
         assertFalse("워치가 표본으로 쟀으면 다를 까닭 없음", section.contains("사용 통계로"))
         // 워치 요약이 사용 통계 기준이면 이 표(15분 기록)와 숫자가 조금 다를 수 있다고 적는다
         val fx = f.copy(watchSummary = "[최근 며칠] 10/12 0.9 · 10/13 0.9 (대기 %/h, 사용 통계 기준)")

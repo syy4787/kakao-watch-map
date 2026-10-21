@@ -41,7 +41,8 @@ class KnownIssuesTest {
         assertEquals(KnownIssues.PLAY_SERVICES_LOOP, i.id)
         assertEquals("com.google.android.gms", i.pkg)
         assertTrue(i.title, i.title.contains("Play 서비스"))
-        assertTrue(i.steps.toString(), i.steps.first().contains("캐시 지우기"))
+        // 워치 화면의 단추 이름 그대로 (삼성 한국어 화면: 저장공간 › 캐시 삭제)
+        assertTrue(i.steps.toString(), i.steps.first().contains("캐시 삭제") && i.steps.first().contains("데이터 삭제는 하지 마세요"))
         assertTrue(i.steps.toString(), i.steps.any { it.contains("재시작") })
         assertTrue(i.why, i.why.contains("CPU"))
     }
@@ -136,7 +137,7 @@ class KnownIssuesTest {
         assertEquals(home, i.pkg)
         assertEquals(Grade.ABNORMAL, i.grade)                            // (24분 − 화면 6분의 절반) ÷ 2시간 ≈ 시간당 10.5분
         assertTrue(i.steps.first(), i.steps.first().contains("강제 재시작"))
-        assertTrue(i.steps.toString(), i.steps.none { it.contains("데이터 지우기") && !it.contains("하지 마세요") })
+        assertTrue(i.steps.toString(), i.steps.none { it.contains("데이터 삭제") && !it.contains("하지 마세요") })
         assertTrue(i.why, i.why.contains("CPU") && i.why.contains("화면 켜짐 6분"))
         assertTrue(i.tile!!, i.tile!!.contains("강제 재시작"))
         // 화면을 오래 켜고 썼으면(2시간 중 40분) 그 CPU 는 홈 화면·알림·타일을 그린 것
@@ -182,10 +183,10 @@ class KnownIssuesTest {
         assertTrue(withNotes.why, withNotes.why.contains("알림 300개"))
     }
 
-    /** 해결 단계의 앱 이름은 이 워치에 보이는 이름으로 (모르면 'One UI Watch 홈') */
     /**
-     * 시킨 대로 재시작했는데 그 뒤에도 또 짚이면(재시작 뒤 다시 나타남) 같은 '강제 재시작'을 되풀이하지 않고 다음 단계로 — 홈은 홈 캐시
-     * 지우기(앱 정보 단추로), Play 서비스는 캐시(아직이면) → PC 툴킷 자동 치료. 시계 화면은 재시작과 상관없어 그대로
+     * 재시작한 뒤에도 또 짚이면(그대로였든 몇 시간 뒤 다시 나타났든) 같은 '강제 재시작'을 되풀이하지 않고 다음 단계로 — 홈은 홈 캐시
+     * 삭제 뒤 한 번 더 강제 재시작(캐시만 지우면 돌고 있는 홈은 그대로), Play 서비스는 캐시(아직이면) → PC 툴킷 자동 치료. 시계 화면은
+     * 재시작과 상관없어 그대로. '재시작해도 그대로'라고 단정하지 않는다 — 재시작이 몇 시간은 들었을 수도 있어서 (리뷰)
      */
     @Test
     fun anIssueThatCameBackAfterARestartMovesToTheNextStep() {
@@ -196,20 +197,27 @@ class KnownIssuesTest {
         assertEquals(KnownIssues.HOME_HOG, again.id)
         assertTrue(again.cameBack && !first.cameBack)
         assertEquals("One UI Watch 홈 과소모 — 홈 캐시 지우기", again.tile)
-        assertTrue(again.title, again.title.contains("재시작해도 그대로"))
-        assertTrue(again.steps.first(), again.steps.first().contains("캐시 지우기") && again.steps.first().contains("데이터"))
+        assertTrue(again.title, again.title.endsWith("재시작 뒤에도 또 나타남"))
+        assertTrue(again.steps.first(), again.steps.first().contains("캐시 삭제") && again.steps.first().contains("데이터 삭제는 하지 마세요"))
         assertTrue(again.steps.toString(), again.steps.none { it.startsWith("홈 + 뒤로") })
-        assertEquals("재시작해도 홈 과소모 그대로", again.todo!!.first)
+        assertEquals("재시작 뒤에도 홈 과소모", again.todo!!.first)
+        // 캐시만 지우면 돌고 있는 홈은 그대로 — 할 일 줄에도 강제 재시작을 같이
+        assertTrue(again.todo!!.second, again.todo!!.second.contains("캐시만 지우고 강제 재시작"))
 
         val gms = AppDrain.rank(listOf(UidUse(KnownIssues.GMS, cpuMs = 30 * 60_000L, wakelockMs = 40 * 60_000L)), 2 * h)
         val gmsAgain = KnownIssues.detect(gms, windowMs = 2 * h, cameBack = setOf(KnownIssues.PLAY_SERVICES_LOOP)).single()
-        assertTrue(gmsAgain.title, gmsAgain.title.contains("재시작해도 그대로"))
+        assertTrue(gmsAgain.title, gmsAgain.title.endsWith("재시작 뒤에도 또 나타남"))
+        assertEquals("재시작 뒤에도 Play 서비스 과소모", gmsAgain.todo!!.first)
         assertTrue(gmsAgain.todo!!.second, gmsAgain.todo!!.second.contains("PC 툴킷"))
+        assertTrue(gmsAgain.steps.first(), gmsAgain.steps.first().startsWith("아직 안 했으면 "))
+        // PC 툴킷은 자기 보고서가 Play 서비스를 짚어야 캐시 정리·다시 시작을 한다 — 그렇다고 적는다
+        assertTrue(gmsAgain.steps.toString(), gmsAgain.steps.any { it.contains("PC 보고서도 Play 서비스를 짚으면") })
         assertEquals("Play 서비스 과소모 — 캐시·PC 치료", gmsAgain.tile)
         // 다른 문제가 다시 나타났다고 이 문제가 바뀌지는 않는다
         assertEquals(first, KnownIssues.detect(home, windowMs = 2 * h, screenOnMs = 0, cameBack = setOf(KnownIssues.PLAY_SERVICES_LOOP)).single())
     }
 
+    /** 해결 단계의 앱 이름은 이 워치에 보이는 이름으로 (모르면 'One UI Watch 홈') */
     @Test
     fun theHomeStepsUseTheWatchsOwnAppName() {
         val ranks = AppDrain.rank(listOf(UidUse(KnownIssues.HOME, cpuMs = 24 * 60_000L)), 2 * h)

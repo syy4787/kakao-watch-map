@@ -56,6 +56,10 @@ data class Insights(
     val tileDevice: String? = null,
     /** One UI Watch 홈의 uid ([HomeUid]) — 하루 요약에 */
     val home: HomeUid? = null,
+    /** 앱별 순위를 모은 시간 (0 = 아직 없음) — 알려진 문제는 [com.mywatch.battery.core.KnownIssues.MIN_WINDOW_MS] 넘게 쌓여야 본다 */
+    val appWindowMs: Long = 0L,
+    /** 마지막 앱별 스냅샷 뒤에 재시작했다 (켜진 지 10분 뒤 첫 기록부터 다시 모음) */
+    val rebootPending: Boolean = false,
 )
 
 
@@ -114,7 +118,9 @@ object BatteryInsights {
             breakdown?.steepest.orEmpty().flatMap { h -> listOfNotNull(h.topApp, h.culprit?.use?.pkg) }
         val names = shown.map { it.substringBefore('+') }.distinct().mapNotNull { pkg -> label(pkg)?.let { pkg to it } }.toMap()
         val tileDevice = runCatching { TileDeviceNote.read(c) }.getOrNull()
-        return Insights(analysis, breakdown, culprits, issues, effect, wakes, night, levers, chart, face, charging, trend, bootAt, names, tileDevice, HomeUid.of(c))
+        val rebootPending = runCatching { HealthStore(c).rebootedSinceLast(HealthStore.Boot.now(c)) }.getOrDefault(false)
+        return Insights(analysis, breakdown, culprits, issues, effect, wakes, night, levers, chart, face, charging, trend, bootAt, names, tileDevice, HomeUid.of(c),
+            cw.windowMs, rebootPending)
     }
 
     /** 미리 찾아 둔 이름으로 보일 이름 (공유 uid 의 '+N' 은 ' 외 N') — 화면을 그리는 동안 패키지 관리자를 부르지 않게 */

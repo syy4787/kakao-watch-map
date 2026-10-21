@@ -153,8 +153,8 @@ class HealthStore(context: Context) {
     /** 마지막으로 스냅샷을 남긴 때 (없으면 0) — 파일을 열지 않고 */
     fun lastAt(): Long = prefs.getLong(K_LAST_AT, 0L)
 
-    /** 지금 부팅 차례 (재시작을 알아챌 때마다 1씩 — 줄의 "b") — 파일을 열지 않고 */
-    fun bootSeq(): Int = prefs.getInt(K_LAST_BOOT_SEQ, 0)
+    /** 지금 부팅 차례 (재시작을 알아챌 때마다 1씩 — 줄의 "b") — 파일을 열지 않고. 이 버전이 스냅샷을 남기기 전엔 모름(-1) */
+    fun bootSeq(): Int = prefs.getInt(K_LAST_BOOT_SEQ, -1)
 
     /**
      * 마지막 스냅샷 뒤에 재시작했나 (파일을 열지 않고). 스냅샷이 아직 없으면 false, 그 스냅샷이 부팅을 안 적었으면(예전 버전) true —
