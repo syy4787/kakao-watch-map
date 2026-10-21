@@ -150,9 +150,11 @@ object BatterySummary {
         put("issue_gms", issueCode(ins, com.mywatch.battery.core.KnownIssues.PLAY_SERVICES_LOOP))
         put("issue_home", issueCode(ins, com.mywatch.battery.core.KnownIssues.HOME_HOG))
         put("issue_face", issueCode(ins, com.mywatch.battery.core.KnownIssues.WATCH_FACE_HEAVY))
-        // 재시작 뒤에도 또 나타났는지 — 문제마다 (한 문제가 다시 나타났다고 다른 문제까지 그렇게 적지 않게)
-        put("back_gms", if (ins.issues.any { it.id == com.mywatch.battery.core.KnownIssues.PLAY_SERVICES_LOOP && it.cameBack }) 1.0 else 0.0)
-        put("back_home", if (ins.issues.any { it.id == com.mywatch.battery.core.KnownIssues.HOME_HOG && it.cameBack }) 1.0 else 0.0)
+        // 재시작 뒤에도 또 나타났는지 — 문제마다 (한 문제가 다시 나타났다고 다른 문제까지 그렇게 적지 않게). 몇 번째 단계인지 그대로:
+        // 0 처음 · 1 재시작 뒤에도 또 · 2 다음 단계 뒤에도 계속 (예전 PC 툴킷은 1 이상을 '또 나타남'으로 읽는다)
+        fun stage(id: String) = (ins.issues.firstOrNull { it.id == id }?.stage ?: 0).toDouble()
+        put("back_gms", stage(com.mywatch.battery.core.KnownIssues.PLAY_SERVICES_LOOP))
+        put("back_home", stage(com.mywatch.battery.core.KnownIssues.HOME_HOG))
     })
 
     /** summary.txt 본문 */

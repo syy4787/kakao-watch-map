@@ -196,7 +196,9 @@ class KnownIssuesTest {
         val again = KnownIssues.detect(home, windowMs = 2 * h, screenOnMs = 0, cameBack = setOf(KnownIssues.HOME_HOG)).single()
         assertEquals(KnownIssues.HOME_HOG, again.id)
         assertTrue(again.cameBack && !first.cameBack)
-        assertEquals("One UI Watch 홈 과소모 — 홈 캐시 지우기", again.tile)
+        assertEquals(1, again.stage)
+        // 캐시만 지우면 돌고 있는 홈은 그대로 — 타일 줄에도 재시작을 같이 (시나리오 점검)
+        assertEquals("One UI Watch 홈 과소모 — 홈 캐시 지우고 재시작", again.tile)
         assertTrue(again.title, again.title.endsWith("재시작 뒤에도 또 나타남"))
         assertTrue(again.steps.first(), again.steps.first().contains("캐시 삭제") && again.steps.first().contains("데이터 삭제는 하지 마세요"))
         assertTrue(again.steps.toString(), again.steps.none { it.startsWith("홈 + 뒤로") })
@@ -215,6 +217,54 @@ class KnownIssuesTest {
         assertEquals("Play 서비스 과소모 — 캐시·PC 치료", gmsAgain.tile)
         // 다른 문제가 다시 나타났다고 이 문제가 바뀌지는 않는다
         assertEquals(first, KnownIssues.detect(home, windowMs = 2 * h, screenOnMs = 0, cameBack = setOf(KnownIssues.PLAY_SERVICES_LOOP)).single())
+    }
+
+    /**
+     * 다음 단계(홈 캐시 삭제 → 재시작 · PC 치료)를 보인 뒤 또 재시작했는데도 또 나타나면 — 같은 '캐시 지우고 재시작'을 되풀이하지 않고
+     * 오류 보고·업데이트·밤 모드로. 사용자가 할 수 있는 일이 거의 남지 않아 할 일·타일도 그것으로 (시나리오 점검)
+     */
+    @Test
+    fun anIssueThatOutlastsTheNextStepPointsToReportsAndUpdates() {
+        val home = AppDrain.rank(listOf(UidUse(KnownIssues.HOME, cpuMs = 30 * 60_000L)), 2 * h)
+        val ids = setOf(KnownIssues.HOME_HOG, KnownIssues.PLAY_SERVICES_LOOP)
+        val third = KnownIssues.detect(home, windowMs = 2 * h, screenOnMs = 0, cameBack = ids, again = ids).single()
+        assertEquals(2, third.stage)
+        assertTrue(third.cameBack)
+        assertTrue(third.title, third.title.endsWith("다음 단계 뒤에도 계속"))
+        assertTrue(third.steps.first(), third.steps.first().startsWith("아직 안 했으면 ") && third.steps.first().contains("캐시 삭제"))
+        assertTrue(third.steps.toString(), third.steps.any { it.contains("Samsung Members") })
+        // 워치 소프트웨어 업데이트는 폰의 Galaxy Wearable 앱에서 (삼성 안내의 메뉴 이름 그대로)
+        assertTrue(third.steps.toString(), third.steps.any { it.contains("Galaxy Wearable 앱 › 워치 설정 › 워치 소프트웨어 업데이트") })
+        assertEquals("One UI Watch 홈 과소모 계속 — 오류 보고", third.tile)
+        assertTrue(third.todo!!.second, third.todo!!.second.contains("오류 보고"))
+
+        val gms = AppDrain.rank(listOf(UidUse(KnownIssues.GMS, cpuMs = 30 * 60_000L, wakelockMs = 40 * 60_000L)), 2 * h)
+        val gmsThird = KnownIssues.detect(gms, windowMs = 2 * h, cameBack = ids, again = ids).single()
+        assertEquals(2, gmsThird.stage)
+        assertTrue(gmsThird.title, gmsThird.title.endsWith("다음 단계 뒤에도 계속"))
+        assertTrue(gmsThird.steps.first(), gmsThird.steps.first().startsWith("아직 안 했으면 PC 툴킷 메뉴 8"))
+        // 충전 중 앱 모두 업데이트(일부 사용자에게 도움), 초기화는 마지막 수단으로만 (Gadget Hacks 2026 정리)
+        assertTrue(gmsThird.steps.toString(), gmsThird.steps.any { it.contains("Play 스토어 › 내 앱 › 모두 업데이트") })
+        assertTrue(gmsThird.steps.toString(), gmsThird.steps.any { it.contains("초기화") && it.contains("마지막 수단") })
+        assertEquals("Play 서비스 과소모 계속 — 업데이트·보고", gmsThird.tile)
+        // '다시'만 있고 '또 나타남'은 없으면(앞 단계를 아직 안 보임) 다음 단계 그대로
+        assertEquals(1, KnownIssues.detect(home, windowMs = 2 * h, screenOnMs = 0, cameBack = ids).single().stage)
+    }
+
+    /**
+     * Play 서비스의 첫 단계는 캐시 삭제 뒤 바로 강제 재시작 (알려진 해결 순서) — '30분 뒤에도 그대로면 재시작'은 최근 2시간으로 보는 판단과
+     * 맞지 않아(캐시를 지워도 1~2시간은 계속 짚임) 쓸데없는 재시작을 시켰다 (시나리오 점검)
+     */
+    @Test
+    fun playServicesStartWithCacheThenRestart() {
+        val gms = AppDrain.rank(listOf(UidUse(KnownIssues.GMS, cpuMs = 30 * 60_000L, wakelockMs = 40 * 60_000L)), 2 * h)
+        val i = KnownIssues.detect(gms, windowMs = 2 * h).single()
+        assertEquals(0, i.stage)
+        assertTrue(i.steps[0], i.steps[0].contains("캐시 삭제"))
+        assertTrue(i.steps[1], i.steps[1].startsWith("캐시를 지운 뒤 바로") && i.steps[1].contains("강제 재시작"))
+        assertTrue(i.steps.toString(), i.steps.none { it.contains("30분") })
+        assertEquals("앱 정보 › 저장공간 › 캐시만 지우고 강제 재시작", i.todo!!.second)
+        assertEquals("Play 서비스 과소모 — 캐시 지우고 재시작", i.tile)
     }
 
     /** 해결 단계의 앱 이름은 이 워치에 보이는 이름으로 (모르면 'One UI Watch 홈') */

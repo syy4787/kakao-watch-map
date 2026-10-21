@@ -88,6 +88,41 @@ class CollectTest {
         assertNotNull(snap.watchSummary)
     }
 
+    /** 수집 폴더 하나 — 워치 시계(date)와 PC 시계(meta time)를 따로 줄 수 있게 */
+    private fun snapAt(name: String, pcAt: Long, watchAt: Long = pcAt): Snapshot {
+        val dir = File(tmp.root, "snapshots/$name").apply { mkdirs() }
+        File(dir, "date.txt").writeText((watchAt / 1000).toString())
+        File(dir, "meta.properties").writeText("time=$pcAt\n")
+        return Snapshot(dir)
+    }
+
+    /**
+     * 치료 전후 비교의 '전'은 바로 앞 수집이 아니라 마지막 조치(되돌리지 않은 것)보다 앞선 마지막 수집 — 자동 치료 10분 뒤에 확인하려고
+     * 한 번 더 수집했어도 하루 뒤 수집이 그 10분짜리(초기화 직후라 비교할 값이 없음)가 아니라 치료 전 수집과 견주게 (시나리오 점검).
+     * 조치 시각(PC 시계)은 수집의 PC 시계와 견준다 — 워치 시계가 몇 분 앞서도 치료 전 수집을 놓치지 않게
+     */
+    @Test
+    fun theBaselineIsTheCollectionBeforeTheLastTreatment() {
+        val h = 3_600_000L
+        val t0 = 1_792_000_000_000L
+        val a = snapAt("20261014-100000", t0, watchAt = t0 + 3 * 60_000L)          // 워치 시계가 3분 앞섬
+        val b = snapAt("20261014-101000", t0 + 10 * 60_000L)
+        val c = snapAt("20261015-120000", t0 + 26 * h)
+        fun entry(at: Long, undone: Boolean = false) = doctor.fix.JournalEntry(at, "trim-caches", null, emptyList(), null, undone)
+        val treated = listOf(entry(t0 + 60_000L))
+        assertEquals(a.dir, Collect.baseline(tmp.root, c, treated)!!.dir)
+        assertEquals(a.dir, Collect.baseline(tmp.root, b, treated)!!.dir)
+        assertNull("처음 수집", Collect.baseline(tmp.root, a, treated))
+        // 조치가 없거나 되돌렸거나 일주일이 넘었으면 바로 앞 수집
+        assertEquals(b.dir, Collect.baseline(tmp.root, c, emptyList())!!.dir)
+        assertEquals(b.dir, Collect.baseline(tmp.root, c, listOf(entry(t0 + 60_000L, undone = true)))!!.dir)
+        val d = snapAt("20261023-120000", t0 + 9 * 24 * h)
+        assertEquals(c.dir, Collect.baseline(tmp.root, d, treated)!!.dir)
+        // PC 시계
+        assertEquals(t0, a.pcTime)
+        assertEquals(t0 + 3 * 60_000L, a.time)
+    }
+
     @Test
     fun runsEveryCommandAndWritesAFilePerName() {
         val adb = happyAdb()

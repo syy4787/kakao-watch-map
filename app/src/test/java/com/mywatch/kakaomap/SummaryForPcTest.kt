@@ -46,14 +46,15 @@ class SummaryForPcTest {
     @Test
     fun theMetricsCarryTheWatchsKnownIssues() {
         val a = DrainAnalyzer(445, zone).analyze(emptyList(), now)
-        val home = KnownIssue(KnownIssues.HOME_HOG, KnownIssues.HOME, "t", "w", emptyList(), Grade.ABNORMAL, cameBack = true)
+        val home = KnownIssue(KnownIssues.HOME_HOG, KnownIssues.HOME, "t", "w", emptyList(), Grade.ABNORMAL, stage = 2)
         val gms = KnownIssue(KnownIssues.PLAY_SERVICES_LOOP, KnownIssues.GMS, "t", "w", emptyList(), Grade.CAUTION)
         val ins = Insights(a, null, emptyList(), listOf(home, gms), LeverEffect(emptyList(), emptyList()), appWindowMs = 2 * 3_600_000L)
         val m = SummaryMetrics.parse(BatterySummary.metricsLine(a, ins, now))
         assertEquals(2.0, m["issue_home"])
         assertEquals(1.0, m["issue_gms"])
         assertEquals(0.0, m["issue_face"])
-        assertEquals(1.0, m["back_home"])
+        // 몇 번째 단계인지 그대로 (0 처음 · 1 재시작 뒤 또 · 2 다음 단계 뒤에도 계속) — 예전 PC 툴킷은 1 이상을 '또 나타남'으로 읽는다
+        assertEquals(2.0, m["back_home"])
         assertEquals(0.0, m["back_gms"])
         assertEquals(120.0, m["app_window_min"])
         // 판단할 만큼 기록이 없으면(55분 미만) 문제 칸은 적지 않는다 — '없음'과 '모름'을 가르게

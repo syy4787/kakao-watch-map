@@ -358,11 +358,15 @@ class BatteryActivity : ComponentActivity() {
             return rows
         }
         val window = insights?.appWindowMs ?: 0L
-        if (window in 1 until KnownIssues.MIN_WINDOW_MS) rows += Row.Note("알려진 문제는 기록이 1시간쯤 쌓이면 봅니다 (지금 ${window / 60_000}분치)")
+        // 1시간이 안 되는 창(첫 기록·재시작 뒤)은 시간당으로 늘리면 부풀려진다(재시작 직후 동기화가 '비정상'으로 빨갛게) — 등급·시간당
+        // 표시는 빼고 이 창에서 쓴 만큼만 (알려진 문제도 그래서 1시간쯤 뒤에 본다)
+        val short = window in 1 until KnownIssues.MIN_WINDOW_MS
+        if (short) rows += Row.Note("알려진 문제는 기록이 1시간쯤 쌓이면 봅니다 (지금 ${window / 60_000}분치)")
         ranked.take(8).forEach { r ->
-            val sub = (r.flags.filter { it != "이 앱" } + r.summary).joinToString(" · ")
+            val sub = if (short) r.summary else (r.flags.filter { it != "이 앱" } + r.summary).joinToString(" · ")
             val name = appLabel(r.use.pkg) + (if ("이 앱" in r.flags) " (이 앱)" else "")
-            rows += Row.Step(color(r.grade), R.drawable.ic_battery, if (r.grade == Grade.NORMAL) null else r.grade.label, name, sub, key = "app:${r.use.pkg}")
+            val grade = if (short) Grade.UNKNOWN else r.grade
+            rows += Row.Step(color(grade), R.drawable.ic_battery, if (grade == Grade.NORMAL || grade == Grade.UNKNOWN) null else grade.label, name, sub, key = "app:${r.use.pkg}")
         }
         return rows
     }

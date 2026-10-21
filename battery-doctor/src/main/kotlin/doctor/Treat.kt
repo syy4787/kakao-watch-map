@@ -20,6 +20,9 @@ object Treat {
     /** 손실 없는 설정 — 추천 표시가 없어도 현재 값이 목표와 다르면 적용한다 */
     val NO_LOSS: Set<String> = setOf("wifi-scan-off", "ble-scan-off", "adaptive-battery-on", "app-standby-on")
 
+    /** 자동 치료를 마치고 워치 앱에 보내는 '치료함' (셸만 보낼 수 있는 받는 곳 — 워치 앱 ShellRestoreReceiver) */
+    val TREATED_BROADCAST = listOf("shell", "am", "broadcast", "--include-stopped-packages", "-n", Collect.SHELL_RECEIVER, "-a", Collect.TREATED_ACTION)
+
     /** 범인 앱에 자동으로 거는 '주의' 등급 조치 종류 */
     val AUTO_CAUTION: Set<String> = setOf("bg-restrict", "bucket-restricted", "doze-unwhitelist", "gms-restart")
 
@@ -151,6 +154,13 @@ object Treat {
 
         // (e) 측정 시작
         val reset = try { adb.run(listOf("shell", "dumpsys", "batterystats", "--reset"), 60) } catch (e: Exception) { Result(-3, "", e.toString()) }
+        // 캐시 정리·Play 서비스 다시 시작을 했으면 워치 앱에 알린다 — 워치가 앱별 기록을 거기서 새로 재, 치료 전 기록으로 또 짚거나
+        // (10분 뒤 수집에서) 또 치료를 권하지 않게. 그 뒤에도 또 나타나면 워치가 다음 단계로 넘어간다
+        val cureIds = setOf("trim-caches", "gms-restart")
+        val told: Boolean? = if (applied.none { it.ok && it.lever.id in cureIds }) null else {
+            val r = try { adb.run(TREATED_BROADCAST, 90) } catch (e: Exception) { Result(-3, "", e.toString()) }
+            r.ok && r.out.contains("treated:ok")
+        }
 
         // (f) 요약
         val opened = open(report)
@@ -172,7 +182,16 @@ object Treat {
         skipped.forEach { (l, why) -> io.println("  - ${l.title} (${l.id}): $why") }
         io.println(if (reset.ok) " 배터리 통계 초기화: 완료 — 지금부터가 깨끗한 측정 구간입니다"
             else " 배터리 통계 초기화: 실패 (${(reset.err.ifBlank { reset.out }).trim().lineSequence().firstOrNull() ?: "exit ${reset.code}"}) — 메뉴 3(측정 시작)을 따로 실행하세요")
-        io.println(" 다음: 워치 개발자 옵션의 '자동 Wi-Fi 끄기'를 다시 끄고, 충전기에서 내려 평소처럼 쓰세요. 24시간 뒤 메뉴 2(수집·분석)로 비교하세요.")
+        when (told) {
+            true -> io.println(" 워치 앱에 치료를 알렸습니다 — 앱별 기록을 지금부터 새로 재고 1시간쯤 뒤 다시 봅니다")
+            false -> io.println(" 워치 앱에 치료를 알리지 못했습니다(예전 버전이거나 앱별 통계 권한 없음) — 워치의 알려진 문제는 1~2시간 동안 치료 전 기록으로 보일 수 있습니다")
+            null -> {}
+        }
+        // 워치가 One UI Watch 홈 과소모를 짚었는데 캐시 정리를 했으면 강제 재시작까지 — 캐시만 지우면 돌고 있는 홈은 그대로다 (워치 할 일과 같은 순서)
+        val homeTrimmed = findings.any { it.id == "watch-home" } && applied.any { it.ok && it.lever.id == "trim-caches" }
+        if (homeTrimmed) io.println(" 다음: 워치를 한 번 강제 재시작(홈 + 뒤로 7초 이상)하세요 — 캐시만 지우면 돌고 있는 One UI Watch 홈은 그대로입니다. " +
+            "그다음 워치 개발자 옵션의 '자동 Wi-Fi 끄기'를 다시 끄고, 충전기에서 내려 평소처럼 쓰세요. 24시간 뒤 메뉴 2(수집·분석)로 비교하세요.")
+        else io.println(" 다음: 워치 개발자 옵션의 '자동 Wi-Fi 끄기'를 다시 끄고, 충전기에서 내려 평소처럼 쓰세요. 24시간 뒤 메뉴 2(수집·분석)로 비교하세요.")
         io.println("       효과가 없거나 불편하면 메뉴 5(되돌리기) → all 로 조치와 권한을 모두 되돌립니다. 기록: ${journal.file.absolutePath}")
         io.println(" 보고서: ${report.absolutePath}" + if (opened) " (브라우저로 열었습니다)" else " (브라우저를 열 수 없어 경로만 표시합니다 — 파일을 더블클릭해 여세요)")
         return if (applied.all { it.ok } && reset.ok) 0 else 1

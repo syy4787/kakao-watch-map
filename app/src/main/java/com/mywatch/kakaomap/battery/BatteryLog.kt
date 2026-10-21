@@ -65,7 +65,8 @@ class BatteryLog(context: Context) {
     fun pruneIfDue(now: Long = System.currentTimeMillis()) {
         val prefs = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val last = prefs.getLong(KEY_PRUNED_AT, 0L)
-        if (now - last < 86_400_000L) return
+        // 시계가 뒤로 가 미래가 된 '마지막으로 자른 때'는 기다리지 않는다
+        if (now - last in 0 until 86_400_000L) return
         runCatching { pruneOlderThan(KEEP_DAYS, now) }
         prefs.edit().putLong(KEY_PRUNED_AT, now).apply()
     }

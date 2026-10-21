@@ -158,6 +158,37 @@ class GuardianRulesTest {
         assertFalse((a4.single() as GuardianAction.AbnormalOn).notify)
     }
 
+    /**
+     * 비정상 모드 중에 (알림대로) 재시작했으면 그 모드를 풀고 재시작 뒤로 다시 잰다 — 재시작 앞의 소모로 절전을 6시간 끌거나,
+     * 재시작 직후 2시간 창에 남은 재시작 앞의 과소모로 다시 켜지 않게 (시나리오 점검)
+     */
+    @Test
+    fun aRestartEndsAbnormalModeAndItIsMeasuredAgain() {
+        val since = at(14, 0)
+        val st = GuardianState(abnormalActive = true, abnormalSince = since, lastAbnormalNotifyAt = since, saverSeenOn = true)
+        val samples = drain(since, 9, 90.0, 8.0) +                                            // 12:00~14:00 시간당 8%
+            BatterySample(t = at(14, 40), level = 71, event = Event.BOOT) + BatterySample(t = at(14, 45), level = 71)
+        val (a, s) = GuardianRules.decide(at(14, 45), zone, cfg, st, samples, null, saverOnNow = true)
+        assertEquals(listOf<GuardianAction>(GuardianAction.AbnormalOff), a)
+        assertFalse(s.abnormalActive)
+        // 재시작 앞의 과소모(13:00~15:00 창의 시간당 5.5%)로 다시 켜지 않는다 — 재시작 뒤 1시간 45분이 쌓여야 본다
+        val (a2, s2) = GuardianRules.decide(at(15, 0), zone, cfg, s, samples + BatterySample(t = at(15, 0), level = 71), null, saverOnNow = false)
+        assertTrue(a2.toString(), a2.isEmpty())
+        assertFalse(s2.abnormalActive)
+    }
+
+    /** 시계가 뒤로 갔다 — 미래가 된 '켠 때'·'알린 때'가 비정상 모드를 충전 때까지 끌거나 알림을 막지 않게 (시나리오 점검) */
+    @Test
+    fun timestampsFromTheFutureDoNotStickAfterTheClockGoesBack() {
+        val now = at(14, 0)
+        val future = now + 3 * 3_600_000L
+        val (a, s) = GuardianRules.decide(now, zone, cfg, GuardianState(abnormalActive = true, abnormalSince = future), drain(now, 9, 50.0, 1.0), null, true)
+        assertEquals(listOf<GuardianAction>(GuardianAction.AbnormalOff), a)
+        assertFalse(s.abnormalActive)
+        val (a2, _) = GuardianRules.decide(now, zone, cfg, GuardianState(lastAbnormalNotifyAt = future), drain(now, 9, 80.0, 6.0), null, false)
+        assertTrue((a2.single() as GuardianAction.AbnormalOn).notify)
+    }
+
     @Test
     fun abnormalModeIsNotEnteredWhileChargingOrAtNight() {
         val day = at(14, 0)

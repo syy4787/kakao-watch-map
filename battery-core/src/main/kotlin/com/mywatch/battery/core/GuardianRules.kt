@@ -143,16 +143,18 @@ object GuardianRules {
             s = s.copy(nightActive = true, nightSince = now, saverSeenOn = false)
         }
 
-        // 3. 비정상 소모 — 밤 모드가 아닐 때만 (밤엔 이미 절전)
+        // 3. 비정상 소모 — 밤 모드가 아닐 때만 (밤엔 이미 절전). 켠 뒤에 재시작했으면(알림대로 강제 재시작) 풀고 재시작 뒤로 다시 잰다.
+        // 켠 때가 미래면(시계가 뒤로 감) 얼마나 됐는지 모르니 푼다
         if (s.abnormalActive) {
-            if (charging || navigating || now - s.abnormalSince >= ABNORMAL_MAX_MS) {
+            val restarted = samples.any { it.event == Event.BOOT && it.t > s.abnormalSince && it.t <= now }
+            if (charging || navigating || restarted || now - s.abnormalSince !in 0 until ABNORMAL_MAX_MS) {
                 actions += GuardianAction.AbnormalOff
                 s = s.copy(abnormalActive = false, saverSeenOn = false)
             }
         } else if (cfg.abnormalSaver && !s.nightActive && !charging && !overridden && !navigating) {
             val a = AlertRule.check(samples, now, lastAlertAt = null, screenOnMs = screenOnMs2h)
             if (a != null) {
-                val notify = now - s.lastAbnormalNotifyAt >= ABNORMAL_NOTIFY_COOLDOWN_MS
+                val notify = now - s.lastAbnormalNotifyAt !in 0 until ABNORMAL_NOTIFY_COOLDOWN_MS
                 actions += GuardianAction.AbnormalOn(a.pph, notify)
                 s = s.copy(abnormalActive = true, abnormalSince = now, saverSeenOn = false, lastAbnormalNotifyAt = if (notify) now else s.lastAbnormalNotifyAt)
             }

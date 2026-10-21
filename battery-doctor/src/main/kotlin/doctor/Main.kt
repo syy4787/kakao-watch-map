@@ -101,15 +101,19 @@ object Main {
     }
 
     /**
-     * 이 수집 바로 앞의 수집과 비교해 콘솔에 보이고 돌려준다 (보고서에도 싣는다) — 처음 수집이거나 비교할 값이 없으면 null.
-     * collect / analyze / treat 가 같이 쓴다
+     * 이 수집을 치료 전 수집([Collect.baseline] — 조치가 없으면 바로 앞 수집)과 비교해 콘솔에 보이고 돌려준다 (보고서에도 싣는다) —
+     * 처음 수집이거나 비교할 값이 없으면 null. collect / analyze / treat 가 같이 쓴다
      */
     fun compareWithPrevious(io: Console, dataDir: File, snap: Snapshot, after: Facts, journal: Journal, zone: ZoneId): Comparison? {
-        val prev = Collect.before(dataDir, snap) ?: return null
-        val c = runCatching { Compare.of(Analyzer.facts(prev, zone), after, journal.entries(), zone) }.getOrNull() ?: return null
+        val entries = journal.entries()
+        val prev = Collect.baseline(dataDir, snap, entries) ?: return null
+        val between = (prev.pcTime + 1)..snap.pcTime
+        val c = runCatching { Compare.of(Analyzer.facts(prev, zone), after, entries, zone, actionsBetween = between) }.getOrNull() ?: return null
         val fmt = DateTimeFormatter.ofPattern("M/d HH:mm")
+        // 바로 앞 수집을 건너뛰고 치료 전 수집과 견주면 그렇다고
+        val title = if (prev.dir == Collect.before(dataDir, snap)?.dir) "지난 수집과 비교" else "치료 전 수집과 비교"
         io.println()
-        io.println("━━ 지난 수집과 비교 (${Instant.ofEpochMilli(c.beforeAt).atZone(zone).format(fmt)} → ${Instant.ofEpochMilli(c.afterAt).atZone(zone).format(fmt)})" +
+        io.println("━━ $title (${Instant.ofEpochMilli(c.beforeAt).atZone(zone).format(fmt)} → ${Instant.ofEpochMilli(c.afterAt).atZone(zone).format(fmt)})" +
             (if (c.actions.isNotEmpty()) " — 사이에 한 조치: ${c.actions.joinToString(", ")}" else ""))
         io.println("   ${c.headline}")
         c.rows.forEach { r -> io.println(String.format("    - %s: %s → %s (%s)", r.label, r.before, r.after, r.change.label)) }

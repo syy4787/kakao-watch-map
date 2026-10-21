@@ -345,6 +345,8 @@ class AnalyzerTest {
         val top = fs.first { it.id == "power-top" }
         // 1위라는 것만으로 고장이라 단정하지 않는다 — '흔하다'고 단정하지도 않는다 (리뷰에서 찾음: 근거 없는 안심)
         assertTrue(top.evidence.toString(), top.evidence.any { it.contains("One UI Watch 홈") && it.contains("단정할 수 없") && !it.contains("흔") })
+        // 할 일은 단계마다 다르니(강제 재시작 → 홈 캐시 → 오류 보고) 한 단계를 박아 두지 않고 워치의 '지금 할 일'을 가리킨다 (시나리오 점검)
+        assertTrue(top.evidence.toString(), top.evidence.any { it.contains("'지금 할 일'") && !it.contains("→ 강제 재시작") })
         assertFalse(fs.filter { it.blames }.flatMap { it.packages }.contains(home))
         // 홈이 위쪽이 아니면 설명도 없다
         assertFalse(Analyzer.findings(facts()).first { it.id == "power-top" }.evidence.any { it.contains("One UI Watch 홈") })
@@ -531,6 +533,40 @@ class AnalyzerTest {
         assertTrue(vBack.todo.first(), vBack.todo.first().contains("재시작 뒤에도 또 나타남") && vBack.todo.first().indexOf("캐시 정리") < vBack.todo.first().indexOf("강제 재시작"))
         // 다른 할 일(다시 재서 견주기)이 밀려나지 않는다
         assertTrue(v.todo.toString(), v.todo.any { it.contains("24시간 뒤 메뉴 2") })
+    }
+
+    /**
+     * 워치가 '다음 단계 뒤에도 계속'(2단계)이라 적었으면 PC 도 같은 말로 — 같은 '캐시 정리 → 재시작'을 되풀이하지 않고 오류 보고·워치
+     * 소프트웨어 업데이트·Play 스토어 업데이트로 (워치 앱 할 일과 같게 · 시나리오 점검). 예전 워치 앱은 1까지만 적는다
+     */
+    @Test
+    fun aWatchIssueThatOutlastsTheNextStepPointsToReportsOnThePcToo() {
+        val now = 1792414865000L
+        val f = Facts(collectedAt = now, packages = listOf(PackageInfo(Analyzer.HOME, 10123, true, false), PackageInfo(Analyzer.GMS, 10045, true, false)),
+            watchMetrics = mapOf("at" to (now - 5 * 60_000L).toDouble(), "issue_home" to 2.0, "back_home" to 2.0, "issue_gms" to 2.0, "back_gms" to 2.0, "app_window_min" to 120.0))
+        val fs = Analyzer.findings(f)
+        val home = fs.single { it.id == "watch-home" }
+        assertTrue(home.title, home.title.endsWith("다음 단계 뒤에도 계속"))
+        assertTrue(home.evidence.toString(), home.evidence.any { it.contains("Samsung Members") } && home.evidence.any { it.contains("워치 소프트웨어 업데이트") })
+        val gms = fs.single { it.id == "watch-gms" }
+        assertTrue(gms.title, gms.title.endsWith("다음 단계 뒤에도 계속"))
+        assertTrue(gms.evidence.toString(), gms.evidence.any { it.contains("모두 업데이트") })
+        val vf = facts().copy(watchMetrics = f.watchMetrics)
+        val v = Analyzer.verdict(vf, Analyzer.findings(vf) + Finding("rate-24h", Severity.ABNORMAL, "24시간 시간당 6.0%", emptyList(), category = "drain"))
+        assertTrue(v.todo.first(), v.todo.first().contains("다음 단계 뒤에도 계속") && v.todo.first().contains("Samsung Members"))
+    }
+
+    /**
+     * Play 서비스는 워치 앱과 같은 순서(캐시 삭제 → 강제 재시작)로. 어시스턴트 업데이트 제거는 2023년 워치6 사례(Play 서비스로 보였지만
+     * 어시스턴트였음)의 해결책이라 그렇게 적는다 — '2026년 사례'가 아니다 (출처 확인 · 시나리오 점검)
+     */
+    @Test
+    fun playServicesStepsMatchTheWatchOrderAndTheAssistantFixIsDated() {
+        val vf = facts().copy(watchMetrics = mapOf("at" to (this.now - 5 * 60_000L).toDouble(), "issue_gms" to 2.0, "app_window_min" to 120.0))
+        val v = Analyzer.verdict(vf, Analyzer.findings(vf))
+        val step = v.todo.first { it.contains("Play 서비스는") }
+        assertTrue(step, step.contains("캐시 삭제 → 강제 재시작") && !step.contains("재시작 → 캐시"))
+        assertTrue(step, step.contains("2023년") && !step.contains("2026년 사례"))
     }
 
     /**

@@ -72,7 +72,9 @@ object BatteryTodo {
         }
         ins.night?.todos?.forEach { out += todo(it, Grade.CAUTION) }
         if (!permitted) {
-            out += Todo("지킴이 권한 주기", "PC 툴킷 메뉴 8(자동 치료) 한 번 — 밤·과소모 때 워치가 알아서 조절", Grade.UNKNOWN)
+            // 처음이면 메뉴 8(자동 치료) — 권한 주기에 진단·조치까지. 화면의 다른 안내('메뉴 7(권한 주기) 뒤에')와 엇갈려 보이지 않게
+            // 메뉴 7 이 그 안에 든다고 (시나리오 점검)
+            out += Todo("지킴이 권한 주기", "PC 툴킷 메뉴 8(자동 치료) 한 번 — 권한 주기(메뉴 7)에 진단·조치까지", Grade.UNKNOWN)
         }
         ins.charging?.let { ch ->
             ch.todos.forEachIndexed { i, t -> out += todo(t, Grade.CAUTION, if (i == 0 && ch.protectAdvised) Action.Battery else null) }

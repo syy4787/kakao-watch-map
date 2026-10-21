@@ -111,6 +111,9 @@ grep -q "clear:com.example.drain.*--strong" treat.log || fail "강함 후보 안
 grep -qE "범인 앱: .*com\.example\.drain" treat.log || fail "범인 앱 없음"
 grep -q "24시간 뒤 메뉴 2" treat.log || fail "다음 안내 없음"
 grep -q "배터리 통계 초기화: 완료" treat.log || fail "측정 시작 안내 없음"
+# 캐시 정리·Play 서비스 다시 시작을 했으니 워치 앱에 '치료함'을 한 번 알린다 (워치가 앱별 기록을 거기서 새로 잰다)
+[ "$(wc -l < "$FAKE_ADB_STATE/treated")" = "1" ] || fail "treat: 워치 앱에 치료를 알리지 않음"
+grep -q "워치 앱에 치료를 알렸습니다" treat.log || fail "treat: 워치 앱에 알렸다는 줄 없음"
 grep -q "report.html" treat.log || fail "보고서 경로 없음"
 ! grep -q "정말 적용하려면" treat.log || fail "treat 가 질문을 함"
 # journal: 새 기록 = 권한 6건 + 안전 4건(캐시 정리 포함) + 범인 앱 주의 3건 + Play 서비스 다시 시작 1건, 전부 성공·미되돌림, 금지 조치 없음

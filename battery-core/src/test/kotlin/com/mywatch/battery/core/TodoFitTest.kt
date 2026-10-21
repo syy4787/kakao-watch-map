@@ -27,6 +27,9 @@ class TodoFitTest {
         val all = setOf(KnownIssues.HOME_HOG, KnownIssues.PLAY_SERVICES_LOOP)
         fits(KnownIssues.detect(listOf(home), windowMs = 2 * 3_600_000L, screenOnMs = 60_000L, cameBack = all).single().todo)
         KnownIssues.detect(listOf(gms, face), "com.example.face", 2 * 3_600_000L, cameBack = all).forEach { fits(it.todo) }
+        // 그다음 단계(오류 보고·업데이트) 줄도
+        fits(KnownIssues.detect(listOf(home), windowMs = 2 * 3_600_000L, screenOnMs = 60_000L, cameBack = all, again = all).single().todo)
+        KnownIssues.detect(listOf(gms, face), "com.example.face", 2 * 3_600_000L, cameBack = all, again = all).forEach { fits(it.todo) }
     }
 
     @Test

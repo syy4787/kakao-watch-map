@@ -93,6 +93,7 @@ class MainTest {
         first.dir.listFiles()!!.filter { it.isFile && it.name != "report.html" }.forEach { it.copyTo(File(second, it.name), overwrite = true) }
         val t1 = Snapshot(first.dir).time
         File(second, "date.txt").writeText(((t1 + 35 * 3_600_000L) / 1000).toString())
+        File(second, "meta.properties").writeText("time=${t1 + 35 * 3_600_000L}\n")   // 수집마다 제 PC 시각
         Journal(File(data, "journal.jsonl")).append(doctor.fix.JournalEntry(t1 + 3_600_000L, "trim-caches", null, emptyList(), null, false))
         val (code, out) = run(fakeAdb(), data, "analyze")
         assertEquals(out, 0, code)
@@ -103,12 +104,13 @@ class MainTest {
         // 처음 수집이면 비교 없음
         val (_, firstOut) = run(fakeAdb(), data, "analyze", first.dir.path)
         assertFalse(firstOut.contains("지난 수집과 비교"))
-        // 10분 뒤 또 수집(충전 없이 이어짐 — 자동 치료가 다시 수집하는 경우): 겹치는 측정이라 비교하지 않는다
+        // 10분 뒤 또 수집: 바로 앞(겹치는 측정)이 아니라 치료 전 수집과 견준다 — 치료 뒤 몇 번을 수집해도 '치료 전과 비교' (시나리오 점검)
         val third = File(data, "snapshots/20261021-091000").apply { mkdirs() }
         second.listFiles()!!.filter { it.isFile && it.name != "report.html" }.forEach { it.copyTo(File(third, it.name), overwrite = true) }
         File(third, "date.txt").writeText(((t1 + 35 * 3_600_000L + 10 * 60_000L) / 1000).toString())
+        File(third, "meta.properties").writeText("time=${t1 + 35 * 3_600_000L + 10 * 60_000L}\n")
         val (_, thirdOut) = run(fakeAdb(), data, "analyze")
-        assertFalse(thirdOut, thirdOut.contains("지난 수집과 비교"))
+        assertTrue(thirdOut, thirdOut.contains("치료 전 수집과 비교") && thirdOut.contains("trim-caches"))
     }
 
     @Test

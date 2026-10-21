@@ -207,7 +207,7 @@ class BatteryInsightsTest {
         // 12시간에 한 번
         nm.cancel(Guardian.N_ISSUE)
         playServicesLoop(at(14), 7, from = 5, stats = loop)
-        assertEquals("문제는 그대로 보이고(타일)", "Play 서비스 과소모 — 캐시 지우기", Guardian.tileIssue(context, at(15, 30)))
+        assertEquals("문제는 그대로 보이고(타일)", "Play 서비스 과소모 — 캐시 지우고 재시작", Guardian.tileIssue(context, at(15, 30)))
         assertNull("알림만 쉰다", shadowOf(nm).getNotification(Guardian.N_ISSUE))
     }
 
@@ -260,7 +260,7 @@ class BatteryInsightsTest {
 
     /**
      * 재시작 효과: 시킨 대로 강제 재시작한 뒤 대기 소모가 줄었는지 숫자로 — 배터리 화면(알려진 문제 칸)과 하루 요약에.
-     * 재시작 전 12시간 시간당 4%, 재시작 30분 뒤부터 3시간 시간당 1% → '줄었습니다'
+     * 재시작 직전 대기 3시간 시간당 4%(그 전 12시간 내내 4%), 재시작 30분 뒤부터 3시간 시간당 1% → '줄었습니다'
      */
     @Test
     fun theRestartEffectIsShownOnTheScreenAndInTheSummary() {
@@ -308,9 +308,15 @@ class BatteryInsightsTest {
         for (i in 0..8) log.append(BatterySample(now - (8 - i) * q, 80 - i / 4))
         val store = HealthStore(context)
         store.record(now - 30 * 60_000L, mapOf("a" to UidUse("a", cpuMs = 1_000)))
-        store.record(now - 60_000L, mapOf("a" to UidUse("a", cpuMs = 61_000)))
-        val notes = open().second.rows.filterIsInstance<Row.Note>().map { it.text }
+        // 29분에 CPU 12분 — 시간당으로 늘리면 25분('비정상')이지만 짧은 창이라 등급은 매기지 않는다 (재시작 직후 동기화가 빨갛게 보이지 않게)
+        store.record(now - 60_000L, mapOf("a" to UidUse("a", cpuMs = 1_000 + 12 * 60_000L)))
+        val rows = open().second.rows
+        val notes = rows.filterIsInstance<Row.Note>().map { it.text }
         assertTrue(notes.toString(), notes.any { it == "알려진 문제는 기록이 1시간쯤 쌓이면 봅니다 (지금 29분치)" })
+        val app = rows.filterIsInstance<Row.Step>().single { it.key == "app:a" }
+        assertNull(app.toString(), app.chip)
+        // 시간당으로 늘린 표시('CPU 시간당 24분')도 빼고 이 창에서 쓴 만큼만
+        assertTrue(app.sub.orEmpty(), app.sub.orEmpty().contains("CPU 12분") && !app.sub.orEmpty().contains("시간당"))
     }
 
     /** 배터리 화면을 열 때도 One UI Watch 홈 과소모를 짚는다 — 사용 통계로 본 화면 켜짐 시간을 빼고 (15분 기록과 같은 판단) */

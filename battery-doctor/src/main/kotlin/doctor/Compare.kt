@@ -17,6 +17,7 @@ data class CompareRow(val label: String, val before: String, val after: String, 
 
 /**
  * 지난 수집(조치 전)과 이번 수집(조치 후)의 비교. [actions] = 두 수집 사이에 적용해 아직 되돌리지 않은 조치 id.
+ * [Compare.of] 의 actionsBetween = 그 '사이'를 PC 시계로 (조치 기록과 같은 시계 — 모르면 수집 시각으로)
  */
 data class Comparison(val beforeAt: Long, val afterAt: Long, val actions: List<String>, val rows: List<CompareRow>, val headline: String)
 
@@ -37,7 +38,7 @@ object Compare {
     const val REL = 0.15
     const val MIN_HOURS = 2.0
 
-    fun of(before: Facts, after: Facts, journal: List<JournalEntry>, zone: ZoneId = ZoneId.systemDefault()): Comparison? {
+    fun of(before: Facts, after: Facts, journal: List<JournalEntry>, zone: ZoneId = ZoneId.systemDefault(), actionsBetween: LongRange? = null): Comparison? {
         val rows = ArrayList<CompareRow>()
         val beforeAt = before.collectedAt ?: return null
         val afterAt = after.collectedAt ?: return null
@@ -80,7 +81,8 @@ object Compare {
         }
         if (rows.isEmpty()) return null
 
-        val actions = journal.filter { it.time in (beforeAt + 1)..afterAt && it.ok && !it.undone }.map { it.id }
+        // 조치 기록은 PC 시계 — 수집 시각(워치 시계)과 몇 분 어긋날 수 있어 알면 PC 시계 창으로 고른다
+        val actions = journal.filter { it.time in (actionsBetween ?: (beforeAt + 1)..afterAt) && it.ok && !it.undone }.map { it.id }
         return Comparison(beforeAt, afterAt, actions, rows, headline(rows, actions.isNotEmpty()))
     }
 

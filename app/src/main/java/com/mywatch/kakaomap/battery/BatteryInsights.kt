@@ -94,7 +94,7 @@ object BatteryInsights {
         val face = runCatching { watchFace(c) }.getOrNull()
         // 화면이 켜져 있던 시간·받은 알림(사용 통계, 하루치)을 같이 — One UI Watch 홈은 화면을 그리고 알림을 보여 주는 몫을 빼고 본다
         // (15분 기록과 같은 판단: 앱별 통계의 기록 구간들과 겹친 만큼)
-        val issues = Guardian.issuesIn(cw, face, usage?.screen, usage?.notifications?.map { it.second }, now - 24 * 3_600_000L, Guardian.cameBack(c, now), label)
+        val issues = Guardian.issuesIn(cw, face, usage?.screen, usage?.notifications?.map { it.second }, now - 24 * 3_600_000L, Guardian.stages(c, now), label)
         val effect = runCatching { LeverEffects.nightMode(samples, GuardianJournal(c).nightSessions(now), now, zone) }
             .getOrDefault(LeverEffect(emptyList(), emptyList()))
         val levers = runCatching { Levers(c).checkLine(Guardian.state(c).saverBroken) }.getOrNull()

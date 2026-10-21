@@ -45,8 +45,12 @@ object Guardian {
     const val N_DRIFT = 7305
     /** 게이지 보정 루틴 단계 */
     const val N_CAL = 7306
-    /** 알려진 문제(Play 서비스 과소모 등) */
+    /** 알려진 문제 — 문제마다 따로 (두 문제가 한 시간 간격으로 서로 덮어쓰지 않게): Play 서비스 과소모(예전부터 쓰던 번호) */
     const val N_ISSUE = 7307
+    /** 알려진 문제: One UI Watch 홈 과소모 */
+    const val N_ISSUE_HOME = 7310
+    /** 알려진 문제: 그 밖의 것(시계 화면 등) */
+    const val N_ISSUE_OTHER = 7311
     /** 권한이 없어져 바꿔 둔 설정을 되돌리지 못함 — 직접 되돌릴 것 */
     const val N_RELEASE = 7309
     /** 길 안내가 시작·끝난 때 (안내 뒤 2시간은 그 소모를 '비정상'으로 읽지 않게) */
@@ -57,6 +61,8 @@ object Guardian {
     const val ACTION_SHELL_RESTORE = "com.mywatch.kakaomap.battery.SHELL_RESTORE"
     /** PC 툴킷이 수집 직전에 보내는 '지금 요약 쓰기' (셸만 — [ShellRestoreReceiver]) */
     const val ACTION_SHELL_SUMMARY = "com.mywatch.kakaomap.battery.SHELL_SUMMARY"
+    /** PC 툴킷이 자동 치료(캐시 정리·Play 서비스 다시 시작)를 마치고 보내는 '치료함' (셸만 — [ShellRestoreReceiver], [onTreated]) */
+    const val ACTION_SHELL_TREATED = "com.mywatch.kakaomap.battery.SHELL_TREATED"
     /** 잔량 표시 오차 알림의 '보정 루틴 시작' 버튼 */
     const val ACTION_CAL_START = "com.mywatch.kakaomap.battery.CAL_START"
 
@@ -81,6 +87,8 @@ object Guardian {
     private const val K_S_ISSUE_AT = "gs_issue_notify_at"
     /** 알려진 문제 알림은 12시간에 한 번 */
     const val ISSUE_COOLDOWN_MS = 12L * 3_600_000L
+    /** 다음 단계 뒤에도 계속되는 문제(오류 보고·업데이트만 남음)의 알림은 하루에 한 번 */
+    const val ISSUE_LAST_STAGE_COOLDOWN_MS = 24L * 3_600_000L
     /** 지킴이 판단에 읽는 기록 (일) */
     const val RECENT_DAYS = 3
     /**
@@ -257,6 +265,21 @@ object Guardian {
         runCatching { nm.notify(N_RELEASE, n) }
     }
 
+    /**
+     * PC 툴킷이 자동 치료(모든 앱 캐시 정리·Play 서비스 다시 시작)를 마쳤다 ([ACTION_SHELL_TREATED]): 앱별 기록을 지금 새로 시작한다 —
+     * 재시작처럼 부팅 차례를 하나 올리고 그 앞의 사용량은 빼고 본다. 치료 10분 뒤의 PC 수집이 치료 전 기록으로 또 치료를 권하지 않게,
+     * 1시간쯤 쌓인 뒤 다시 보고, 그 뒤에도 또 나타나면 다음 단계로(치료도 한 단계). 앱별 통계 권한이 없으면 아무것도 안 한다(false)
+     */
+    fun onTreated(context: Context, now: Long = System.currentTimeMillis(), source: UidStatsSource? = null): Boolean {
+        val c = context.applicationContext
+        val reader = source ?: HealthReader(c).takeIf { it.available } ?: return false
+        HealthStore(c).record(now, reader.take(), HealthStore.Boot.now(c), boundary = true)
+        // 치료 전 판단(타일 줄)은 바로 내린다 — 창이 비었으니 아무 문제도 찾지 않는다
+        knownIssues(c, now, null, null)
+        noteAction(c, "PC 자동 치료 — 앱별 기록을 새로 시작 (알려진 문제는 1시간쯤 뒤 다시 봄)")
+        return true
+    }
+
     /** 앱별 통계 스냅샷 간격 (15분 기록 넷에 한 번, 시각이 조금 밀려도) */
     const val SNAPSHOT_EVERY_MS = 55L * 60_000L
 
@@ -306,19 +329,33 @@ object Guardian {
 
     fun tileIssueGraded(c: Context, now: Long): Pair<String, Grade>? {
         val p = prefs(c)
-        val at = p.getLong(K_TILE_ISSUE_AT, 0L)
-        if (at <= 0L || now - at > TILE_ISSUE_MAX_AGE_MS || now < at) return null
-        // 그 뒤에 재시작했으면(할 일대로 강제 재시작) 앞의 판단은 바로 내린다 — 재시작 뒤 기록이 1시간쯤 쌓이면 다시 본다.
-        // 이전 버전이 적은 줄(부팅을 안 적음)은 켜진 때(벽시계 − 켜진 뒤 시간)보다 앞이면
-        val seen = p.getLong(K_TILE_ISSUE_ELAPSED, -1L).takeIf { it >= 0 }?.let {
-            HealthStore.Boot(p.getInt(K_TILE_ISSUE_BOOT, -1).takeIf { n -> n >= 0 }, it, p.getLong(K_TILE_ISSUE_WALL, -1L).takeIf { w -> w >= 0 })
-        }
-        if (seen == null && at < now - android.os.SystemClock.elapsedRealtime()) return null
-        if (seen != null && HealthStore.Boot.now(c).rebootedSince(seen)) return null
+        if (!issueRecordFresh(c, now)) return null
         val line = p.getString(K_TILE_ISSUE, null) ?: return null
         val grade = runCatching { Grade.valueOf(p.getString(K_TILE_ISSUE_GRADE, null) ?: "CAUTION") }.getOrDefault(Grade.CAUTION)
         return line to grade
     }
+
+    /**
+     * 마지막으로 찾아 적어 둔 알려진 문제가 아직 지금의 것인가 — 3시간 안에 이번 부팅에서 본 것. 그 뒤에 재시작했으면(할 일대로 강제
+     * 재시작) 앞의 판단은 바로 내린다 — 재시작 뒤 기록이 1시간쯤 쌓이면 다시 본다. 이전 버전이 적은 것(부팅을 안 적음)은 켜진 때
+     * (벽시계 − 켜진 뒤 시간)보다 앞이면 지난 것
+     */
+    private fun issueRecordFresh(c: Context, now: Long): Boolean {
+        val p = prefs(c)
+        val at = p.getLong(K_TILE_ISSUE_AT, 0L)
+        if (at <= 0L || now - at > TILE_ISSUE_MAX_AGE_MS || now < at) return false
+        val seen = p.getLong(K_TILE_ISSUE_ELAPSED, -1L).takeIf { it >= 0 }?.let {
+            HealthStore.Boot(p.getInt(K_TILE_ISSUE_BOOT, -1).takeIf { n -> n >= 0 }, it, p.getLong(K_TILE_ISSUE_WALL, -1L).takeIf { w -> w >= 0 })
+        }
+        if (seen == null && at < now - android.os.SystemClock.elapsedRealtime()) return false
+        return seen == null || !HealthStore.Boot.now(c).rebootedSince(seen)
+    }
+
+    /**
+     * 지금(이번 부팅, 3시간 안에) 짚은 알려진 문제 중 재시작·치료 뒤에도 또 나타난 것이 있나 — 비정상 소모 알림이 같은 '재시작'을 시키지
+     * 않게. 이틀 기억([stages])은 다음 단계를 고르려는 것이지 지금 보이는 문제가 아니다 (재시작으로 사라진 뒤엔 다른 까닭의 과소모일 수 있다)
+     */
+    fun backNow(c: Context, now: Long): Boolean = issueRecordFresh(c, now) && !prefs(c).getString(K_TILE_ISSUE_BACK, null).isNullOrEmpty()
 
     /**
      * 최근 2시간 앱별 순위로 알려진 문제를 찾고 타일 줄을 적어 둔다 (알림은 [checkKnownIssues]).
@@ -329,11 +366,13 @@ object Guardian {
         val w = culpritWindow(c, now, boot)
         val face = runCatching { BatteryInsights.watchFace(c) }.getOrNull()
         // 화면 켜짐·알림은 6시간치만 읽었다 — 창이 그보다 앞서면 화면 켜짐을 모른다
-        val found = issuesIn(w, face, screen, notifications, now - SCREEN_LOOKBACK_MS, cameBack(c, now), BatteryInsights.appName(c))
+        val found = issuesIn(w, face, screen, notifications, now - SCREEN_LOOKBACK_MS, stages(c, now), BatteryInsights.appName(c))
         noteSeen(c, now, found)
-        // 타일은 이 결과를 읽는다 (타일이 통계 파일을 읽고 분석하지 않게) — 문제마다 그 할 일로, 비정상 먼저. 어느 부팅에서 본 것인지도
+        // 타일은 이 결과를 읽는다 (타일이 통계 파일을 읽고 분석하지 않게) — 문제마다 그 할 일로, 비정상 먼저. 어느 부팅에서 본 것인지도.
+        // 재시작·치료 뒤에도 또 나타난 것(비정상 소모 알림이 같은 '재시작'을 시키지 않게)도 함께
         val top = found.firstOrNull { it.grade == Grade.ABNORMAL } ?: found.firstOrNull()
         prefs(c).edit().putString(K_TILE_ISSUE, top?.let { it.tile ?: it.title }).putString(K_TILE_ISSUE_GRADE, top?.grade?.name)
+            .putString(K_TILE_ISSUE_BACK, found.filter { it.cameBack }.joinToString(",") { it.id })
             .putLong(K_TILE_ISSUE_AT, now).putInt(K_TILE_ISSUE_BOOT, boot.count ?: -1).putLong(K_TILE_ISSUE_ELAPSED, boot.elapsedMs)
             .putLong(K_TILE_ISSUE_WALL, boot.wallMs ?: -1L).apply()
         return found
@@ -346,12 +385,15 @@ object Guardian {
      */
     internal fun issuesIn(
         w: CulpritWindow, face: String?, screen: List<Span>?, notifications: List<Long>?, recordedFrom: Long,
-        cameBack: Set<String> = emptySet(), label: (String) -> String?,
+        stages: Map<String, Int> = emptyMap(), label: (String) -> String?,
     ): List<com.mywatch.battery.core.KnownIssue> {
         val known = w.spans.isNotEmpty() && w.spans.all { it.first >= recordedFrom }
         val screenOn = screen?.takeIf { known }?.sumOf { s -> w.spans.sumOf { (a, b) -> s.overlap(a, b) } }
         val notes = notifications?.count { t -> w.spans.any { (a, b) -> t >= a && t < b } } ?: 0
-        return KnownIssues.detect(w.ranks, face, w.windowMs.takeIf { it > 0 }, screenOn, notes, label, cameBack)
+        return KnownIssues.detect(
+            w.ranks, face, w.windowMs.takeIf { it > 0 }, screenOn, notes, label,
+            cameBack = stages.filterValues { it >= 1 }.keys, again = stages.filterValues { it >= 2 }.keys,
+        )
     }
 
     /** 재시작 뒤에도 또 나타나는지 보려고 기억하는 문제 — 해결 단계에 재시작이 있는 것들 */
@@ -361,23 +403,32 @@ object Guardian {
     const val ISSUE_RECALL_MS = 48L * 3_600_000L
 
     /**
-     * 재시작한 뒤에도 또 나타난 문제(id) — 이번 일(이틀 안에 계속 보임)에서 처음 본 부팅 차례가 지금보다 앞이면. 같은 '재시작'을
+     * 재시작(·PC 치료)한 뒤에도 또 나타난 문제(id) — 이번 일(이틀 안에 계속 보임)에서 처음 본 부팅 차례가 지금보다 앞이면. 같은 '재시작'을
      * 되풀이하지 않고 다음 단계를 주려고 (15분 기록·배터리 화면이 같이 씀). 부팅 차례를 아직 모르면 없음
      */
-    fun cameBack(c: Context, now: Long): Set<String> {
+    fun cameBack(c: Context, now: Long): Set<String> = stages(c, now).keys
+
+    /**
+     * 이번 일에서 문제마다 몇 번째 단계인가 (0 은 넣지 않는다): 1 = 처음 본 부팅 뒤에 또 나타남(다음 단계), 2 = 그 다음 단계를 처음 보인
+     * 부팅 뒤에 또 나타남(오류 보고·업데이트). 단계마다 앞 단계의 할 일이 실제로 보였어야 넘어간다 — 재시작을 두 번 연달아 했다고 건너뛰지 않게
+     */
+    fun stages(c: Context, now: Long): Map<String, Int> {
         val p = prefs(c)
         val seq = HealthStore(c).bootSeq()
-        if (seq < 0) return emptySet()
-        return RESTART_FIRST.filter { id ->
+        if (seq < 0) return emptyMap()
+        return RESTART_FIRST.mapNotNull { id ->
             val at = p.getLong("$K_SEEN_AT$id", 0L)
             val first = p.getInt("$K_SEEN_SEQ$id", -1)
-            at > 0 && now - at in 0 until ISSUE_RECALL_MS && first in 0 until seq
-        }.toSet()
+            if (at <= 0 || now - at !in 0 until ISSUE_RECALL_MS || first !in 0 until seq) return@mapNotNull null
+            val next = p.getInt("$K_NEXT_SEQ$id", -1)
+            id to if (next in first + 1 until seq) 2 else 1
+        }.toMap()
     }
 
     /**
      * 이번에 본 문제를 적는다 — 이번 일의 첫 부팅 차례는 그대로 두고 본 때만 새로. 이틀 넘게 안 보였거나 기억한 차례가 지금보다 크면
-     * (통계 파일이 사라져 차례를 0 부터 다시 셈) 새 일. 부팅 차례를 아직 모르면 적지 않는다(업데이트 뒤 첫 스냅샷 전)
+     * (통계 파일이 사라져 차례를 0 부터 다시 셈) 새 일. 다음 단계(재시작 뒤에도 또)를 처음 보인 부팅 차례도 — 그 뒤에 또 나타나면
+     * 그다음 단계로. 부팅 차례를 아직 모르면 적지 않는다(업데이트 뒤 첫 스냅샷 전)
      */
     private fun noteSeen(c: Context, now: Long, found: List<com.mywatch.battery.core.KnownIssue>) {
         val p = prefs(c)
@@ -386,8 +437,10 @@ object Guardian {
         val e = p.edit()
         for (i in found.filter { it.id in RESTART_FIRST }) {
             val at = p.getLong("$K_SEEN_AT${i.id}", 0L)
-            val ongoing = at > 0 && now - at in 0 until ISSUE_RECALL_MS && p.getInt("$K_SEEN_SEQ${i.id}", -1) in 0..seq
-            if (!ongoing) e.putInt("$K_SEEN_SEQ${i.id}", seq)
+            val first = p.getInt("$K_SEEN_SEQ${i.id}", -1)
+            val ongoing = at > 0 && now - at in 0 until ISSUE_RECALL_MS && first in 0..seq
+            if (!ongoing) e.putInt("$K_SEEN_SEQ${i.id}", seq).remove("$K_NEXT_SEQ${i.id}")
+            else if (i.cameBack && p.getInt("$K_NEXT_SEQ${i.id}", -1) !in first + 1..seq) e.putInt("$K_NEXT_SEQ${i.id}", seq)
             e.putLong("$K_SEEN_AT${i.id}", now)
         }
         e.apply()
@@ -395,6 +448,8 @@ object Guardian {
 
     private const val K_SEEN_SEQ = "gs_issue_seen_seq_"
     private const val K_SEEN_AT = "gs_issue_seen_at_"
+    /** 다음 단계(재시작 뒤에도 또)를 처음 보인 부팅 차례 */
+    private const val K_NEXT_SEQ = "gs_issue_next_seq_"
 
     private const val K_TILE_ISSUE = "gs_tile_issue"
     private const val K_TILE_ISSUE_GRADE = "gs_tile_issue_grade"
@@ -402,6 +457,8 @@ object Guardian {
     private const val K_TILE_ISSUE_BOOT = "gs_tile_issue_boot"
     private const val K_TILE_ISSUE_ELAPSED = "gs_tile_issue_elapsed"
     private const val K_TILE_ISSUE_WALL = "gs_tile_issue_wall"
+    /** 그때 찾은 문제 중 재시작·치료 뒤에도 또 나타난 것(id, 쉼표) */
+    private const val K_TILE_ISSUE_BACK = "gs_tile_issue_back"
     private const val TILE_ISSUE_MAX_AGE_MS = 3L * 3_600_000L
 
     /** 화면 켜짐 구간으로 본 '지금까지 꺼져 있던 시간' — 지금 켜져 있으면 0, 창 안에 켜진 적이 없으면 창 길이 */
@@ -419,10 +476,12 @@ object Guardian {
         val p = prefs(c)
         // 예전(문제 구분 없는) 시각은 업데이트 뒤 12시간까지만 같이 본다 — 따로 따져서, 시계가 바뀌어 미래가 된 예전 시각이 문제별 쉼을 가리지 않게
         val legacy = p.getLong(K_S_ISSUE_AT, 0L)
-        fun cooling(at: Long) = at > 0 && now - at in 0 until ISSUE_COOLDOWN_MS
-        // 재시작해도 그대로라는 다음 단계 알림은 따로 쉰다 — 12시간 안에 시킨 대로 재시작했어도 그 소식은 한 번 간다
-        fun key(i: com.mywatch.battery.core.KnownIssue) = "${K_S_ISSUE_AT}_${i.id}" + if (i.cameBack) "_back" else ""
-        fun resting(i: com.mywatch.battery.core.KnownIssue): Boolean = cooling(p.getLong(key(i), 0L)) || cooling(legacy)
+        fun cooling(at: Long, ms: Long = ISSUE_COOLDOWN_MS) = at > 0 && now - at in 0 until ms
+        // 단계마다 따로 쉰다 — 12시간 안에 시킨 대로 재시작했는데 그대로라는 소식(다음 단계)은 한 번 간다. 마지막 단계(오류 보고·업데이트만
+        // 남음)는 사용자가 할 일이 거의 없어 하루에 한 번
+        fun key(i: com.mywatch.battery.core.KnownIssue) = "${K_S_ISSUE_AT}_${i.id}" + when (i.stage) { 0 -> ""; 1 -> "_back"; else -> "_back2" }
+        fun resting(i: com.mywatch.battery.core.KnownIssue): Boolean =
+            cooling(p.getLong(key(i), 0L), if (i.stage >= 2) ISSUE_LAST_STAGE_COOLDOWN_MS else ISSUE_COOLDOWN_MS) || cooling(legacy)
         val issue = knownIssues(c, now, screen, notifications).firstOrNull { it.grade == Grade.ABNORMAL && !resting(it) } ?: return
         val (nm, channel) = BatteryAlerts.manager(c, BatteryAlerts.quiet(now, zone)) ?: return
         val text = "${issue.why}. 해결: " + issue.steps.mapIndexed { i, s -> "${i + 1}) $s" }.joinToString(" ")
@@ -437,9 +496,16 @@ object Guardian {
             .addAction(0, if (issue.pkg == KnownIssues.GMS) "Play 서비스 앱 정보" else "${HealthStore.label(c, issue.pkg)} 앱 정보",
                 PendingIntent.getActivity(c, 4, info, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT))
             .build()
-        nm.notify(N_ISSUE, n)
+        nm.notify(issueNotificationId(issue.id), n)
         p.edit().putLong(key(issue), now).apply()
         noteAction(c, "알려진 문제 알림: ${issue.title}")
+    }
+
+    /** 알려진 문제의 알림 번호 — 문제마다 따로 */
+    fun issueNotificationId(id: String): Int = when (id) {
+        KnownIssues.PLAY_SERVICES_LOOP -> N_ISSUE
+        KnownIssues.HOME_HOG -> N_ISSUE_HOME
+        else -> N_ISSUE_OTHER
     }
 
     /** 게이지가 20포인트 넘게 낮게 세는 것이 확실하고 표시 잔량이 35% 아래면 알린다 (12시간에 한 번) — 표시보다 실제가 많으니 당황할 일이 아니다 */
@@ -506,7 +572,7 @@ object Guardian {
                 val culprits = culprits(c, now).filter { it.use.pkg.substringBefore('+') != c.packageName }
                 noteAction(c, "비정상 소모(시간당 ${DrainAnalyzer.fmt(a.pph)}%) — 절전 모드 ${if (ok) "켬" else "못 켬"}" +
                     culprits.take(2).joinToString(prefix = " · 의심: ") { HealthStore.label(c, it.use.pkg) })
-                if (a.notify) notifyAbnormal(c, a.pph, ok, culprits, phantom, BatteryAlerts.quiet(now, zone), back = cameBack(c, now).isNotEmpty())
+                if (a.notify) notifyAbnormal(c, a.pph, ok, culprits, phantom, BatteryAlerts.quiet(now, zone), back = backNow(c, now))
             }
             GuardianAction.AbnormalOff -> { levers.restoreAbnormal(); noteAction(c, "비정상 대응 끝 — 절전 복구") }
             GuardianAction.UserOverride -> { levers.restoreAll(keepSaver = true); noteAction(c, "사용자가 절전을 꺼서 12시간 쉼") }
@@ -545,7 +611,7 @@ object Guardian {
             if (names.isNotEmpty()) append("의심 앱: ${names.joinToString(", ")}. ")
             if (phantom) append("표시 소모의 일부는 잔량 게이지 오차(가짜 소모)로 보입니다 — 배터리 화면 '잔량 표시 점검'을 보세요. ")
             // 재시작 뒤에도 또 나타난 알려진 문제가 있으면 같은 '재시작'을 시키지 않는다 (그 문제 알림·타일과 엇갈리지 않게)
-            if (back) append("재시작 뒤에도 또 나타난 문제가 있습니다 — 배터리 화면 '알려진 문제'의 다음 단계를 보세요.")
+            if (back) append("재시작 뒤에도 또 나타난 문제가 있습니다 — 배터리 화면 맨 위 '지금 할 일'의 다음 단계를 보세요.")
             else append("계속되면 홈+뒤로 버튼을 꺼질 때까지 눌러 강제 재시작하세요.")
         }
         val b = NotificationCompat.Builder(c, channel)
@@ -621,7 +687,8 @@ class GuardianReceiver : BroadcastReceiver() {
 /**
  * PC 툴킷이 지킴이 권한(WRITE_SECURE_SETTINGS)을 거두기 전에 부른다 — `am broadcast -n com.mywatch.kakaomap/.battery.ShellRestoreReceiver`.
  * 바꿔 둔 설정(밤 모드의 AOD·손목 올려 켜기·절전 등)을 권한이 있을 때 되돌려 놓게. 셸(adb)만 보낼 수 있게 매니페스트에서
- * android.permission.DUMP 로 막는다(다른 앱은 이 권한을 얻지 못한다). 결과: "restored" 또는 "left:직접 되돌릴 것들"
+ * android.permission.DUMP 로 막는다(다른 앱은 이 권한을 얻지 못한다). 결과: "restored" 또는 "left:직접 되돌릴 것들".
+ * 같은 받는 곳이 PC 수집 직전의 '지금 요약 쓰기'([Guardian.ACTION_SHELL_SUMMARY])와 자동 치료 뒤 '치료함'([Guardian.ACTION_SHELL_TREATED])도 받는다
  */
 class ShellRestoreReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
@@ -637,6 +704,15 @@ class ShellRestoreReceiver : BroadcastReceiver() {
                 Thread {
                     val ok = runCatching { BatterySummary.writeNow(app, BatteryLog(app)) }.getOrNull() != null
                     pending?.run { resultData = if (ok) "summary:ok" else "summary:none"; finish() }
+                }.start()
+            }
+            // PC 자동 치료를 마쳤다 — 앱별 기록을 거기서 새로 (시스템 통계를 읽으니 뒤에서). 결과: 'treated:ok' / 'treated:none'(권한 없음)
+            Guardian.ACTION_SHELL_TREATED -> {
+                val app = context.applicationContext
+                val pending: PendingResult? = goAsync()
+                Thread {
+                    val ok = runCatching { Guardian.onTreated(app) }.onFailure { ErrorLog.record("배터리·PC 치료", it) }.getOrDefault(false)
+                    pending?.run { resultData = if (ok) "treated:ok" else "treated:none"; finish() }
                 }.start()
             }
         }
