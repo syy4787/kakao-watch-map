@@ -219,6 +219,24 @@ object Analyzer {
             }
         }
 
+        // 워치가 이틀 안에 짚었는데 지금은 안 보이는 것(요약의 seen_*_h) — 재시작·치료 뒤 다시 보는 중이거나 들은 것. 이 보고서의 충전 뒤
+        // 통계엔 그 전 소모가 남아 소모율이 높게 나올 수 있어 하드웨어로 단정하지 않게 '주의'로 (범인으로 짚지는 않는다)
+        val summaryFresh = wm["at"]?.let { at -> f.collectedAt?.let { c -> c - at.toLong() in -WATCH_AHEAD_MS..WATCH_FRESH_MS } } == true
+        if (summaryFresh) {
+            val window = (wm["app_window_min"] ?: 0.0).toInt()
+            fun earlier(key: String, id: String, name: String, category: String) {
+                val hours = wm[key] ?: return
+                if (out.any { it.id == id }) return
+                out += Finding("$id-earlier", Severity.CAUTION, "워치 앱: ${fmt1(hours).removeSuffix(".0")}시간 전 $name — 지금은 안 보임",
+                    listOf("워치 앱 지킴이가 최근 48시간 안에 짚었습니다 — " + if (window >= 55) "재시작·치료 뒤 1시간 넘게(${window}분) 다시 봤는데 지금은 조용합니다"
+                        else "재시작·치료 뒤라 다시 보는 중입니다(기록 ${window}분치 — 1시간쯤 쌓이면 봄)",
+                        "이 보고서의 충전 뒤 통계엔 그 전 소모가 남아 있어 소모율이 높게 나올 수 있습니다 — 하드웨어로 단정하기 전에 메뉴 3(측정 시작)으로 초기화하고 하루 뒤 다시 수집(메뉴 2)해 견주세요"),
+                    source = "워치 앱 지킴이(최근 48시간)", category = category)
+            }
+            earlier("seen_gms_h", "watch-gms", "Google Play 서비스 과소모", "gms")
+            earlier("seen_home_h", "watch-home", "One UI Watch 홈 과소모", "home")
+        }
+
         // One UI Watch 홈이 시스템 uid(1000)를 같이 쓰면 앱별 통계에서 홈만 따로 셀 수 없다 — 이 보고서의 순위도, 워치 앱의
         // '홈 과소모'도 홈을 짚지 못하니 그렇다고 알린다 (따로 쓰면 조용히)
         f.packages.firstOrNull { it.name == HOME }?.uid?.takeIf { it == SYSTEM_UID }?.let {

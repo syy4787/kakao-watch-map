@@ -557,6 +557,32 @@ class AnalyzerTest {
     }
 
     /**
+     * 재시작(·치료) 직후 수집: 워치는 아직 다시 보는 중이라(창 20분) 문제 칸이 없고, 이 보고서의 충전 뒤 통계엔 재시작 전 소모가 남아
+     * 소모율만 비정상 — 워치가 2.5시간 전에 홈 과소모를 봤다면 하드웨어로 단정하지 않는다. 다시 재서 견주라고 (시나리오 점검)
+     */
+    @Test
+    fun aCollectionRightAfterARestartIsNotReadAsHardware() {
+        val wm = mapOf("at" to (this.now - 5 * 60_000L).toDouble(), "app_window_min" to 20.0, "seen_home_h" to 2.5)
+        val vf = facts().copy(watchMetrics = wm)
+        val fs = Analyzer.findings(vf)
+        val e = fs.single { it.id == "watch-home-earlier" }
+        assertEquals(Severity.CAUTION, e.severity)
+        assertTrue(e.title, e.title.contains("2.5시간 전") && e.title.contains("One UI Watch 홈 과소모"))
+        assertTrue(e.evidence.toString(), e.evidence.any { it.contains("다시 보는 중") } && e.evidence.any { it.contains("하드웨어로 단정하기 전에") })
+        assertFalse("범인으로 짚지 않는다", e.blames && e.packages.isNotEmpty())
+        val v = Analyzer.verdict(vf, fs + Finding("rate-24h", Severity.ABNORMAL, "24시간 시간당 6.0%", emptyList(), category = "drain"))
+        assertEquals(Cause.SOFTWARE, v.cause)
+        // 그 전엔(이 소견 없이) 하드웨어 의심이었다
+        val bare = facts().copy(watchMetrics = wm - "seen_home_h")
+        assertEquals(Cause.HARDWARE, Analyzer.verdict(bare, Analyzer.findings(bare) + Finding("rate-24h", Severity.ABNORMAL, "24시간 시간당 6.0%", emptyList(), category = "drain")).cause)
+        // 창이 1시간 넘게 쌓였는데도 안 보이면 '조용하다'고
+        val quiet = Analyzer.findings(facts().copy(watchMetrics = wm + ("app_window_min" to 90.0) + ("issue_home" to 0.0))).single { it.id == "watch-home-earlier" }
+        assertTrue(quiet.evidence.toString(), quiet.evidence.any { it.contains("지금은 조용") })
+        // 묵은 요약(3시간 넘음)은 쓰지 않는다
+        assertTrue(Analyzer.findings(facts().copy(watchMetrics = wm + ("at" to (this.now - 4 * 3_600_000L).toDouble()))).none { it.id == "watch-home-earlier" })
+    }
+
+    /**
      * Play 서비스는 워치 앱과 같은 순서(캐시 삭제 → 강제 재시작)로. 어시스턴트 업데이트 제거는 2023년 워치6 사례(Play 서비스로 보였지만
      * 어시스턴트였음)의 해결책이라 그렇게 적는다 — '2026년 사례'가 아니다 (출처 확인 · 시나리오 점검)
      */

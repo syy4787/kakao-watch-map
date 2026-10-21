@@ -68,6 +68,25 @@ class SummaryForPcTest {
         assertEquals(0.0, none["back_home"])
     }
 
+    /**
+     * 이틀 안에 짚었는데 지금은 안 보이는 문제(재시작·치료 뒤 다시 보는 중이거나 사라짐)는 몇 시간 전인지 — 재시작 직후 PC 수집이 충전 뒤
+     * 통계(재시작 전 소모가 남음)만 보고 하드웨어로 단정하지 않게. 지금 짚은 문제면 문제 칸이 그것을 말하니 적지 않는다 (시나리오 점검)
+     */
+    @Test
+    fun theMetricsSayWhatTheWatchSawBeforeARestart() {
+        val a = DrainAnalyzer(445, zone).analyze(emptyList(), now)
+        val ins = Insights(a, null, emptyList(), emptyList(), LeverEffect(emptyList(), emptyList()), appWindowMs = 20 * 60_000L,
+            earlier = mapOf(KnownIssues.HOME_HOG to now - 150 * 60_000L))
+        val m = SummaryMetrics.parse(BatterySummary.metricsLine(a, ins, now))
+        assertEquals(2.5, m["seen_home_h"])
+        assertNull(m["seen_gms_h"])
+        assertNull("창이 짧아 문제 칸은 없다", m["issue_home"])
+        val home = KnownIssue(KnownIssues.HOME_HOG, KnownIssues.HOME, "t", "w", emptyList(), Grade.ABNORMAL)
+        val now2 = SummaryMetrics.parse(BatterySummary.metricsLine(a, ins.copy(issues = listOf(home), appWindowMs = 2 * 3_600_000L), now))
+        assertNull("지금 짚은 문제", now2["seen_home_h"])
+        assertEquals(2.0, now2["issue_home"])
+    }
+
     /** 셸이 '지금 요약'을 부르면(PC 수집 직전) 하루 한 번을 기다리지 않고 새로 쓴다 */
     @Test
     fun theShellCanAskForAFreshSummary() {

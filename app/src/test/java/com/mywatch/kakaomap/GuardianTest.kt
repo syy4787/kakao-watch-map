@@ -596,6 +596,9 @@ class GuardianTest {
         assertEquals("One UI Watch 홈 과소모 — 강제 재시작", Guardian.tileIssue(context, at(12, 0)))
         restartAndSettle(2)   // 12:10 재시작
         assertEquals("재시작 앞의 판단은 바로 내린다", null, Guardian.tileIssue(context, at(12, 20)))
+        // 이틀 안에 본 것은 기억한다 — PC 가 재시작 직후 수집에서 하드웨어로 단정하지 않게 (시나리오 점검)
+        assertEquals(at(12, 0), Guardian.lastSeen(context, at(12, 20))[com.mywatch.battery.core.KnownIssues.HOME_HOG])
+        assertTrue("이틀이 지나면 잊는다", Guardian.lastSeen(context, at(12, 20, d = 22) + 60_000L).isEmpty())
         // 통계는 이어진다: 재시작 전 10분 더 돌고(+5분) 재시작 뒤엔 조용(+1분)
         fill(at(13, 0), 9, 77.0, 1.0)
         Guardian.tick(context, log, at(13, 0), stats = UidStatsSource { mapOf(home to com.mywatch.battery.core.UidUse(home, cpuMs = 36 * 60_000L)) }, zone = zone)

@@ -448,6 +448,15 @@ object Guardian {
 
     private const val K_SEEN_SEQ = "gs_issue_seen_seq_"
     private const val K_SEEN_AT = "gs_issue_seen_at_"
+    /**
+     * 이틀 안에 짚었던 문제(해결 단계에 재시작이 있는 것) — id → 마지막으로 본 때. 재시작·치료 뒤 다시 보는 중이거나 사라졌어도 PC 툴킷이
+     * 요약으로 알게 (재시작 직후 수집에서 충전 뒤 통계만 보고 하드웨어로 단정하지 않게)
+     */
+    fun lastSeen(c: Context, now: Long): Map<String, Long> = RESTART_FIRST.mapNotNull { id ->
+        val at = prefs(c).getLong("$K_SEEN_AT$id", 0L)
+        if (at > 0 && now - at in 0 until ISSUE_RECALL_MS) id to at else null
+    }.toMap()
+
     /** 다음 단계(재시작 뒤에도 또)를 처음 보인 부팅 차례 */
     private const val K_NEXT_SEQ = "gs_issue_next_seq_"
 
