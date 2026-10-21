@@ -149,7 +149,8 @@ object ChangeFinder {
         SHEALTH to "Samsung Health",
         "com.android.vending" to "Play 스토어",
         "com.google.android.wearable.app" to "Wear OS",
-        "com.samsung.android.wearable.sysui" to "시스템 UI",
+        // 워치 배터리 사용량 화면·삼성 커뮤니티에 보이는 이름 (Play 스토어 이름 'One UI Watch Home')
+        "com.samsung.android.wearable.sysui" to "One UI Watch 홈",
     )
     val SETTING_NAMES = mapOf(
         "aod" to "AOD", "tilt" to "손목 올려 켜기", "touch" to "화면 터치로 켜기", "hotword" to "'Hey Google'", "location" to "위치",

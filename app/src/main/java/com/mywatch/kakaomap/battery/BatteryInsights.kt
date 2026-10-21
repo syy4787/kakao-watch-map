@@ -82,7 +82,9 @@ object BatteryInsights {
         val (culprits, window) = runCatching { Guardian.culpritsInWindow(c, now) }.getOrDefault(emptyList<AppDrainRank>() to 0L)
         val night = runCatching { NightCulprits.lastNight(HealthStore(c).windows(24, now), now, zone, c.packageName) }.getOrNull()
         val face = runCatching { watchFace(c) }.getOrNull()
-        val issues = KnownIssues.detect(culprits, face, window.takeIf { it > 0 })
+        // 화면이 켜져 있던 시간(사용 통계)을 같이 — One UI Watch 홈은 늘 '보이는' 프로세스라 그 시간만큼 빼고 본다
+        val screenOn = usage?.screen?.takeIf { window > 0 }?.sumOf { it.overlap(now - window, now) }
+        val issues = KnownIssues.detect(culprits, face, window.takeIf { it > 0 }, screenOn)
         val effect = runCatching { LeverEffects.nightMode(samples, GuardianJournal(c).nightSessions(now), now, zone) }
             .getOrDefault(LeverEffect(emptyList(), emptyList()))
         val levers = runCatching { Levers(c).checkLine(Guardian.state(c).saverBroken) }.getOrNull()

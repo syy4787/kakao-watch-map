@@ -506,6 +506,46 @@ class GuardianTest {
     private fun event(pkg: String, t: Long, type: Int) =
         shadowOf(context.getSystemService(android.app.usage.UsageStatsManager::class.java)).addEvent(pkg, t, type)
 
+    /**
+     * One UI Watch 홈(시스템 UI)이 화면이 거의 꺼져 있던 2시간 동안 CPU 를 30분 썼다 — 알려진 문제로 알리고 타일에 '강제 재시작'.
+     * 홈은 늘 '보이는' 프로세스라 앱별 등급으로는 안 잡힌다 (2026년 9~10월 워치9·One UI 9 보고: '배터리 1위가 One UI Watch 홈')
+     */
+    @Test
+    fun theWatchHomeBurningCpuWithTheScreenOffIsCaught() {
+        grant()
+        val home = com.mywatch.battery.core.KnownIssues.HOME
+        event("android", at(10, 30), android.app.usage.UsageEvents.Event.SCREEN_INTERACTIVE)
+        event("android", at(10, 36), android.app.usage.UsageEvents.Event.SCREEN_NON_INTERACTIVE)   // 2시간 중 화면 6분
+        var use = com.mywatch.battery.core.UidUse(home)
+        val stats = UidStatsSource { mapOf(home to use) }
+        fill(at(10, 0), 9, 80.0, 1.0)
+        Guardian.tick(context, log, at(10, 0), stats = stats, zone = zone)
+        use = com.mywatch.battery.core.UidUse(home, cpuMs = 30 * 60_000L, fgMs = 2 * 3_600_000L)
+        fill(at(12, 0), 9, 78.0, 1.0)
+        Guardian.tick(context, log, at(12, 0), stats = stats, zone = zone)
+        assertEquals("One UI Watch 홈 과소모 — 강제 재시작", Guardian.tileIssue(context, at(12, 0)))
+        val n = shadowOf(nm).allNotifications.firstOrNull { it.extras.getString(android.app.Notification.EXTRA_TITLE).orEmpty().contains("One UI Watch 홈") }
+        assertTrue(shadowOf(nm).allNotifications.map { it.extras.getString(android.app.Notification.EXTRA_TITLE) }.toString(), n != null)
+        assertTrue(n!!.extras.getCharSequence(android.app.Notification.EXTRA_BIG_TEXT).toString().contains("강제 재시작"))
+    }
+
+    /** 화면을 오래 켜고 썼으면(2시간 중 50분) 홈의 CPU(40분)는 홈 화면·알림·타일을 그린 것 — 짚지 않는다 */
+    @Test
+    fun theWatchHomeWorkingWhileTheScreenIsOnIsNotAnIssue() {
+        grant()
+        val home = com.mywatch.battery.core.KnownIssues.HOME
+        event("android", at(10, 30), android.app.usage.UsageEvents.Event.SCREEN_INTERACTIVE)
+        event("android", at(11, 20), android.app.usage.UsageEvents.Event.SCREEN_NON_INTERACTIVE)
+        var use = com.mywatch.battery.core.UidUse(home)
+        val stats = UidStatsSource { mapOf(home to use) }
+        fill(at(10, 0), 9, 80.0, 1.0)
+        Guardian.tick(context, log, at(10, 0), stats = stats, zone = zone)
+        use = com.mywatch.battery.core.UidUse(home, cpuMs = 40 * 60_000L, fgMs = 2 * 3_600_000L)
+        fill(at(12, 0), 9, 78.0, 1.0)
+        Guardian.tick(context, log, at(12, 0), stats = stats, zone = zone)
+        assertEquals(null, Guardian.tileIssue(context, at(12, 0)))
+    }
+
     /** 새벽 알림이 화면을 잠깐 켠 것은 '일어남'이 아니다 — 밤 모드를 끝내지 않는다. 사람이 40초 보면 끝낸다 */
     @Test
     fun aNotificationFlashAtDawnDoesNotEndTheNight() {

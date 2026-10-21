@@ -161,7 +161,7 @@ object Guardian {
         val source = stats ?: HealthReader(c).takeIf { it.available }
         if (source != null && snapshotDue(c, now, samples)) {
             runCatching { HealthStore(c).record(now, source.take()) }.onFailure { ErrorLog.record("배터리·앱별 통계", it) }
-            runCatching { checkKnownIssues(c, now, zone) }.onFailure { ErrorLog.record("배터리·알려진 문제", it) }
+            runCatching { checkKnownIssues(c, now, zone, screen) }.onFailure { ErrorLog.record("배터리·알려진 문제", it) }
         }
 
         // 권한이 필요 없는 것들: 게이지 보정 루틴 단계, 잔량 표시 오차 알림
@@ -267,7 +267,9 @@ object Guardian {
         val store = HealthStore(c)
         if (now - store.lastAt() < maxAgeMs && now >= store.lastAt()) return
         runCatching { store.record(now, reader.take()) }.onFailure { ErrorLog.record("배터리·앱별 통계", it) }
-        runCatching { knownIssues(c, now) }.onFailure { ErrorLog.record("배터리·알려진 문제", it) }
+        // 화면 켜짐 시간(One UI Watch 홈 과소모 판단용) — 화면 이벤트만 가볍게
+        val screen = runCatching { ScreenUsage(c).readScreen(now - SCREEN_LOOKBACK_MS, now)?.spans }.getOrNull()
+        runCatching { knownIssues(c, now, screen) }.onFailure { ErrorLog.record("배터리·알려진 문제", it) }
     }
 
     /** 타일에 보일 알려진 문제 (한 줄, 등급) — 15분 기록·배터리 화면이 찾아 적어 둔 것 (3시간 넘게 다시 확인 못 했으면 null) */
@@ -282,11 +284,15 @@ object Guardian {
         return line to grade
     }
 
-    /** 최근 2시간 앱별 순위로 알려진 문제를 찾고 타일 줄을 적어 둔다 (알림은 [checkKnownIssues]) */
-    private fun knownIssues(c: Context, now: Long): List<com.mywatch.battery.core.KnownIssue> {
+    /**
+     * 최근 2시간 앱별 순위로 알려진 문제를 찾고 타일 줄을 적어 둔다 (알림은 [checkKnownIssues]).
+     * [screen] = 최근 화면 켜짐 구간(사용 통계 — 모르면 null): 그 창 안에서 화면이 켜져 있던 시간으로 One UI Watch 홈 과소모를 가린다
+     */
+    private fun knownIssues(c: Context, now: Long, screen: List<Span>?): List<com.mywatch.battery.core.KnownIssue> {
         val (ranks, window) = culpritsInWindow(c, now)
         val face = runCatching { BatteryInsights.watchFace(c) }.getOrNull()
-        val found = KnownIssues.detect(ranks, face, window.takeIf { it > 0 })
+        val screenOn = screen?.takeIf { window > 0 }?.sumOf { it.overlap(now - window, now) }
+        val found = KnownIssues.detect(ranks, face, window.takeIf { it > 0 }, screenOn)
         // 타일은 이 결과를 읽는다 (타일이 통계 파일을 읽고 분석하지 않게) — 문제마다 그 할 일로
         val top = found.firstOrNull()
         prefs(c).edit().putString(K_TILE_ISSUE, top?.let { it.tile ?: it.title }).putString(K_TILE_ISSUE_GRADE, top?.grade?.name)
@@ -309,8 +315,8 @@ object Guardian {
      * 알려진 문제(지금은 Play 서비스가 멈춘 채 돌며 배터리를 먹는 것)를 최근 2시간 앱별 사용량에서 찾으면 해결 순서와
      * 그 앱 정보 바로 가기를 알린다 (12시간에 한 번). 권한(BATTERY_STATS)이 있어야 앱별 사용량을 안다
      */
-    private fun checkKnownIssues(c: Context, now: Long, zone: ZoneId) {
-        val issue = knownIssues(c, now).firstOrNull { it.grade == Grade.ABNORMAL } ?: return
+    private fun checkKnownIssues(c: Context, now: Long, zone: ZoneId, screen: List<Span>?) {
+        val issue = knownIssues(c, now, screen).firstOrNull { it.grade == Grade.ABNORMAL } ?: return
         val p = prefs(c)
         val last = p.getLong(K_S_ISSUE_AT, 0L)
         if (last > 0 && now - last < ISSUE_COOLDOWN_MS) return

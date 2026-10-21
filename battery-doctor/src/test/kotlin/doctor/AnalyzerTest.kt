@@ -333,6 +333,22 @@ class AnalyzerTest {
         assertFalse(Analyzer.findings(facts()).any { it.id == "gms-share" })   // 8% 는 소견 없음
     }
 
+    /**
+     * 추정 전력 순위에 One UI Watch 홈이 위에 있으면 그게 흔한 일이라는 설명을 붙인다 — 화면 전력은 앞에 떠 있던 앱의 시간 비율로
+     * 나뉘어 시계 화면을 띄운 홈에 잡힌다 (2026년 9~10월 워치9 사용자들이 '홈이 1위'를 원인으로 오해). 범인으로 짚지는 않는다
+     */
+    @Test
+    fun theWatchHomeNearTheTopOfPowerUseIsExplainedNotBlamed() {
+        val home = "com.samsung.android.wearable.sysui"
+        val stats = quietStats().copy(powerItems = listOf(PowerItem("Uid 1000", home, 40.0, 40.0), PowerItem("Screen", null, 30.0, 30.0), PowerItem("Uid u0a45", "com.google.android.gms", 8.0, 8.0)))
+        val fs = Analyzer.findings(facts(stats = stats))
+        val top = fs.first { it.id == "power-top" }
+        assertTrue(top.evidence.toString(), top.evidence.any { it.contains("One UI Watch 홈") && it.contains("흔") })
+        assertFalse(fs.filter { it.blames }.flatMap { it.packages }.contains(home))
+        // 홈이 위쪽이 아니면 설명도 없다
+        assertFalse(Analyzer.findings(facts()).first { it.id == "power-top" }.evidence.any { it.contains("One UI Watch 홈") })
+    }
+
     @Test
     fun settingsFindingsOnlyWhenKeyExists() {
         val risky = mapOf("global" to mapOf("wifi_scan_always_enabled" to "1", "adaptive_battery_management_enabled" to "0", "ble_scan_always_enabled" to "0"))

@@ -307,7 +307,7 @@ class BatteryActivity : ComponentActivity() {
         if (!b.exactScreen) rows += Row.Note("PC 툴킷 메뉴 7(권한 주기) 뒤엔 화면 켜짐 시간까지 정확히 나눕니다")
         insights?.wakes?.let { w ->
             rows += Row.Note("화면 켜짐 ${w.wakes}번 — 5초 안에 꺼짐 ${w.shortWakes}번 · 알림이 켬 ${w.notificationWakes}번 (알림 ${w.notifications}개)")
-            listOfNotNull(w.gestureTodo(), w.notificationTodo { appLabel(it) }).forEachIndexed { i, (title, sub) ->
+            listOfNotNull(w.gestureTodo(), w.notificationTodo()).forEachIndexed { i, (title, sub) ->
                 rows += Row.Step(color(Grade.CAUTION), R.drawable.ic_warning, null, title, sub, key = "wake:$i")
             }
         }
@@ -584,8 +584,9 @@ class BatteryActivity : ComponentActivity() {
         const val HELP = "• 잔량 표시 점검: '17%에서 꺼졌는데 켜니 47%'는 배터리가 아니라 잔량 게이지가 낮게 센 것. 쉬는 전압으로 그 오차를 잡아 알려 주고, 강제 재시작·보정 루틴으로 다시 맞춥니다.\n" +
             "• 강제 재시작: 홈 + 뒤로 버튼을 꺼질 때까지(7초 이상) 누르기. 효과 없으면 30초.\n" +
             "• Play 서비스가 1위면: 설정 > 애플리케이션 > Google Play 서비스 > 저장공간 > 캐시 지우기 → 재시작 (2026년에 되풀이된 문제의 알려진 해결)\n" +
+            "• 배터리 사용량 1위가 'One UI Watch 홈'인 것 자체는 흔함(화면을 켜 둔 시간의 몫이 홈에 잡힘) — 화면이 꺼진 채 CPU 를 많이 쓰면 지킴이가 '알려진 문제'로 짚음 → 강제 재시작\n" +
             "• 설정 > 디스플레이: Always On Display 끄기, '손목 올려 켜기' 끄기, 화면 자동 꺼짐 짧게\n" +
-            "• Galaxy Wearable 앱 > 워치 설정 > 알림 > 고급 알림 설정: '화면 켜기' 끄기, 필요 없는 앱 알림 끄기\n" +
+            "• Galaxy Wearable 앱 > 워치 설정 > 알림 > 고급 설정: '알림 받으면 화면 켜기' 끄기(알림은 그대로 옴), 필요 없는 앱 알림 끄기\n" +
             "• \"Hey Google\"·빅스비 음성 호출 끄기, 설정 > 버튼 및 제스처 > 손목 올려 말하기 끄기\n" +
             "• 삼성 헬스: 자동 심박 측정 '10분마다', 스트레스 상시 측정 끄기, 수면 중 혈중 산소·피부 온도 끄기(필요한 것만)\n" +
             "• 설정 > 배터리 > 헬스 기능 제한 / 대기 중인 앱\n" +

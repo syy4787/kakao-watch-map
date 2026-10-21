@@ -35,6 +35,8 @@ import java.util.Locale
 /** 사실(facts) → 소견(findings) → 판정(verdict) */
 object Analyzer {
     const val GMS = "com.google.android.gms"
+    /** One UI Watch 홈 (시스템 UI) */
+    const val HOME = "com.samsung.android.wearable.sysui"
 
     private const val DAY_MS = 24 * 3_600_000L
     /** '언제부터' 소견의 갈래 — 범인 앱을 정하지 않는다 ([Finding.blames]) */
@@ -179,8 +181,12 @@ object Analyzer {
         // 6. 추정 전력 순위 + Play 서비스 패턴 + 계산/실측 차이
         if (s != null && s.powerItems.isNotEmpty()) {
             val top = s.powerItems.sortedByDescending { it.mah }.take(10)
+            // One UI Watch 홈이 위쪽이면 흔한 일이라는 설명 — 화면 전력이 앞에 떠 있던 앱(시계 화면을 띄운 홈)의 시간 비율로 나뉘어 잡힌다
+            val homeNote = top.take(3).firstOrNull { it.pkg == HOME }?.let {
+                "One UI Watch 홈이 위쪽인 것은 흔합니다 — 화면을 켜 둔 시간의 전력이 시계 화면을 띄운 홈 몫으로 잡힘. 화면이 꺼진 채 CPU 를 쓰는지는 워치 앱 지킴이가 봅니다"
+            }
             out += Finding("power-top", Severity.INFO, "추정 전력 사용 상위 ${top.size}개",
-                top.mapIndexed { i, p -> "${i + 1}. ${p.display}: ${fmt1(p.mah)} mAh${p.percent?.let { " (${pct(it)}%)" } ?: ""}" },
+                top.mapIndexed { i, p -> "${i + 1}. ${p.display}: ${fmt1(p.mah)} mAh${p.percent?.let { " (${pct(it)}%)" } ?: ""}" } + listOfNotNull(homeNote),
                 packages = top.mapNotNull { it.pkg }, source = "dumpsys batterystats 'Estimated power use' — 시스템이 모델로 추정한 값(실측 아님)", category = "info")
             val total = s.computedDrainMah ?: s.powerItems.sumOf { it.mah }.takeIf { it > 0 }
             val gms = s.powerItems.filter { it.pkg == GMS }.sumOf { it.mah }
