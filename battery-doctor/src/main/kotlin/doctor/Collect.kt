@@ -46,6 +46,9 @@ data class Snapshot(val dir: File) {
 object Collect {
     const val WATCH_CSV = "/sdcard/Android/data/com.mywatch.kakaomap/files/battery/log.csv"
     const val WATCH_SUMMARY = "/sdcard/Android/data/com.mywatch.kakaomap/files/battery/summary.txt"
+    /** 워치 앱의 셸 전용 받는 곳(DUMP 권한 — 다른 앱은 못 보냄)과 '지금 요약 쓰기' 신호 */
+    const val SHELL_RECEIVER = "com.mywatch.kakaomap/.battery.ShellRestoreReceiver"
+    const val SUMMARY_ACTION = "com.mywatch.kakaomap.battery.SHELL_SUMMARY"
     val DIR_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss")
 
     /** 이름 → `adb shell` 뒤에 붙는 인자 */
@@ -112,6 +115,12 @@ object Collect {
         } else {
             log("워치 배터리 기록이 아직 없습니다 (워치 앱의 '배터리' 화면을 한 번 열면 기록이 시작됩니다)")
         }
+        // 워치 앱 요약을 지금 새로 쓰게 한다 — 하루 한 번 쓴 묵은 요약 대신 지금의 알려진 문제·지표로 보고서와 자동 치료를 고르게
+        log("수집: 워치 앱 요약 새로 쓰기")
+        val refresh = try {
+            adb.run(listOf("shell", "am", "broadcast", "--include-stopped-packages", "-n", SHELL_RECEIVER, "-a", SUMMARY_ACTION), 90)
+        } catch (e: Exception) { Result(-3, "", e.toString()) }
+        if (!refresh.ok || !refresh.out.contains("summary:ok")) log("  워치 앱이 요약을 새로 쓰지 못했습니다(예전 버전이거나 기록 없음) — 있던 요약을 가져옵니다")
         // 워치 앱이 쓴 요약 (있으면)
         val lsSummary = adb.run(listOf("shell", "ls", WATCH_SUMMARY), 30)
         if (lsSummary.ok && lsSummary.out.contains("summary.txt")) {

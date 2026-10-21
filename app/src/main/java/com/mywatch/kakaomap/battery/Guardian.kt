@@ -55,6 +55,8 @@ object Guardian {
     const val ACTION_RESTORE = "com.mywatch.kakaomap.battery.RESTORE"
     /** PC 툴킷이 지킴이 권한을 거두기 전에 보내는 '모두 되돌리기' ([ShellRestoreReceiver]) */
     const val ACTION_SHELL_RESTORE = "com.mywatch.kakaomap.battery.SHELL_RESTORE"
+    /** PC 툴킷이 수집 직전에 보내는 '지금 요약 쓰기' (셸만 — [ShellRestoreReceiver]) */
+    const val ACTION_SHELL_SUMMARY = "com.mywatch.kakaomap.battery.SHELL_SUMMARY"
     /** 잔량 표시 오차 알림의 '보정 루틴 시작' 버튼 */
     const val ACTION_CAL_START = "com.mywatch.kakaomap.battery.CAL_START"
 
@@ -623,8 +625,20 @@ class GuardianReceiver : BroadcastReceiver() {
  */
 class ShellRestoreReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
-        if (intent.action != Guardian.ACTION_SHELL_RESTORE) return
-        val left = runCatching { Guardian.restoreNow(context) }.getOrDefault(emptyList())
-        if (isOrderedBroadcast) resultData = if (left.isEmpty()) "restored" else "left:" + left.joinToString(",")
+        when (intent.action) {
+            Guardian.ACTION_SHELL_RESTORE -> {
+                val left = runCatching { Guardian.restoreNow(context) }.getOrDefault(emptyList())
+                if (isOrderedBroadcast) resultData = if (left.isEmpty()) "restored" else "left:" + left.joinToString(",")
+            }
+            // 요약은 30일 기록·사용 통계를 읽어 몇 초 걸린다 — 메인 스레드를 막지 않게 뒤에서, 끝나면 결과('summary:ok')를 셸에 돌려준다
+            Guardian.ACTION_SHELL_SUMMARY -> {
+                val app = context.applicationContext
+                val pending: PendingResult? = goAsync()
+                Thread {
+                    val ok = runCatching { BatterySummary.writeNow(app, BatteryLog(app)) }.getOrNull() != null
+                    pending?.run { resultData = if (ok) "summary:ok" else "summary:none"; finish() }
+                }.start()
+            }
+        }
     }
 }

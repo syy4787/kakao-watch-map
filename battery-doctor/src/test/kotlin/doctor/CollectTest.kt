@@ -28,6 +28,41 @@ class CollectTest {
         pullable[Collect.WATCH_CSV] = "# battery-log v1\nt,level\n"
     }
 
+    /**
+     * 워치 앱 요약은 가져오기 전에 새로 쓰게 한다(셸만 보낼 수 있는 받는 곳 — 워치 앱 ShellRestoreReceiver) — 하루 한 번 쓴 묵은
+     * 요약이 아니라 지금의 알려진 문제·지표로 보고서와 자동 치료를 고르게
+     */
+    @Test
+    fun theWatchSummaryIsRefreshedBeforeItIsPulled() {
+        val adb = happyAdb().apply {
+            on("shell am broadcast", "Broadcasting: Intent { flg=0x400000 }\nBroadcast completed: result=0, data=\"summary:ok\"\n")
+            on("shell ls " + Collect.WATCH_SUMMARY, Collect.WATCH_SUMMARY + "\n")
+            pullable[Collect.WATCH_SUMMARY] = "[지표] at=1760878800000\n"
+        }
+        val log = ArrayList<String>()
+        Collect.run(adb, tmp.root, bugreport = false, log = { log += it }, now = 1760878865000L)
+        val refresh = adb.calls.indexOfFirst { it.joinToString(" ").contains(Collect.SUMMARY_ACTION) }
+        val list = adb.calls.indexOfFirst { it == listOf("shell", "ls", Collect.WATCH_SUMMARY) }
+        assertTrue(adb.calls.toString(), refresh in 0 until list)
+        assertTrue(adb.calls[refresh].toString(), adb.calls[refresh].containsAll(listOf("-n", Collect.SHELL_RECEIVER)))
+        assertTrue(log.toString(), log.any { it.contains("워치 앱 요약 새로 쓰기") })
+        assertTrue(log.toString(), log.none { it.contains("있던 요약") })
+    }
+
+    /** 예전 워치 앱(이 신호를 모름)이나 실패면 있던 요약을 그대로 가져오고 그렇다고 적는다 */
+    @Test
+    fun anOldWatchAppKeepsItsLastSummary() {
+        val adb = happyAdb().apply {
+            on("shell am broadcast", "Broadcasting: Intent { flg=0x400000 }\nBroadcast completed: result=0\n")
+            on("shell ls " + Collect.WATCH_SUMMARY, Collect.WATCH_SUMMARY + "\n")
+            pullable[Collect.WATCH_SUMMARY] = "[지표] at=1760800000000\n"
+        }
+        val log = ArrayList<String>()
+        val snap = Collect.run(adb, tmp.root, bugreport = false, log = { log += it }, now = 1760878865000L)
+        assertTrue(log.toString(), log.any { it.contains("있던 요약") })
+        assertNotNull(snap.watchSummary)
+    }
+
     @Test
     fun runsEveryCommandAndWritesAFilePerName() {
         val adb = happyAdb()

@@ -110,6 +110,21 @@ object BatterySummary {
         return t.shownDays.joinToString(" · ") { d -> ChangeFinder.day(d.date) + " " + (d.pph?.let { DrainAnalyzer.fmt(it) } ?: "-") } + if (t.exact) " (대기 %/h, 사용 통계 기준)" else " (대기 %/h, 15분 기록 기준)"
     }
 
+    /**
+     * PC 툴킷(셸)이 수집 직전에 부르는 '지금 요약' — 앱별 통계를 하나 남기고(15분 넘게 묵었으면) 알려진 문제까지 새로 본 뒤 쓴다.
+     * 하루 한 번 요약([writeDailyIfDue])을 기다리지 않게. 분석할 기록이 없으면 null
+     */
+    fun writeNow(context: android.content.Context, log: BatteryLog, now: Long = System.currentTimeMillis()): java.io.File? {
+        runCatching { Guardian.snapshotIfStale(context, now) }.onFailure { com.mywatch.kakaomap.data.ErrorLog.record("배터리·지금 요약", it) }
+        val ins = BatteryInsights.compute(context, log.readAll(), now)
+        val a = ins.analysis ?: return null
+        return log.writeSummary(text(a, null, android.os.Build.MODEL ?: "", now, ins))
+    }
+
+    /** 알려진 문제 칸의 값 — 0 없음 · 1 주의 · 2 비정상 */
+    private fun issueCode(insights: Insights, id: String): Double =
+        insights.issues.firstOrNull { it.id == id }?.grade?.let { if (it == com.mywatch.battery.core.Grade.ABNORMAL) 2.0 else 1.0 } ?: 0.0
+
     /** PC 툴킷이 읽는 숫자 한 줄 (조치 추천·치료 전후 비교) — [SummaryMetrics] */
     fun metricsLine(a: Analysis, insights: Insights?, now: Long = System.currentTimeMillis()): String = SummaryMetrics.line(linkedMapOf(
         // 쓴 때 (epoch ms) — PC 툴킷이 지난 수집보다 새 요약인지 본다
@@ -127,7 +142,16 @@ object BatterySummary {
         "notif_wakes" to insights?.wakes?.notificationWakes?.toDouble(),
         "notifications" to insights?.wakes?.notifications?.toDouble(),
         "drift" to a.drift?.driftPoints?.toDouble(),
-    ))
+        // 워치가 최근 2시간 앱별 통계로 짚은 알려진 문제 — 판단할 만큼(55분) 기록이 쌓였을 때만 적는다('없음'과 '모름'을 가르게).
+        // PC 툴킷이 방금 쓴 요약이면 자동 치료(캐시 정리·Play 서비스 다시 시작)를 고르는 데 쓴다
+        "app_window_min" to insights?.appWindowMs?.takeIf { it > 0 }?.let { it / 60_000.0 },
+    ).apply {
+        val ins = insights?.takeIf { it.appWindowMs >= com.mywatch.battery.core.KnownIssues.MIN_WINDOW_MS } ?: return@apply
+        put("issue_gms", issueCode(ins, com.mywatch.battery.core.KnownIssues.PLAY_SERVICES_LOOP))
+        put("issue_home", issueCode(ins, com.mywatch.battery.core.KnownIssues.HOME_HOG))
+        put("issue_face", issueCode(ins, com.mywatch.battery.core.KnownIssues.WATCH_FACE_HEAVY))
+        put("issue_back", if (ins.issues.any { it.cameBack }) 1.0 else 0.0)
+    })
 
     /** summary.txt 본문 */
     fun text(a: Analysis, live: BatterySample?, model: String, now: Long = System.currentTimeMillis(), insights: Insights? = null): String = buildString {

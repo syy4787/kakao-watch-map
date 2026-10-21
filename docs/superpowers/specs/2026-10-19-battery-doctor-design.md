@@ -161,6 +161,14 @@ Kotlin/JVM 17 CLI, 의존성은 kotlin-stdlib + battery-core만(JSON은 직접 �
 모두 `adb -s <serial> shell …`, 각각 `<이름>.txt`로. 실패해도 다음으로 넘어가고 보고서에 "수집 실패"로 표시.
 
 `getprop`, `dumpsys battery`, `dumpsys batterystats`(기본 텍스트), `dumpsys batterystats --checkin`, `dumpsys power`, `dumpsys alarm`, `dumpsys sensorservice`, `dumpsys location`, `dumpsys deviceidle`, `dumpsys jobscheduler`, `dumpsys activity service WearableService`, `dumpsys package com.google.android.gms`, `pm list packages -U`, `pm list packages -e`, `pm list packages -d`, `pm list packages -3`, `settings list global`, `settings list secure`, `settings list system`, `cmd deviceidle whitelist`, `date +%s`, 워치 CSV(`/sdcard/Android/data/com.mywatch.kakaomap/files/battery/log.csv` → `adb pull`). `--bugreport`면 `adb bugreport <snapshot>/bugreport.zip`.
+워치 앱 요약(`summary.txt`)은 가져오기 전에 **새로 쓰게 한다**(9차, 2026-10-22): `am broadcast -n com.mywatch.kakaomap/.battery.ShellRestoreReceiver
+-a com.mywatch.kakaomap.battery.SHELL_SUMMARY` — 셸만 보낼 수 있는 받는 곳(DUMP 권한)이 앱별 통계를 하나 남기고(15분 넘게 묵었으면) 알려진
+문제까지 새로 본 뒤 뒤에서 쓰고 `summary:ok` 를 돌려준다(`BatterySummary.writeNow`). 예전 앱·기록 없음이면 있던 요약을 그대로 가져온다.
+요약의 '[지표]' 줄엔 워치가 최근 2시간 앱별 통계로 짚은 알려진 문제(`issue_gms`·`issue_home`·`issue_face` = 0 없음·1 주의·2 비정상,
+`issue_back` = 재시작 뒤에도 또 나타남, `app_window_min` = 판단한 창 — 55분이 안 되면 문제 칸은 적지 않아 '없음'과 '모름'을 가른다).
+분석은 3시간 안에 쓴 요약이고 창이 55분 이상이면 `watch-gms`(Play 서비스를 범인으로 → 자동 치료가 캐시 정리·Play 서비스 다시 시작)·
+`watch-home`(홈은 시스템 앱이라 범인으로 제한하지 않고 '모든 앱 캐시 정리'만 추천 — 홈 캐시 삭제 단계를 대신, 판정은 하드웨어 의심이 아니라
+소프트웨어, 할 일 맨 앞에 홈 해결 순서) 소견을 낸다 — 이 보고서의 충전 뒤 통계에선 Play 서비스 몫이 15% 아래여도 워치가 방금 짚은 것을 쓴다.
 
 ### 파서 (각각 단위 테스트, 입력은 견본 덤프 + 사용자 실제 덤프가 오면 교체)
 

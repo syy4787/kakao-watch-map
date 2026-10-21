@@ -465,6 +465,54 @@ class AnalyzerTest {
     }
 
     /**
+     * 워치 앱이 방금 쓴 요약의 알려진 문제(최근 2시간 앱별 통계로 짚음)를 PC 도 쓴다 — 충전 뒤 통계(이 보고서)에선 Play 서비스 몫이 15%
+     * 아래여도 자동 치료가 캐시 정리·Play 서비스 다시 시작을 고르게. 3시간 넘게 묵은 요약은 쓰지 않는다
+     */
+    @Test
+    fun aFreshWatchFindingFlagsPlayServicesForTheTreatment() {
+        val now = 1792414865000L
+        val gms = PackageInfo(Analyzer.GMS, 10045, true, false)
+        val f = Facts(collectedAt = now, packages = listOf(gms),
+            watchMetrics = mapOf("at" to (now - 10 * 60_000L).toDouble(), "issue_gms" to 2.0, "app_window_min" to 120.0))
+        val fs = Analyzer.findings(f)
+        val w = fs.single { it.id == "watch-gms" }
+        assertEquals(Severity.ABNORMAL, w.severity)
+        assertTrue(w.blames && Analyzer.GMS in w.packages)
+        val levers = doctor.fix.Catalog.levers(f, fs)
+        assertTrue(levers.single { it.id == "trim-caches" }.recommended)
+        assertTrue(levers.any { it.id == "gms-restart" })
+        val plan = Treat.decide(levers, strong = false)
+        assertTrue(plan.apply.map { it.id }.toString(), plan.apply.any { it.id == "trim-caches" })
+        // 묵은 요약(3시간 넘음)·창이 짧은 요약은 쓰지 않는다
+        val stale = f.copy(watchMetrics = f.watchMetrics + ("at" to (now - 4 * 3_600_000L).toDouble()))
+        assertTrue(Analyzer.findings(stale).none { it.id == "watch-gms" })
+        val short = f.copy(watchMetrics = f.watchMetrics + ("app_window_min" to 30.0))
+        assertTrue(Analyzer.findings(short).none { it.id == "watch-gms" })
+    }
+
+    /** 워치가 One UI Watch 홈 과소모를 짚었으면: 홈을 범인으로 제한하지는 않고(시스템 앱) 모든 앱 캐시 정리(홈 캐시 포함)를 추천 */
+    @Test
+    fun aFreshWatchHomeFindingRecommendsTheCacheTrimWithoutBlamingTheHome() {
+        val now = 1792414865000L
+        val f = Facts(collectedAt = now, packages = listOf(PackageInfo(Analyzer.HOME, 10123, true, false)),
+            watchMetrics = mapOf("at" to (now - 5 * 60_000L).toDouble(), "issue_home" to 2.0, "issue_back" to 1.0, "app_window_min" to 60.0))
+        val fs = Analyzer.findings(f)
+        val w = fs.single { it.id == "watch-home" }
+        assertEquals(Severity.ABNORMAL, w.severity)
+        assertFalse(w.blames && w.packages.isNotEmpty())
+        assertTrue(w.title, w.title.contains("재시작 뒤에도"))
+        assertTrue(w.evidence.toString(), w.evidence.any { it.contains("강제 재시작") })
+        val levers = doctor.fix.Catalog.levers(f, fs)
+        assertTrue(levers.single { it.id == "trim-caches" }.recommended)
+        assertTrue(levers.none { Analyzer.HOME in it.packages && it.id != "trim-caches" })
+        // 판정은 '하드웨어 의심'이 아니라 소프트웨어 — 앱·알람·센서가 조용해 보여도 워치가 홈을 짚었다
+        val vf = facts().copy(watchMetrics = mapOf("at" to (this.now - 5 * 60_000L).toDouble(), "issue_home" to 2.0, "app_window_min" to 60.0))
+        val v = Analyzer.verdict(vf, Analyzer.findings(vf) + Finding("rate-24h", Severity.ABNORMAL, "24시간 시간당 6.0%", emptyList(), category = "drain"))
+        assertEquals(Cause.SOFTWARE, v.cause)
+        assertTrue(v.todo.toString(), v.todo.first().contains("One UI Watch 홈"))
+    }
+
+    /**
      * One UI Watch 홈이 시스템 uid(1000)를 같이 쓰면 앱별 통계에서 홈만 따로 셀 수 없다 — 보고서가 그렇다고 알려 준다
      * (워치 앱의 '홈 과소모'도 못 짚음 → 워치 배터리 사용량 화면에서 직접 보라고). 따로 쓰면 조용히
      */
