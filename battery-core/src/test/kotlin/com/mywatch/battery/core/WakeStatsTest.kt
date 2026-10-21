@@ -47,9 +47,11 @@ class WakeStatsTest {
         // 낮(9~17시 UTC)의 짧은 켜짐은 시계를 본 것 — 손목 올려 켜기를 끄라고 하지 않는다
         assertTrue(advice.toString(), advice.none { it.contains("손목") })
         assertTrue(advice.toString(), advice.any { it.contains("알림") && it.contains("com.kakao.talk") })
+        // 알림은 그대로 받고 화면만 안 켜지게 — 삼성 안내의 이름 그대로 (웨어러블 앱 › 워치 설정 › 알림 › 고급 설정 › '알림 받으면 화면 켜기')
         val (title, detail) = w.notificationTodo()!!
         assertTrue(title, title.contains("60번") && TodoText.fitsTitle(title))
-        assertTrue(detail, detail.contains("com.kakao") && TodoText.fitsDetail(detail))
+        assertTrue(detail, detail.contains("고급 설정") && detail.contains("'알림 받으면 화면 켜기' 끄기") && TodoText.fitsDetail(detail))
+        assertTrue(advice.toString(), advice.any { it.contains("'알림 받으면 화면 켜기'") && it.contains("알림은 그대로") })
     }
 
     /**

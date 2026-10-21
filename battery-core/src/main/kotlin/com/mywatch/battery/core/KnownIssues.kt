@@ -30,6 +30,8 @@ object KnownIssues {
     const val GMS = "com.google.android.gms"
     const val PLAY_SERVICES_LOOP = "play-services-loop"
     const val WATCH_FACE_HEAVY = "watch-face-heavy"
+    const val HOME = "com.samsung.android.wearable.sysui"
+    const val HOME_HOG = "watch-home-hog"
     const val SHARE = 0.4
 
     /** 삼성·구글 기본 시계 화면과 Watch Face Format 렌더러 — 시계 화면 문제로 짚지 않는다 */
@@ -44,7 +46,7 @@ object KnownIssues {
      * [watchFace] = 지금 시계 화면의 패키지 (모르면 null), [windowMs] = 순위를 모은 시간 — 시계 화면은 늘 '보이는' 상태라
      * 화면 밖 CPU 표시가 붙지 않으므로 CPU 를 시간당으로 따로 본다
      */
-    fun detect(ranks: List<AppDrainRank>, watchFace: String? = null, windowMs: Long? = null): List<KnownIssue> {
+    fun detect(ranks: List<AppDrainRank>, watchFace: String? = null, windowMs: Long? = null, screenOnMs: Long? = null): List<KnownIssue> {
         if (ranks.isEmpty()) return emptyList()
         val total = ranks.sumOf { it.score }
         val out = ArrayList<KnownIssue>()
@@ -89,6 +91,46 @@ object KnownIssues {
                 }
             }
         }
+        // One UI Watch 홈(시스템 UI): 늘 '보이는' 프로세스라 화면 밖 CPU 표시가 안 붙는다 → 화면이 켜져 있던 동안 홈 화면·알림·타일을
+        // 그렸을 몫([HOME_SCREEN_CPU_SHARE])을 빼고 남은 CPU 를 시간당으로 본다. 화면 켜진 시간을 모르거나 오래 켜고 썼으면 짚지 않는다
+        if (windowMs != null && windowMs > 0 && screenOnMs != null && screenOnMs <= windowMs * HOME_MAX_SCREEN_SHARE) {
+            ranks.withIndex().firstOrNull { (_, r) -> r.use.pkg.substringBefore('+') == HOME }?.let { (i, r) ->
+                val hours = (windowMs / 3_600_000.0).coerceAtLeast(0.25)
+                val idleCpuMs = (r.use.cpuMs - screenOnMs * HOME_SCREEN_CPU_SHARE).coerceAtLeast(0.0)
+                val perH = idleCpuMs / hours
+                val cpuGrade = when {
+                    perH > AppDrain.CPU_ABNORMAL_MS_PER_H -> Grade.ABNORMAL
+                    perH > AppDrain.CPU_CAUTION_MS_PER_H -> Grade.CAUTION
+                    else -> Grade.NORMAL
+                }
+                val grade = Grade.worst(listOf(cpuGrade, r.grade))
+                if (grade != Grade.NORMAL && (i == 0 || r.score >= total * SHARE)) {
+                    val cpuNote = "화면이 거의 꺼져 있던 ${fmtHours(hours)} 동안 CPU ${(r.use.cpuMs / 60_000).toInt()}분 (화면 켜짐 ${(screenOnMs / 60_000).toInt()}분)"
+                    out += KnownIssue(
+                        HOME_HOG, HOME,
+                        "One UI Watch 홈이 화면 꺼진 채 많이 씀 — 2026년 업데이트 뒤 보고된 문제",
+                        (listOf(cpuNote) + r.flags.filter { it != "이 앱" }).joinToString(" · "),
+                        listOf(
+                            "홈 + 뒤로 버튼을 꺼질 때까지(7초 이상) 눌러 강제 재시작 — 보통 재시작으론 안 풀리고 강제 재시작으로 나아졌다는 보고가 있습니다",
+                            "업데이트한 지 며칠 안 됐으면 적응 기간일 수 있습니다 — 충전기 위에서 하룻밤 지나도 그대로면 다음 단계",
+                            "설정 › 애플리케이션 › One UI Watch 홈 › 저장공간 › 캐시 지우기 (데이터 지우기는 하지 마세요 — 홈 화면 배치가 초기화됩니다)",
+                            "계속되면 Samsung Members 앱으로 오류 보고(삼성 안내) — 고쳐질 때까지 밤엔 지킴이 밤 모드",
+                        ),
+                        grade,
+                        todo = "One UI Watch 홈 과소모" to "홈+뒤로 버튼 7초 넘게 눌러 강제 재시작 → 그대로면 홈 앱 캐시만 지우기",
+                        tile = "One UI Watch 홈 과소모 — 강제 재시작",
+                    )
+                }
+            }
+        }
         return out
     }
+
+    /** 화면이 켜져 있던 동안 홈이 쓸 만한 CPU — 화면 켜짐 시간의 이 몫까지는 홈 화면·알림·타일을 그린 것으로 본다 */
+    const val HOME_SCREEN_CPU_SHARE = 0.5
+
+    /** 창의 이만큼 넘게 화면이 켜져 있었으면 홈을 짚지 않는다 (홈을 쓴 것) */
+    const val HOME_MAX_SCREEN_SHARE = 0.3
+
+    private fun fmtHours(h: Double): String = if (h >= 1.0) "${DrainAnalyzer.fmt(h)}시간".replace(".0시간", "시간") else "${(h * 60).toInt()}분"
 }

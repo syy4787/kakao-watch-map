@@ -91,4 +91,43 @@ class KnownIssuesTest {
         assertTrue(KnownIssues.isSystemFace("com.google.wear.watchface.runtime"))
         assertTrue(!KnownIssues.isSystemFace(face))
     }
+
+    /**
+     * One UI Watch 홈(시스템 UI, com.samsung.android.wearable.sysui)이 화면이 거의 꺼져 있던 동안 CPU 를 많이 쓰면 짚는다 —
+     * 2026년 9~10월 워치9·One UI 9 업데이트 뒤 '배터리 1위가 One UI Watch 홈', 보통 재시작으론 안 풀리고 강제 재시작으로 나아졌다는
+     * 보고(삼성 커뮤니티). 홈은 늘 '보이는' 프로세스라 화면 밖 CPU 표시가 안 붙으므로, 화면이 켜져 있던 시간만큼은 빼고 본다
+     */
+    @Test
+    fun theWatchHomeBurningCpuWithTheScreenOffIsAKnownIssue() {
+        val home = KnownIssues.HOME
+        val ranks = AppDrain.rank(
+            listOf(
+                UidUse(home, cpuMs = 24 * 60_000L, fgMs = 2 * h),
+                UidUse("com.samsung.android.wear.shealth", sensorMs = 60 * 60_000L, cpuMs = 2 * 60_000L),
+            ),
+            2 * h,
+        )
+        // 홈 자체의 등급은 '정상' (화면 밖 CPU 표시가 안 붙는다) — 그래서 따로 본다
+        assertEquals(Grade.NORMAL, ranks.first { it.use.pkg == home }.grade)
+        val i = KnownIssues.detect(ranks, windowMs = 2 * h, screenOnMs = 6 * 60_000L).single()
+        assertEquals(KnownIssues.HOME_HOG, i.id)
+        assertEquals(home, i.pkg)
+        assertEquals(Grade.ABNORMAL, i.grade)                            // (24분 − 화면 6분의 절반) ÷ 2시간 ≈ 시간당 10.5분
+        assertTrue(i.steps.first(), i.steps.first().contains("강제 재시작"))
+        assertTrue(i.steps.toString(), i.steps.none { it.contains("데이터 지우기") && !it.contains("하지 마세요") })
+        assertTrue(i.why, i.why.contains("CPU") && i.why.contains("화면 켜짐 6분"))
+        assertTrue(i.tile!!, i.tile!!.contains("강제 재시작"))
+        // 화면을 오래 켜고 썼으면(2시간 중 40분) 그 CPU 는 홈 화면·알림·타일을 그린 것
+        assertTrue(KnownIssues.detect(ranks, windowMs = 2 * h, screenOnMs = 40 * 60_000L).isEmpty())
+        // 화면 켜진 시간을 모르면(사용 통계 권한 없음) 짚지 않는다
+        assertTrue(KnownIssues.detect(ranks, windowMs = 2 * h).isEmpty())
+        // 시간당 4분이면 주의, 1분이면 그대로
+        val warm = AppDrain.rank(listOf(UidUse(home, cpuMs = 10 * 60_000L, fgMs = 2 * h)), 2 * h)
+        assertEquals(Grade.CAUTION, KnownIssues.detect(warm, windowMs = 2 * h, screenOnMs = 4 * 60_000L).single().grade)
+        val light = AppDrain.rank(listOf(UidUse(home, cpuMs = 4 * 60_000L, fgMs = 2 * h)), 2 * h)
+        assertTrue(KnownIssues.detect(light, windowMs = 2 * h, screenOnMs = 4 * 60_000L).isEmpty())
+        // 다른 앱이 훨씬 많이 쓰면 홈 탓을 하지 않는다
+        val behind = AppDrain.rank(listOf(UidUse(home, cpuMs = 10 * 60_000L, fgMs = 2 * h), UidUse("com.example.drain", wakelockMs = 110 * 60_000L, cpuMs = 40 * 60_000L)), 2 * h)
+        assertTrue(KnownIssues.detect(behind, windowMs = 2 * h, screenOnMs = 4 * 60_000L).none { it.id == KnownIssues.HOME_HOG })
+    }
 }

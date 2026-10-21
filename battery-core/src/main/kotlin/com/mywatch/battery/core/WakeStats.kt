@@ -52,21 +52,23 @@ data class WakeStats(
         "밤에 저절로 켜진 화면 ${nightGestureWakes}번" to
             "취침 모드나 지킴이 '밤에 손목·터치 켜기 끄기'로 밤에만 끄기 (하루 약 ${DrainAnalyzer.fmt(nightGestureCostPercent)}%)"
 
-    /** 알림이 화면을 켠 일이 많을 때 (폰의 Galaxy Wearable 앱) */
+    /**
+     * 알림이 화면을 켠 일이 많을 때 (폰의 Galaxy Wearable 앱). 삼성 안내(배터리가 빨리 닳을 때·알림 설정): 웨어러블 앱 › 워치 설정 ›
+     * 알림 › 고급 설정 › '알림 받으면 화면 켜기'를 끄면 알림은 그대로 오고 화면만 안 켜진다 — 앱 알림을 통째로 끄는 것보다 먼저
+     */
     fun notificationAdvice(label: (String) -> String = { it }): String? {
         if (notificationWakes < Wakes.NOTIF_ADVICE) return null
         val top = topNotifiers.take(2).joinToString(", ") { "${label(it.first)} ${it.second}번" }
-        return "알림이 화면을 ${notificationWakes}번 켬 (많이 보낸 앱: $top) — Galaxy Wearable 앱 > 워치 설정 > 알림 > 고급 알림 설정에서 " +
-            "'화면 켜기'를 끄거나 그 앱의 워치 알림을 끄면 하루 약 ${DrainAnalyzer.fmt(notificationCostPercent)}% 아낍니다"
+        return "알림이 화면을 ${notificationWakes}번 켬 (많이 보낸 앱: $top) — 폰의 Galaxy Wearable 앱 › 워치 설정 › 알림 › 고급 설정에서 " +
+            "'알림 받으면 화면 켜기'를 끄면(알림은 그대로 옴) 하루 약 ${DrainAnalyzer.fmt(notificationCostPercent)}% 아낍니다. " +
+            "한 앱이 대부분이면 그 앱의 워치 알림만 꺼도 됩니다"
     }
 
-    /** [notificationAdvice] 의 '지금 할 일' 줄 — 가장 많이 보낸 앱 하나만 (이름이 길면 줄여) */
-    fun notificationTodo(label: (String) -> String = { it }): Pair<String, String>? {
+    /** [notificationAdvice] 의 '지금 할 일' 줄 — 알림은 그대로 받고 화면만 안 켜지게 (앱 알림을 끄라고 하지 않는다) */
+    fun notificationTodo(): Pair<String, String>? {
         if (notificationWakes < Wakes.NOTIF_ADVICE) return null
-        val save = "(하루 약 ${DrainAnalyzer.fmt(notificationCostPercent)}%)"
-        val top = topNotifiers.firstOrNull()?.let { TodoText.clip(label(it.first)) }
         return "알림이 화면을 ${notificationWakes}번 켬" to
-            (if (top != null) "폰 Galaxy Wearable 앱 › 알림에서 '$top' 끄기 $save" else "폰 Galaxy Wearable 앱 › 알림 › '화면 켜기' 끄기 $save")
+            "웨어러블 앱 › 알림 › 고급 설정 › '알림 받으면 화면 켜기' 끄기 (하루 약 ${DrainAnalyzer.fmt(notificationCostPercent)}%)"
     }
 }
 

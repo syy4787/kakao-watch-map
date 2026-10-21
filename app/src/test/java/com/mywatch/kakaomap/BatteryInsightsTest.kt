@@ -253,6 +253,22 @@ class BatteryInsightsTest {
         assertTrue(rows.filterIsInstance<Row.Action>().any { it.id == BatteryActivity.A_APP_INFO + "com.google.android.gms" })
     }
 
+    /** 배터리 화면을 열 때도 One UI Watch 홈 과소모를 짚는다 — 사용 통계로 본 화면 켜짐 시간을 빼고 (15분 기록과 같은 판단) */
+    @Test
+    fun theWatchHomeHogIsFoundWhenTheScreenOpens() {
+        allowUsage()
+        val home = com.mywatch.battery.core.KnownIssues.HOME
+        val now = at(12)
+        event("android", now - 30 * 60_000L, UsageEvents.Event.SCREEN_INTERACTIVE)
+        event("android", now - 26 * 60_000L, UsageEvents.Event.SCREEN_NON_INTERACTIVE)   // 화면 4분
+        val store = HealthStore(context)
+        store.record(now - 2 * 3_600_000L, mapOf(home to UidUse(home)))
+        store.record(now - 60_000L, mapOf(home to UidUse(home, cpuMs = 28 * 60_000L, fgMs = 2 * 3_600_000L)))
+        val samples = (0..8).map { i -> BatterySample(now - (8 - i) * q, 80 - i / 4) }
+        val ins = com.mywatch.kakaomap.battery.BatteryInsights.compute(context, samples, now, zone)
+        assertTrue(ins.issues.toString(), ins.issues.any { it.id == com.mywatch.battery.core.KnownIssues.HOME_HOG })
+    }
+
     /** 타사 시계 화면이 웨이크락·CPU 를 많이 쓰면 배터리 화면에 '기본 시계 화면으로 바꿔 비교'를, 맨 위엔 지금 시계 화면 이름을 */
     @Test
     fun aHeavyThirdPartyWatchFaceIsShownWithTheFix() {
@@ -311,8 +327,8 @@ class BatteryInsightsTest {
         assertTrue(todo[0].title, todo[0].title.startsWith("밤에 저절로 켜진 화면"))
         assertTrue(todo[0].sub ?: "", (todo[0].sub ?: "").contains("밤에만"))
         assertTrue(todo[1].title, todo[1].title.contains("알림이 화면을 60번"))
-        // 가장 많이 보낸 앱 (이름을 모르면 패키지 이름을 줄에 맞게 줄여)
-        assertTrue(todo[1].sub ?: "", (todo[1].sub ?: "").contains("com.kakao"))
+        // 알림은 그대로 받고 화면만 안 켜지게 — 삼성 안내 이름 그대로 (앱 알림을 통째로 끄라고 하지 않는다)
+        assertTrue(todo[1].sub ?: "", (todo[1].sub ?: "").contains("'알림 받으면 화면 켜기' 끄기"))
     }
 
     /** 밤사이 뒤에서 쓴 앱과, 삼성 헬스가 밤새 센서를 켜 두면 측정 설정 할 일 */

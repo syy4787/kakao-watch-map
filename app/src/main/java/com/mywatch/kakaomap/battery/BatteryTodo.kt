@@ -68,7 +68,7 @@ object BatteryTodo {
         ins.wakes?.let { w ->
             // 밤에 저절로 켜진 화면 — 밤에만 끄는 길(취침 모드·이 화면의 지킴이 설정)을 권하므로 설정 바로 가기는 두지 않는다
             w.gestureTodo()?.let { out += todo(it, Grade.CAUTION) }
-            w.notificationTodo(label)?.let { out += todo(it, Grade.CAUTION) }
+            w.notificationTodo()?.let { out += todo(it, Grade.CAUTION) }
         }
         ins.night?.todos?.forEach { out += todo(it, Grade.CAUTION) }
         if (!permitted) {

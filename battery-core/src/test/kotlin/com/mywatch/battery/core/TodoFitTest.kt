@@ -20,6 +20,9 @@ class TodoFitTest {
         issues.forEach { fits(it.todo) }
         // 캐시만 — '데이터'가 잘려 '데이터 지…'로 읽히지 않게
         assertTrue(issues[0].todo!!.second.contains("캐시만"))
+        val home = AppDrainRank(UidUse(KnownIssues.HOME, cpuMs = 40 * 60_000L, fgMs = 2 * 3_600_000L), 1e8, emptyList(), Grade.NORMAL)
+        val homeIssue = KnownIssues.detect(listOf(home), windowMs = 2 * 3_600_000L, screenOnMs = 60_000L).single()
+        fits(homeIssue.todo)
     }
 
     @Test
@@ -31,7 +34,6 @@ class TodoFitTest {
     fun wakes() {
         val w = WakeStats(400, 300, 120, 200, 600_000L, 150, listOf("com.example.very.long.notifier" to 120), 20.0, 40, 120_000L)
         fits(w.gestureTodo())
-        fits(w.notificationTodo { "Samsung Galaxy Wearable Plugin Service" })
-        fits(w.notificationTodo { "카카오톡" })
+        fits(w.notificationTodo())
     }
 }
