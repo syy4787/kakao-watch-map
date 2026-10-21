@@ -4,6 +4,13 @@ import doctor.AdbRunner
 
 /** 조치 적용·되돌리기. 모든 적용은 이전 상태와 함께 [Journal] 에 남는다 */
 object Fixer {
+    private const val WSS = "android.permission.WRITE_SECURE_SETTINGS"
+    /** 앱의 '모두 되돌리기' (셸만 보낼 수 있는 받는 곳 — 워치 앱 ShellRestoreReceiver) */
+    val RESTORE_BROADCAST = listOf(
+        "shell", "am", "broadcast", "--include-stopped-packages",
+        "-n", "${doctor.Grant.PKG}/.battery.ShellRestoreReceiver", "-a", "${doctor.Grant.PKG}.battery.SHELL_RESTORE",
+    )
+
     /** 마지막 실패 사유(화면 표시용) */
     @Volatile var lastError: String? = null
 
@@ -39,6 +46,11 @@ object Fixer {
             val e = entries[i]
             if (e.undone) continue
             val cmds = e.undo ?: continue
+            // 지킴이 권한(WRITE_SECURE_SETTINGS)을 거두기 전에 앱이 바꿔 둔 설정(밤 모드의 AOD·손목 올려 켜기·절전 등)을 되돌리게 한다 —
+            // 거둔 뒤엔 앱이 되돌릴 수 없다. 앱이 예전 버전이라 받는 곳이 없어도 그냥 지나간다
+            if (cmds.any { it.takeLast(2) == listOf(doctor.Grant.PKG, WSS) && "revoke" in it }) {
+                runCatching { adb.run(RESTORE_BROADCAST, 30) }
+            }
             var ok = true
             for (cmd in cmds) {
                 val r = try { adb.run(cmd, 120) } catch (ex: Exception) { doctor.Result(-3, "", ex.toString()) }

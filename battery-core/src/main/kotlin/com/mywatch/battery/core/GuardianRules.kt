@@ -94,6 +94,11 @@ object GuardianRules {
         screenOffMs: Long? = null,
         /** 최근 2시간 중 화면이 켜져 있던 시간(사용 통계) — 비정상 소모 판단에 */
         screenOnMs2h: Long? = null,
+        /**
+         * 이 앱의 길 안내 중이거나 최근 2시간 안에 안내했다 — 그동안은 밤·비정상 모드를 켜지 않고 켜 둔 것도 푼다
+         * (안내의 GPS·LTE 소모를 '비정상'으로 읽어 절전을 켜거나, 밤 안내 중 손목 올려 켜기를 끄지 않게)
+         */
+        navigating: Boolean = false,
     ): Pair<List<GuardianAction>, GuardianState> {
         val actions = ArrayList<GuardianAction>()
         var s = st
@@ -129,22 +134,22 @@ object GuardianRules {
             // 아침 2시간 안에 화면을 봤다 = 일어났다. 15분 표본이 놓친 짧은 켜짐도 사용 통계(화면 꺼진 시간)로 안다
             val lookedJustNow = latest?.interactive == true || (screenOffMs != null && screenOffMs < WAKE_SEEN_MS)
             val wakingUp = lookedJustNow && minutesUntil(minuteOfDay, cfg.nightEndMin) <= 120
-            if (!inNight || charging || wakingUp) {
+            if (!inNight || charging || wakingUp || navigating) {
                 actions += GuardianAction.NightOff
                 s = s.copy(nightActive = false, saverSeenOn = false)
             }
-        } else if (cfg.anyNight && inNight && !charging && !overridden && screenOff >= SCREEN_OFF_BEFORE_NIGHT_MS && !s.abnormalActive) {
+        } else if (cfg.anyNight && inNight && !charging && !overridden && !navigating && screenOff >= SCREEN_OFF_BEFORE_NIGHT_MS && !s.abnormalActive) {
             actions += GuardianAction.NightOn
             s = s.copy(nightActive = true, nightSince = now, saverSeenOn = false)
         }
 
         // 3. 비정상 소모 — 밤 모드가 아닐 때만 (밤엔 이미 절전)
         if (s.abnormalActive) {
-            if (charging || now - s.abnormalSince >= ABNORMAL_MAX_MS) {
+            if (charging || navigating || now - s.abnormalSince >= ABNORMAL_MAX_MS) {
                 actions += GuardianAction.AbnormalOff
                 s = s.copy(abnormalActive = false, saverSeenOn = false)
             }
-        } else if (cfg.abnormalSaver && !s.nightActive && !charging && !overridden) {
+        } else if (cfg.abnormalSaver && !s.nightActive && !charging && !overridden && !navigating) {
             val a = AlertRule.check(samples, now, lastAlertAt = null, screenOnMs = screenOnMs2h)
             if (a != null) {
                 val notify = now - s.lastAbnormalNotifyAt >= ABNORMAL_NOTIFY_COOLDOWN_MS

@@ -83,6 +83,8 @@ class GrantTest {
             "shell appops set $pkg GET_USAGE_STATS default",
             "shell pm revoke $pkg android.permission.READ_LOGS",
             "shell pm revoke $pkg android.permission.DUMP",
+            // 지킴이 권한을 거두기 전에 바꿔 둔 설정(밤 모드 등)을 앱이 되돌리게 한다 — 거둔 뒤엔 되돌릴 수 없다 (점검에서 찾음)
+            "shell am broadcast --include-stopped-packages -n $pkg/.battery.ShellRestoreReceiver -a $pkg.battery.SHELL_RESTORE",
             "shell pm revoke $pkg android.permission.WRITE_SECURE_SETTINGS",
             "shell pm revoke $pkg android.permission.BATTERY_STATS",
         ), adb.joined())

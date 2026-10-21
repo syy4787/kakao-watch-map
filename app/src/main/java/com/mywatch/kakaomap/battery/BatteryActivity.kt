@@ -377,7 +377,12 @@ class BatteryActivity : ComponentActivity() {
         if (row !is Row.Action) return
         when {
             row.id == A_RESTORE -> {
-                lifecycleScope.launch { withContext(Dispatchers.IO) { runCatching { Guardian.restoreNow(this@BatteryActivity) } }; notice = "원래대로 되돌렸습니다 (12시간 쉼)"; render() }
+                lifecycleScope.launch {
+                    val left = withContext(Dispatchers.IO) { runCatching { Guardian.restoreNow(this@BatteryActivity) }.getOrDefault(emptyList()) }
+                    // 권한이 없어 되돌리지 못한 것이 있으면 '되돌렸습니다'라 하지 않는다
+                    notice = if (left.isEmpty()) "원래대로 되돌렸습니다 (12시간 쉼)" else "권한이 없어 직접 되돌릴 것: ${left.joinToString(" · ")}"
+                    render()
+                }
             }
             row.id.startsWith(A_TOGGLE) -> {
                 val cfg = Guardian.config(this)

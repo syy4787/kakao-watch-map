@@ -118,6 +118,25 @@ class GuardianRulesTest {
         assertEquals(listOf<GuardianAction>(GuardianAction.UserOverride), a5)
     }
 
+    /**
+     * 길 안내 중(또는 막 끝나 최근 2시간에 안내가 있었음)엔 지킴이가 손대지 않는다 — 버스·기차 2시간 안내(화면 꺼진 채 GPS·LTE)가
+     * '비정상 소모'로 절전을 켜고, 밤 안내 중 손목 올려 켜기를 꺼 다음 갈림길을 못 보던 것. 이미 켜 둔 밤·비정상 모드는 풀어 준다 (점검에서 찾음)
+     */
+    @Test
+    fun navigationKeepsTheGuardiansHandsOff() {
+        val night = at(0, 30)
+        val (a1, s1) = GuardianRules.decide(night, zone, cfg, GuardianState(), drain(night, 8, 60.0, 2.0), null, saverOnNow = false, navigating = true)
+        assertTrue(a1.isEmpty()); assertFalse(s1.nightActive)
+        val day = at(14, 0)
+        val (a2, s2) = GuardianRules.decide(day, zone, cfg, GuardianState(), drain(day, 9, 80.0, 6.0), null, saverOnNow = false, navigating = true)
+        assertTrue(a2.isEmpty()); assertFalse(s2.abnormalActive)
+        // 이미 켜 둔 것은 푼다
+        val (a3, s3) = GuardianRules.decide(at(1, 0), zone, cfg, GuardianState(nightActive = true, nightSince = night), drain(at(1, 0), 8, 60.0, 2.0), null, true, navigating = true)
+        assertEquals(listOf<GuardianAction>(GuardianAction.NightOff), a3); assertFalse(s3.nightActive)
+        val (a4, s4) = GuardianRules.decide(day, zone, cfg, GuardianState(abnormalActive = true, abnormalSince = day - q), drain(day, 9, 80.0, 6.0), null, true, navigating = true)
+        assertEquals(listOf<GuardianAction>(GuardianAction.AbnormalOff), a4); assertFalse(s4.abnormalActive)
+    }
+
     @Test
     fun abnormalDaytimeDrainTurnsSaverOnOnceAndNotifiesWithCooldown() {
         val now = at(14, 0)

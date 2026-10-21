@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.os.PowerManager
 import android.provider.Settings
+import androidx.annotation.VisibleForTesting
 import com.mywatch.battery.core.GuardianConfig
 import com.mywatch.kakaomap.data.ErrorLog
 
@@ -41,7 +42,7 @@ class Levers(context: Context) {
     }.getOrNull()
 
     /** 쓰기 성공 여부 (권한이 없으면 false — 예외는 삼킨다) */
-    fun write(key: Key, value: String): Boolean = runCatching {
+    fun write(key: Key, value: String): Boolean = writeHook?.invoke(key, value) ?: runCatching {
         when (key.table) {
             Table.GLOBAL -> Settings.Global.putString(cr, key.name, value)
             Table.SECURE -> Settings.Secure.putString(cr, key.name, value)
@@ -86,8 +87,8 @@ class Levers(context: Context) {
         wakeLabel(tilt, touch)?.let { done += "$it 켜기 복구" }
         if (putBack(B_HOTWORD, HOTWORD)) done += "'Hey Google' 복구"
         if (putBack(B_LOCATION, LOCATION)) done += "위치 복구"
-        recall(B_SYNC)?.let { v -> if (setSync(v == "1")) done += "동기화 복구" }
-        recall(B_SAVER)?.let { v -> if (setSaver(v == "1")) done += "절전 복구" }
+        restoreSlot(B_SYNC) { v -> setSync(v == "1") }?.let { if (it) done += "동기화 복구" }
+        restoreSlot(B_SAVER) { v -> restoreSaver(v) }?.let { if (it) done += "절전 복구" }
         return done
     }
 
@@ -106,7 +107,7 @@ class Levers(context: Context) {
         return setSaver(true)
     }
 
-    fun restoreAbnormal(): Boolean = recall(B_SAVER)?.let { setSaver(it == "1") } ?: false
+    fun restoreAbnormal(): Boolean = restoreSlot(B_SAVER) { v -> restoreSaver(v) } ?: false
 
     /** 전부 원래대로. [keepSaver] 면 절전은 사용자가 손수 바꾼 것이라 건드리지 않고 기억만 지운다 */
     fun restoreAll(keepSaver: Boolean = false) {
@@ -115,8 +116,30 @@ class Levers(context: Context) {
         putBack(B_TOUCH, TOUCH)
         putBack(B_HOTWORD, HOTWORD)
         putBack(B_LOCATION, LOCATION)
-        recall(B_SYNC)?.let { v -> setSync(v == "1") }
-        recall(B_SAVER)?.let { v -> if (!keepSaver) setSaver(v == "1") }
+        restoreSlot(B_SYNC) { v -> setSync(v == "1") }
+        if (keepSaver) prefs.edit().remove(B_SAVER).apply() else restoreSlot(B_SAVER) { v -> restoreSaver(v) }
+    }
+
+    /**
+     * 권한(WRITE_SECURE_SETTINGS)이 없어져 되돌릴 수 없을 때: 지금도 우리가 둔 값인 설정을 사용자가 직접 되돌릴 일로 돌려주고
+     * (동기화는 권한 없이 되돌린다) 기억을 모두 지운다 — 손을 떼고 사용자에게 맡긴다. 이미 원래대로면 넣지 않는다
+     */
+    fun releaseWithoutPermission(): List<String> {
+        val todo = ArrayList<String>()
+        fun held(slot: String, key: Key?, label: String) {
+            val v = prefs.getString(slot, null) ?: return
+            val now = key?.let { read(it) } ?: return
+            if (now != v && now == "0") todo += label
+        }
+        held(B_AOD, aodKey, "AOD 켜기")
+        held(B_TILT, TILT, "손목 올려 켜기")
+        held(B_TOUCH, TOUCH, "화면 터치로 켜기")
+        held(B_HOTWORD, HOTWORD, "'Hey Google' 켜기")
+        held(B_LOCATION, LOCATION, "위치 켜기")
+        prefs.getString(B_SYNC, null)?.let { v -> if (v == "1" && !syncOn() && !setSync(true)) todo += "계정 동기화 켜기" }
+        prefs.getString(B_SAVER, null)?.let { v -> if (v == "0" && saverOn()) todo += "절전 모드 끄기" }
+        prefs.edit().apply { SLOTS.forEach { remove(it) } }.apply()
+        return todo
     }
 
     /** 우리가 무언가를 바꿔 둔 상태인가 */
@@ -164,6 +187,16 @@ class Levers(context: Context) {
 
     private fun setSaver(on: Boolean): Boolean = write(SAVER, if (on) "1" else "0")
 
+    /**
+     * 절전을 원래 값으로. 원래 꺼져 있었으면 '끈 채 유지(sticky)' 표시도 지운다 — 설정으로 켠 절전은 시스템이 손수 켠 것으로 보고
+     * sticky 를 남겨, 충전기에서 90% 아래로 뺄 때(배터리 보호 90%면 늘) 다시 켜 버린다(AOSP 'Sticky restore')
+     */
+    private fun restoreSaver(v: String): Boolean {
+        val ok = setSaver(v == "1")
+        if (ok && v == "0" && read(SAVER_STICKY) == "1") write(SAVER_STICKY, "0")
+        return ok
+    }
+
     private fun setSync(on: Boolean): Boolean = runCatching { ContentResolver.setMasterSyncAutomatically(on); true }
         .onFailure { ErrorLog.record("배터리·지킴이", "동기화 설정 실패: ${it.javaClass.simpleName}") }.getOrDefault(false)
 
@@ -181,11 +214,23 @@ class Levers(context: Context) {
      * 지금 값이 우리가 둔 값([ours])일 때만 — 그 사이 사용자나 삼성 취침 모드가 바꿨으면 그쪽이 새것이라 건드리지 않는다
      */
     private fun putBack(slot: String, key: Key?, ours: String = "0"): Boolean {
-        val v = recall(slot) ?: return false
-        val k = key ?: return false
+        val v = prefs.getString(slot, null) ?: return false
+        val k = key ?: run { prefs.edit().remove(slot).apply(); return false }
         val now = read(k)
-        if (now == v || now != ours) return false
-        return write(k, v)
+        // 이미 원래 값이거나 그 사이 다른 쪽이 바꿨으면 기억만 지운다
+        if (now == v || now != ours) { prefs.edit().remove(slot).apply(); return false }
+        // 기억은 실제로 되돌렸을 때만 지운다 — 권한이 없어 못 쓰면 남겨 두어 나중에(또는 사용자에게 알려) 되돌린다
+        val ok = write(k, v)
+        if (ok) prefs.edit().remove(slot).apply()
+        return ok
+    }
+
+    /** 기억한 값으로 [restore] 하고, 성공했을 때만 기억을 지운다 (기억이 없으면 null) */
+    private fun restoreSlot(slot: String, restore: (String) -> Boolean): Boolean? {
+        val v = prefs.getString(slot, null) ?: return null
+        val ok = restore(v)
+        if (ok) prefs.edit().remove(slot).apply()
+        return ok
     }
 
     /** 처음 바꿀 때의 값만 기억한다 (두 번 당겨도 원래 값이 남게) */
@@ -195,16 +240,14 @@ class Levers(context: Context) {
         prefs.edit().putString(slot, v).apply()
     }
 
-    /** 기억한 값을 꺼내고 지운다 */
-    private fun recall(slot: String): String? {
-        val v = prefs.getString(slot, null) ?: return null
-        prefs.edit().remove(slot).apply()
-        return v
-    }
-
     companion object {
         /** 안드로이드 절전 모드 (Settings.Global.LOW_POWER_MODE) — 삼성 절전 모드도 이 위에서 돈다 */
         val SAVER = Key(Table.GLOBAL, "low_power")
+        /** Settings.Global.LOW_POWER_MODE_STICKY — 설정으로 켠 절전을 충전 뒤 다시 켜는 표시 */
+        val SAVER_STICKY = Key(Table.GLOBAL, "low_power_sticky")
+
+        /** 시험에서 '쓰기 실패'(권한 없음)를 흉내 낸다 */
+        @VisibleForTesting @Volatile var writeHook: ((Key, String) -> Boolean)? = null
         /** Wear OS 의 Always On Display 키 후보 — 있는 것을 쓴다 */
         val AOD_KEYS = listOf(Key(Table.GLOBAL, "ambient_enabled"), Key(Table.SECURE, "ambient_enabled"), Key(Table.SYSTEM, "ambient_enabled"))
         val LOCATION = Key(Table.SECURE, "location_mode")

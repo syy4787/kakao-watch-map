@@ -192,6 +192,92 @@ class GuardianTest {
         assertEquals(at(2, 0, d = 16), p.getLong("summary_written_at", 0L))
     }
 
+    /** 되돌리다 쓰기에 실패하면(권한 없음 등) 기억을 지우지 않는다 — 다음 기록(밤 모드 아님)에서 다시 되돌린다 (점검에서 찾음) */
+    @Test
+    fun aFailedRestoreKeepsTheMemoryAndRetriesLater() {
+        grant()
+        Settings.Global.putString(cr, "ambient_tilt_to_wake", "1")
+        val levers = Levers(context)
+        levers.applyNight(GuardianConfig(nightSaver = false, nightAodOff = false, nightWakeOff = true))
+        assertEquals("0", Settings.Global.getString(cr, "ambient_tilt_to_wake"))
+        Levers.writeHook = { _, _ -> false }
+        try { levers.restoreNight() } finally { Levers.writeHook = null }
+        assertTrue("기억이 남음", levers.holdsAnything)
+        fill(at(14, 0), 9, 80.0, 1.0)
+        Guardian.tick(context, log, at(14, 0), stats = UidStatsSource { emptyMap() }, zone = zone)
+        assertEquals("1", Settings.Global.getString(cr, "ambient_tilt_to_wake"))
+        assertFalse(levers.holdsAnything)
+    }
+
+    /**
+     * 권한이 없어졌는데(PC '되돌리기 all' 이 거둠) 밤 모드로 바꿔 둔 설정이 남아 있으면: 직접 되돌릴 것을 한 번 알리고 손을 뗀다 —
+     * 타일이 '밤 모드 중'에 영영 머물거나 설정 변화 기록이 멈추지 않게 (점검에서 찾음)
+     */
+    @Test
+    fun losingThePermissionWhileHoldingSettingsTellsWhatToTurnBackOn() {
+        grant()
+        Settings.Global.putString(cr, "ambient_enabled", "1")
+        Settings.Global.putString(cr, "ambient_tilt_to_wake", "1")
+        fill(at(0, 30), 8, 60.0, 2.0)
+        Guardian.tick(context, log, at(0, 30), stats = UidStatsSource { emptyMap() }, zone = zone)
+        assertTrue(Guardian.state(context).nightActive)
+        assertEquals("0", Settings.Global.getString(cr, "ambient_enabled"))
+        shadowOf(context as Application).denyPermissions("android.permission.WRITE_SECURE_SETTINGS")
+        Guardian.tick(context, log, at(0, 45), stats = UidStatsSource { emptyMap() }, zone = zone)
+        assertFalse(Guardian.state(context).nightActive)
+        assertFalse(Levers(context).holdsAnything)
+        val text = shadowOf(nm).getNotification(Guardian.N_RELEASE).extras.getCharSequence(Notification.EXTRA_BIG_TEXT).toString()
+        assertTrue(text, text.contains("AOD 켜기") && text.contains("손목 올려 켜기"))
+    }
+
+    /** 설정으로 켠 절전은 '끈 채 유지(sticky)' 표시가 남아 충전 뒤 다시 켜진다 — 원래 꺼져 있었으면 되돌릴 때 그 표시도 지운다 (점검에서 찾음) */
+    @Test
+    fun restoringTheSaverClearsItsStickyFlag() {
+        grant()
+        Settings.Global.putInt(cr, "low_power", 0)
+        val levers = Levers(context)
+        assertTrue(levers.applyAbnormal())
+        Settings.Global.putInt(cr, "low_power_sticky", 1)
+        assertTrue(levers.restoreAbnormal())
+        assertEquals("0", Settings.Global.getString(cr, "low_power"))
+        assertEquals("0", Settings.Global.getString(cr, "low_power_sticky"))
+        // sticky 설정이 없는 워치엔 만들지 않는다
+        Settings.Global.putString(cr, "low_power_sticky", null)
+        assertTrue(levers.applyAbnormal())
+        assertTrue(levers.restoreAbnormal())
+        assertNull(Settings.Global.getString(cr, "low_power_sticky"))
+    }
+
+    /** PC 툴킷이 권한을 거두기 전에 보내는 '모두 되돌리기' — 셸만 보낼 수 있다(DUMP 권한) */
+    @Test
+    fun theShellCanAskForEverythingBackBeforeThePermissionGoes() {
+        grant()
+        Settings.Global.putString(cr, "ambient_tilt_to_wake", "1")
+        Levers(context).applyNight(GuardianConfig(nightSaver = false, nightAodOff = false, nightWakeOff = true))
+        com.mywatch.kakaomap.battery.ShellRestoreReceiver().onReceive(context, android.content.Intent(Guardian.ACTION_SHELL_RESTORE))
+        assertEquals("1", Settings.Global.getString(cr, "ambient_tilt_to_wake"))
+        assertFalse(Levers(context).holdsAnything)
+        val info = context.packageManager.getReceiverInfo(android.content.ComponentName(context, com.mywatch.kakaomap.battery.ShellRestoreReceiver::class.java), 0)
+        assertEquals("android.permission.DUMP", info.permission)
+        assertTrue(info.exported)
+    }
+
+    /** 길 안내를 시작하면 밤 모드로 바꿔 둔 것을 바로 되돌리고, 안내 중·직후엔 밤 모드를 켜지 않는다 (점검에서 찾음) */
+    @Test
+    fun navigationEndsNightModeAndKeepsItOff() {
+        grant()
+        Settings.Global.putString(cr, "ambient_tilt_to_wake", "1")
+        fill(at(0, 30), 8, 60.0, 2.0)
+        Guardian.tick(context, log, at(0, 30), stats = UidStatsSource { emptyMap() }, zone = zone)
+        assertTrue(Guardian.state(context).nightActive)
+        Guardian.onNavigationStarted(context, at(0, 35))
+        assertFalse(Guardian.state(context).nightActive)
+        assertEquals("1", Settings.Global.getString(cr, "ambient_tilt_to_wake"))
+        fill(at(0, 50), 8, 58.0, 2.0)
+        Guardian.tick(context, log, at(0, 50), stats = UidStatsSource { emptyMap() }, zone = zone)
+        assertFalse("안내 직후엔 다시 켜지 않음", Guardian.state(context).nightActive)
+    }
+
     @Test
     fun bedtimeChargeReminder() {
         grant()

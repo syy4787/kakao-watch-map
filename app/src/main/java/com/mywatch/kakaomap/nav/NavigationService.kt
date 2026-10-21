@@ -222,11 +222,15 @@ class NavigationService : Service() {
         }
         Navigator.sync()
         onState(Navigator.state.value)
+        // 배터리 지킴이: 밤·비정상 모드로 꺼 둔 손목 올려 켜기·AOD·절전을 바로 되돌리고, 안내 중엔 손대지 않게
+        scope.launch(Dispatchers.IO) { runCatching { com.mywatch.kakaomap.battery.Guardian.onNavigationStarted(applicationContext) } }
         return START_NOT_STICKY
     }
 
     override fun onDestroy() {
         running = false
+        // 안내 뒤 2시간은 그 소모를 지킴이가 '비정상'으로 읽지 않게
+        runCatching { com.mywatch.kakaomap.battery.Guardian.onNavigationStopped(this) }
         stopTracking()
         lostWake.cancel()
         stallWake.cancel()

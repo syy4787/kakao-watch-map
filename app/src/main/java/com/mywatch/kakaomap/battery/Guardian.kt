@@ -47,7 +47,14 @@ object Guardian {
     const val N_CAL = 7306
     /** 알려진 문제(Play 서비스 과소모 등) */
     const val N_ISSUE = 7307
+    /** 권한이 없어져 바꿔 둔 설정을 되돌리지 못함 — 직접 되돌릴 것 */
+    const val N_RELEASE = 7309
+    /** 길 안내가 시작·끝난 때 (안내 뒤 2시간은 그 소모를 '비정상'으로 읽지 않게) */
+    const val K_NAV_STARTED = "nav_started_at"
+    const val K_NAV_STOPPED = "nav_stopped_at"
     const val ACTION_RESTORE = "com.mywatch.kakaomap.battery.RESTORE"
+    /** PC 툴킷이 지킴이 권한을 거두기 전에 보내는 '모두 되돌리기' ([ShellRestoreReceiver]) */
+    const val ACTION_SHELL_RESTORE = "com.mywatch.kakaomap.battery.SHELL_RESTORE"
     /** 잔량 표시 오차 알림의 '보정 루틴 시작' 버튼 */
     const val ACTION_CAL_START = "com.mywatch.kakaomap.battery.CAL_START"
 
@@ -162,20 +169,75 @@ object Guardian {
 
         val levers = Levers(c)
         val screenOn2h = screen?.sumOf { it.overlap(now - AlertRule.WINDOW_MS, now) }
+        val navigating = navigatingRecently(c, now)
         if (!levers.canWriteSecure) {
-            // 설정을 못 바꾸는 동안은 알림만
-            BatteryAlerts.check(c, samples, now, screenOn2h, zone)
+            // 권한이 없어졌는데(PC 에서 거둠 등) 바꿔 둔 설정이 남아 있으면 되돌릴 수 없다 — 무엇을 직접 되돌릴지 한 번 알리고 손을 뗀다
+            runCatching { releaseWithoutPermission(c, levers, now, zone) }.onFailure { ErrorLog.record("배터리·지킴이", it) }
+            // 설정을 못 바꾸는 동안은 알림만 (길 안내 중·직후엔 그 소모라 알리지 않는다)
+            if (!navigating) BatteryAlerts.check(c, samples, now, screenOn2h, zone)
             return
         }
         val cfg = config(c)
         val st = state(c)
         val screenOff = looked?.let { spans -> screenOffFor(spans, now) }
-        val (actions, next) = GuardianRules.decide(now, zone, cfg, st, samples, analysis, levers.saverOn(), screenOff, screenOn2h)
+        val (actions, next) = GuardianRules.decide(now, zone, cfg, st, samples, analysis, levers.saverOn(), screenOff, screenOn2h, navigating)
         // 설정으로 절전이 안 켜지는 워치면 절전 레버는 빼고 나머지만
         val effective = if (st.saverBroken || next.saverBroken) cfg.copy(nightSaver = false) else cfg
         val phantom = analysis?.verdict?.tags?.let { "phantom" in it || "drift" in it } ?: false
         for (a in actions) runCatching { act(c, levers, effective, a, now, next.saverBroken, phantom, zone) }.onFailure { ErrorLog.record("배터리·지킴이", it) }
+        // 밤·비정상 모드가 아닌데 기억이 남아 있으면(되돌리다 쓰기에 실패함) 다시 되돌려 본다 — 바꾼 채 하루를 보내지 않게
+        if (!next.nightActive && !next.abnormalActive && levers.holdsAnything) runCatching { levers.restoreAll() }
         saveState(c, next)
+    }
+
+    /** 이 앱의 길 안내 중이거나 최근 2시간 안에 안내했다 */
+    fun navigatingRecently(c: Context, now: Long): Boolean {
+        if (com.mywatch.kakaomap.nav.NavigationService.running) return true
+        val p = prefs(c)
+        val last = maxOf(p.getLong(K_NAV_STARTED, 0L), p.getLong(K_NAV_STOPPED, 0L))
+        return last > 0 && now - last in 0 until AlertRule.WINDOW_MS
+    }
+
+    /**
+     * 길 안내가 시작됐다 — 밤·비정상 모드로 바꿔 둔 것(손목 올려 켜기·AOD·절전)을 바로 되돌린다. 안내 중엔 지킴이가 손대지 않는다
+     * (다음 15분 기록까지 기다리면 밤 안내 첫 갈림길에서 손목을 들어도 화면이 안 켜진다)
+     */
+    fun onNavigationStarted(context: Context, now: Long = System.currentTimeMillis()) {
+        val c = context.applicationContext
+        prefs(c).edit().putLong(K_NAV_STARTED, now).apply()
+        val st = state(c)
+        if (!st.nightActive && !st.abnormalActive) return
+        val levers = Levers(c)
+        if (st.nightActive) { runCatching { levers.restoreNight() }; GuardianJournal(c).add(GuardianJournal.NIGHT_OFF, now) }
+        if (st.abnormalActive) runCatching { levers.restoreAbnormal() }
+        saveState(c, st.copy(nightActive = false, abnormalActive = false, saverSeenOn = false))
+        noteAction(c, "길 안내를 시작해 밤·비정상 모드를 풂")
+    }
+
+    fun onNavigationStopped(context: Context, now: Long = System.currentTimeMillis()) {
+        prefs(context.applicationContext).edit().putLong(K_NAV_STOPPED, now).apply()
+    }
+
+    /** 권한이 없는데 바꿔 둔 설정·모드가 남아 있으면: 직접 되돌릴 것을 알리고(있으면) 모두 내려놓는다 */
+    private fun releaseWithoutPermission(c: Context, levers: Levers, now: Long, zone: ZoneId) {
+        val st = state(c)
+        if (!levers.holdsAnything && !st.nightActive && !st.abnormalActive) return
+        val todo = levers.releaseWithoutPermission()
+        if (st.nightActive) GuardianJournal(c).add(GuardianJournal.NIGHT_OFF, now)
+        saveState(c, st.copy(nightActive = false, abnormalActive = false, saverSeenOn = false))
+        noteAction(c, "권한이 없어 손 뗌" + if (todo.isEmpty()) "" else " — 직접 되돌릴 것: ${todo.joinToString(", ")}")
+        if (todo.isEmpty()) return
+        val (nm, channel) = BatteryAlerts.manager(c, BatteryAlerts.quiet(now, zone)) ?: return
+        val text = "직접 되돌려 주세요: ${todo.joinToString(" · ")}. PC 툴킷 메뉴 8로 권한을 다시 주면 지킴이가 다시 맡습니다."
+        val n = NotificationCompat.Builder(c, channel)
+            .setSmallIcon(R.drawable.ic_warning)
+            .setContentTitle("지킴이 권한이 없어 설정을 못 되돌림")
+            .setContentText(text)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(text))
+            .setContentIntent(openScreen(c))
+            .setAutoCancel(true)
+            .build()
+        runCatching { nm.notify(N_RELEASE, n) }
     }
 
     /** 화면 켜짐 구간으로 본 '지금까지 꺼져 있던 시간' — 지금 켜져 있으면 0, 창 안에 켜진 적이 없으면 창 길이 */
@@ -273,7 +335,8 @@ object Guardian {
             }
             is GuardianAction.AbnormalOn -> {
                 val ok = !saverBroken && levers.applyAbnormal()
-                val culprits = culprits(c, now)
+                // 이 앱 자신은 의심 앱으로 꼽지 않는다 (길 안내 등은 사용자가 쓴 것)
+                val culprits = culprits(c, now).filter { it.use.pkg.substringBefore('+') != c.packageName }
                 noteAction(c, "비정상 소모(시간당 ${DrainAnalyzer.fmt(a.pph)}%) — 절전 모드 ${if (ok) "켬" else "못 켬"}" +
                     culprits.take(2).joinToString(prefix = " · 의심: ") { HealthStore.label(c, it.use.pkg) })
                 if (a.notify) notifyAbnormal(c, a.pph, ok, culprits, phantom, BatteryAlerts.quiet(now, zone))
@@ -344,14 +407,21 @@ object Guardian {
         runCatching { nm.notify(N_CHARGE, n) }
     }
 
-    /** 알림의 '되돌리기'·화면의 '지금 되돌리기': 우리가 바꾼 것을 모두 원래대로, 12시간 쉼 */
-    fun restoreNow(c: Context, now: Long = System.currentTimeMillis()) {
-        Levers(c).restoreAll(keepSaver = false)
+    /**
+     * 알림의 '되돌리기'·화면의 '지금 되돌리기'·PC 툴킷이 권한을 거두기 전: 우리가 바꾼 것을 모두 원래대로, 12시간 쉼.
+     * 권한이 없어 되돌리지 못한 것은 직접 되돌릴 일로 돌려준다 (없으면 빈 목록)
+     */
+    fun restoreNow(c: Context, now: Long = System.currentTimeMillis()): List<String> {
+        val levers = Levers(c)
+        levers.restoreAll(keepSaver = false)
+        // 쓰기에 실패해 남은 것(권한 없음) — 사용자가 직접 되돌릴 것으로 알리고 내려놓는다
+        val left = if (levers.holdsAnything) levers.releaseWithoutPermission() else emptyList()
         val s = state(c)
         if (s.nightActive) GuardianJournal(c).add(GuardianJournal.NIGHT_OFF, now)
         saveState(c, s.copy(nightActive = false, abnormalActive = false, userOverrideUntil = now + GuardianRules.USER_OVERRIDE_MS))
-        noteAction(c, "사용자가 되돌림 — 12시간 쉼")
+        noteAction(c, "사용자가 되돌림 — 12시간 쉼" + if (left.isEmpty()) "" else " (직접 되돌릴 것: ${left.joinToString(", ")})")
         runCatching { c.getSystemService(NotificationManager::class.java)?.cancel(N_ABNORMAL) }
+        return left
     }
 }
 
@@ -368,5 +438,18 @@ class GuardianReceiver : BroadcastReceiver() {
                 Calibration.notifyStarted(context)
             }
         }
+    }
+}
+
+/**
+ * PC 툴킷이 지킴이 권한(WRITE_SECURE_SETTINGS)을 거두기 전에 부른다 — `am broadcast -n com.mywatch.kakaomap/.battery.ShellRestoreReceiver`.
+ * 바꿔 둔 설정(밤 모드의 AOD·손목 올려 켜기·절전 등)을 권한이 있을 때 되돌려 놓게. 셸(adb)만 보낼 수 있게 매니페스트에서
+ * android.permission.DUMP 로 막는다(다른 앱은 이 권한을 얻지 못한다). 결과: "restored" 또는 "left:직접 되돌릴 것들"
+ */
+class ShellRestoreReceiver : BroadcastReceiver() {
+    override fun onReceive(context: Context, intent: Intent) {
+        if (intent.action != Guardian.ACTION_SHELL_RESTORE) return
+        val left = runCatching { Guardian.restoreNow(context) }.getOrDefault(emptyList())
+        if (isOrderedBroadcast) resultData = if (left.isEmpty()) "restored" else "left:" + left.joinToString(",")
     }
 }

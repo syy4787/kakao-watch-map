@@ -160,6 +160,11 @@
         <receiver
             android:name=".battery.GuardianReceiver"
             android:exported="false" />
+        <!-- PC 툴킷이 지킴이 권한을 거두기 전에 바꿔 둔 설정을 되돌리게 — 셸(adb)만 보낼 수 있다(DUMP 권한, 다른 앱은 못 얻음) -->
+        <receiver
+            android:name=".battery.ShellRestoreReceiver"
+            android:exported="true"
+            android:permission="android.permission.DUMP" />
         <!-- 부팅 순간을 배터리 기록에 한 줄 (부팅 뒤 15분 기록·충전 시작 기록도 다시 예약).
              충전기 꽂음·뺌·배터리 부족 방송은 targetSdk 26+ 앱의 매니페스트로는 오지 않는다 — 충전 시작은 '충전 중' 조건 작업이 잡는다 -->
         <receiver
