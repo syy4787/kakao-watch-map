@@ -51,7 +51,7 @@ object KnownIssues {
         notifications: Int = 0, label: (String) -> String? = { null },
     ): List<KnownIssue> {
         if (ranks.isEmpty()) return emptyList()
-        // 창이 1시간쯤은 돼야 — 짧으면(첫 스냅샷·재시작 직후·폰에서 알림 다시 받기) 잠깐의 일이 시간당으로 부풀려진다.
+        // 창이 1시간쯤(55분)은 돼야 — 짧으면(첫 스냅샷·재시작 직후·폰에서 알림 다시 받기) 잠깐의 일이 시간당으로 부풀려진다.
         // 창을 모르면(시험 등) 그대로 본다
         if (windowMs != null && windowMs < MIN_WINDOW_MS) return emptyList()
         val total = ranks.sumOf { it.score }
@@ -152,10 +152,10 @@ object KnownIssues {
     const val HOME_CAUTION_MS_PER_H = 5L * 60_000L
 
     /**
-     * 알려진 문제를 판단하려면 앱별 통계 창이 이만큼은 돼야 한다 — '1시간쯤': 앱별 통계는 15분 기록 넷에 한 번(55분이 지나면) 남기고
-     * 기록 시각이 조금씩 밀리므로, 재시작 뒤 기준값 다음의 첫 한 줄(55~65분)로 볼 수 있게 50분
+     * 알려진 문제를 판단하려면 앱별 통계 창이 이만큼은 돼야 한다 — '1시간쯤': 워치 앱은 앱별 통계를 55분이 지나면 남기므로(15분 기록
+     * 넷에 한 번) 재시작 뒤 기준값 다음의 첫 한 줄(55분 이상)로 볼 수 있게 그 간격과 같게
      */
-    const val MIN_WINDOW_MS = 50L * 60_000L
+    const val MIN_WINDOW_MS = 55L * 60_000L
 
     /** 알림 하나를 받아 보여 주는 데 홈이 쓸 만한 CPU (어림 — 진동·화면 표시·묶음 정리) */
     const val HOME_CPU_PER_NOTIFICATION_MS = 2_000L

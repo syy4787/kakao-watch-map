@@ -7,7 +7,7 @@ import com.mywatch.battery.core.KnownIssues
 /**
  * One UI Watch 홈의 uid 와 그 uid 를 같이 쓰는 패키지 수. 앱별 통계(HealthStats)는 uid 단위라 홈이 시스템 uid(1000)를 같이 쓰면
  * 홈만 따로 셀 수 없어(묶음이 'android' 로 보임) '홈 과소모'를 짚지 못한다 — 실제 워치가 어떤지 하루 요약의 '[홈]' 줄로 확인한다
- * (설계 문서 6장의 열린 가정)
+ * (설계 문서 5-7 의 '남은 확인')
  */
 data class HomeUid(val uid: Int, val packages: Int) {
     val line: String

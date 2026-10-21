@@ -576,6 +576,15 @@ class GuardianTest {
     private fun bootCount(n: Int) = Settings.Global.putInt(cr, Settings.Global.BOOT_COUNT, n)
 
     /**
+     * [n]번째 부팅으로 재시작하고 켜진 지 10분이 지난 것으로 — 지킴이는 켜진 직후(부팅 뒤 동기화가 몰림)엔 기준값을 남기지 않는다.
+     * 시험의 시계(켜진 뒤 시간)는 멈춰 있어 앞으로만 민다 (부팅 번호가 바뀌었으니 재시작으로 본다)
+     */
+    private fun restartAndSettle(n: Int) {
+        bootCount(n)
+        org.robolectric.shadows.ShadowSystemClock.advanceBy(java.time.Duration.ofMinutes(10))
+    }
+
+    /**
      * 시킨 대로 재시작하면 그 앞의 판단은 바로 내리고, 재시작 뒤 첫 스냅샷은 기준값만 — 배터리 통계는 부팅 때 0 이 되지 않고 충전 뒤부터
      * 이어진다(안드로이드 Q+). 재시작 직전의 홈 사용이 재시작 뒤 구간에 섞이면 '재시작해도 그대로'로 보였다 (리뷰에서 찾음)
      */
@@ -585,7 +594,7 @@ class GuardianTest {
         bootCount(1)
         homeHogUntilNoon()
         assertEquals("One UI Watch 홈 과소모 — 강제 재시작", Guardian.tileIssue(context, at(12, 0)))
-        bootCount(2)   // 12:10 재시작
+        restartAndSettle(2)   // 12:10 재시작
         assertEquals("재시작 앞의 판단은 바로 내린다", null, Guardian.tileIssue(context, at(12, 20)))
         // 통계는 이어진다: 재시작 전 10분 더 돌고(+5분) 재시작 뒤엔 조용(+1분)
         fill(at(13, 0), 9, 77.0, 1.0)
@@ -610,7 +619,7 @@ class GuardianTest {
         Guardian.tick(context, log, at(10, 0), stats = UidStatsSource { mapOf(home to com.mywatch.battery.core.UidUse(home, cpuMs = 200 * 60_000L), gms to com.mywatch.battery.core.UidUse(gms, cpuMs = 300 * 60_000L)) }, zone = zone)
         fill(at(12, 0), 9, 78.0, 1.0)
         Guardian.tick(context, log, at(12, 0), stats = UidStatsSource { mapOf(home to com.mywatch.battery.core.UidUse(home, cpuMs = 201 * 60_000L), gms to com.mywatch.battery.core.UidUse(gms, cpuMs = 301 * 60_000L)) }, zone = zone)
-        bootCount(2)   // 강제 재시작 — 마지막 저장 뒤 사용을 잃어 누적값이 줄었다
+        restartAndSettle(2)   // 강제 재시작 — 마지막 저장 뒤 사용을 잃어 누적값이 줄었다
         fill(at(13, 0), 9, 77.0, 1.0)
         Guardian.tick(context, log, at(13, 0), stats = UidStatsSource { mapOf(home to com.mywatch.battery.core.UidUse(home, cpuMs = 190 * 60_000L), gms to com.mywatch.battery.core.UidUse(gms, cpuMs = 280 * 60_000L)) }, zone = zone)
         fill(at(14, 0), 9, 76.0, 1.0)
@@ -653,18 +662,46 @@ class GuardianTest {
         assertFalse("엇갈려 적힌 몇 초", HealthStore.Boot(7, 100_000).rebootedSince(HealthStore.Boot(7, 103_000)))
         assertTrue("번호가 바뀜", HealthStore.Boot(8, 900_000).rebootedSince(HealthStore.Boot(7, 100_000)))
         assertTrue("켜진 시간이 크게 줄어듦", HealthStore.Boot(null, 30_000).rebootedSince(HealthStore.Boot(null, 900_000)))
+        // 번호를 몰라도: 엇갈려 적힌 몇 초, 시계 맞춤(2분)은 재시작이 아니다
+        assertFalse("번호 없이 엇갈림", HealthStore.Boot(null, 100_000, wallMs = t).rebootedSince(HealthStore.Boot(null, 103_000, wallMs = t + 3_000)))
+        assertFalse("시계 맞춤 2분", HealthStore.Boot(null, 35 * m, wallMs = t + 32 * m).rebootedSince(before))
     }
 
-    /** 재시작한 뒤 첫 15분 기록에서 바로 기준값을 남긴다 — 1시간을 기다리면 다시 짚는 데 2시간 가까이 걸렸다 (2차 리뷰) */
+    /**
+     * 재시작한 뒤엔 켜진 지 10분이 지나면 다음 15분 기록에서 바로 기준값을 남긴다 — 1시간을 기다리면 다시 짚는 데 2시간 가까이 걸렸다.
+     * 켜진 직후(부팅 뒤 동기화·업데이트가 몰림)엔 남기지 않는다 — 그게 첫 판단 창에 들어가 시킨 대로 재시작한 사람에게 엉뚱한
+     * 'Play 서비스 과소모'를 보이지 않게 (2·3차 리뷰)
+     */
     @Test
-    fun aRestartTakesTheBaselineAtTheNextTick() {
+    fun aRestartTakesTheBaselineOnceSettled() {
         val home = com.mywatch.battery.core.KnownIssues.HOME
         bootCount(1)
         homeHogUntilNoon()
-        bootCount(2)
+        bootCount(2)   // 막 켜짐
         fill(at(12, 15), 9, 78.0, 1.0)
         Guardian.tick(context, log, at(12, 15), stats = UidStatsSource { mapOf(home to UidUse(home, cpuMs = 31 * 60_000L)) }, zone = zone)
+        assertEquals("켜진 직후엔 남기지 않음", at(12, 0), HealthStore(context).lastAt())
+        org.robolectric.shadows.ShadowSystemClock.advanceBy(java.time.Duration.ofMinutes(15))
+        fill(at(12, 30), 9, 78.0, 1.0)
+        Guardian.tick(context, log, at(12, 30), stats = UidStatsSource { mapOf(home to UidUse(home, cpuMs = 32 * 60_000L)) }, zone = zone)
+        assertEquals("켜진 지 15분 — 기준값", at(12, 30), HealthStore(context).lastAt())
+        // 그 뒤 1시간 동안 홈이 또 돌면 다시 짚는다
+        fill(at(13, 30), 9, 77.0, 1.0)
+        Guardian.tick(context, log, at(13, 30), stats = UidStatsSource { mapOf(home to UidUse(home, cpuMs = 52 * 60_000L)) }, zone = zone)
+        assertEquals("One UI Watch 홈 과소모 — 강제 재시작", Guardian.tileIssue(context, at(13, 30)))
+    }
+
+    /** 업데이트 직후(예전 버전의 스냅샷 — 부팅을 안 적음)엔 1시간을 기다리지 않고 다음 15분 기록에서 기준값 (3차 리뷰) */
+    @Test
+    fun anUpdateTakesTheBaselineAtTheNextTick() {
+        org.robolectric.shadows.ShadowSystemClock.advanceBy(java.time.Duration.ofHours(3))   // 켜진 지 3시간
+        val dir = BatteryLog(context).dir.apply { mkdirs() }
+        java.io.File(dir, "health_last.json").writeText("""{"t":${at(12, 0)},"u":[{"p":"a","cpu":60000}]}""")
+        context.getSharedPreferences(BatteryLog.PREFS, Context.MODE_PRIVATE).edit().putLong("health_last_at", at(12, 0)).commit()
+        fill(at(12, 15), 9, 78.0, 1.0)
+        Guardian.tick(context, log, at(12, 15), stats = UidStatsSource { mapOf("a" to UidUse("a", cpuMs = 30_000)) }, zone = zone)
         assertEquals(at(12, 15), HealthStore(context).lastAt())
+        assertTrue("기준값만", HealthStore(context).windows(24, at(12, 15)).isEmpty())
     }
 
     /** 재시작 뒤 짧은 창(30분)에선 Play 서비스가 바쁘게 돌아도(재시작 뒤 동기화) 짚지 않고, 1시간쯤 쌓이면 본다 */
@@ -675,7 +712,7 @@ class GuardianTest {
         bootCount(1)
         fill(at(12, 0), 9, 80.0, 4.0)
         Guardian.tick(context, log, at(12, 0), stats = UidStatsSource { mapOf(gms to UidUse(gms, cpuMs = 100 * 60_000L)) }, zone = zone)
-        bootCount(2)
+        restartAndSettle(2)
         fill(at(13, 0), 9, 76.0, 4.0)
         Guardian.tick(context, log, at(13, 0), stats = UidStatsSource { mapOf(gms to UidUse(gms, cpuMs = 101 * 60_000L)) }, zone = zone)
         fill(at(13, 30), 9, 74.0, 4.0)
@@ -707,7 +744,7 @@ class GuardianTest {
         val home = com.mywatch.battery.core.KnownIssues.HOME
         bootCount(1)
         homeHogUntilNoon()
-        bootCount(2)
+        restartAndSettle(2)
         fill(at(13, 0), 9, 77.0, 1.0)
         Guardian.tick(context, log, at(13, 0), stats = UidStatsSource { mapOf(home to com.mywatch.battery.core.UidUse(home, cpuMs = 36 * 60_000L)) }, zone = zone)
         fill(at(14, 0), 9, 76.0, 1.0)

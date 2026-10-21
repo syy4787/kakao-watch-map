@@ -100,7 +100,8 @@ class HealthStore(context: Context) {
         /**
          * [before] 를 남긴 뒤 다시 켜졌다: 부팅 번호가 바뀌었거나, 켜진 뒤 흐른 시간이 줄었거나(같은 부팅의 두 스냅샷이 엇갈려 적힌
          * 몇 초는 봐준다), 부팅 번호를 모르면 켜진 때(벽시계 − 켜진 뒤 시간)가 옮겨졌다 — 재시작 뒤 첫 스냅샷의 켜진 시간이 재시작 전보다
-         * 길어도 알아채게 (시계를 크게 바꿔도 그렇게 보이지만 기준값 하나를 더 남길 뿐이다)
+         * 길어도 알아채게. 부팅 번호를 못 읽는 워치에서 시계를 5분 넘게 바꾸면 재시작으로 보여 기준값을 새로 잡고 그 앞의 최근 기록(최대
+         * 2시간)을 판단에서 뺀다 — 드물고, 1시간쯤 뒤 다시 본다
          */
         fun rebootedSince(before: Boot): Boolean {
             val counted = count != null && before.count != null
@@ -191,8 +192,8 @@ class HealthStore(context: Context) {
             val o = runCatching { JSONObject(line) }.getOrNull() ?: return@forEachLine
             val t = o.optLong("t")
             if (t < from || t > now) return@forEachLine
-            // 부팅 번호가 없는 줄(이전 버전이 쓴 것)은 어느 부팅인지 모른다 — 빼고 본다
-            if (seq != null && o.optInt("b", -1) != seq) return@forEachLine
+            // 부팅 차례가 없는 줄(이전 버전이 쓴 것)은 어느 부팅인지 모른다 — 재시작을 걸친 엉뚱한 줄일 수 있어 늘 빼고 본다
+            if (!o.has("b") || (seq != null && o.optInt("b") != seq)) return@forEachLine
             val ms = o.optLong("ms")
             covered += ms
             spans += (t - ms) to t

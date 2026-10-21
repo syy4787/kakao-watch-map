@@ -62,11 +62,11 @@ class KnownIssuesTest {
         assertTrue(KnownIssues.detect(ranks).isEmpty())
     }
     /**
-     * 창이 1시간이 안 되면 어떤 문제도 짚지 않는다 — 재시작 직후·첫 스냅샷처럼 짧은 창에선 잠깐의 일(재시작 뒤 Play 서비스 동기화 등)이
-     * 시간당으로 부풀려진다 (홈에만 있던 기준을 모든 문제에 — 리뷰에서 찾음). 창을 모르면(PC 툴킷의 충전 뒤 통계) 그대로 본다
+     * 창이 짧으면(55분 미만) 어떤 문제도 짚지 않는다 — 재시작 직후·첫 스냅샷처럼 짧은 창에선 잠깐의 일(재시작 뒤 Play 서비스 동기화 등)이
+     * 시간당으로 부풀려진다 (홈에만 있던 기준을 모든 문제에 — 리뷰에서 찾음). 창을 모르면(시험) 그대로 본다
      */
     @Test
-    fun noIssueIsJudgedOnLessThanAnHour() {
+    fun noIssueIsJudgedOnAShortWindow() {
         val face = "com.jeremysteckling.facerrel"
         val uses = listOf(UidUse("com.google.android.gms", cpuMs = 8 * 60_000L, wakelockMs = 10 * 60_000L), UidUse(face, cpuMs = 4 * 60_000L, wakelockMs = 3 * 60_000L))
         val short = 30 * 60_000L
@@ -76,9 +76,9 @@ class KnownIssuesTest {
             KnownIssues.detect(AppDrain.rank(uses.map { it + it }, h), face, h).map { it.id }.toSet(),
         )
         assertEquals(KnownIssues.PLAY_SERVICES_LOOP, KnownIssues.detect(AppDrain.rank(uses, short)).first().id)
-        // 경계는 50분 — 앱별 통계는 55분마다라 재시작 뒤 기준값 다음의 첫 한 줄(55~65분)로 볼 수 있게
+        // 경계는 55분 — 앱별 통계를 남기는 간격(55분이 지나면)과 같게: 재시작 뒤 기준값 다음의 첫 한 줄로 볼 수 있게
         val min = KnownIssues.MIN_WINDOW_MS
-        assertEquals(50 * 60_000L, min)
+        assertEquals(55 * 60_000L, min)
         assertTrue(KnownIssues.detect(AppDrain.rank(uses, min - 60_000L), face, min - 60_000L).isEmpty())
         assertTrue(KnownIssues.detect(AppDrain.rank(uses, min), face, min).isNotEmpty())
     }

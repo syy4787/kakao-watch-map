@@ -1,5 +1,6 @@
 package com.mywatch.kakaomap
 
+import android.app.Application
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageInfo
 import com.mywatch.battery.core.KnownIssues
@@ -14,12 +15,14 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.Shadows.shadowOf
+import org.robolectric.annotation.Config
 
 /**
  * One UI Watch 홈의 uid — 앱별 통계(HealthStats)는 uid 단위라, 홈이 시스템 uid(1000)를 같이 쓰면 홈만 따로 셀 수 없어 '홈 과소모'를
  * 못 짚는다. 실제 워치가 어떤지(설계 문서의 열린 가정) 하루 요약의 '[홈]' 줄로 확인한다
  */
 @RunWith(RobolectricTestRunner::class)
+@Config(sdk = [35], application = Application::class)
 class HomeUidTest {
     private val context = RuntimeEnvironment.getApplication()
 

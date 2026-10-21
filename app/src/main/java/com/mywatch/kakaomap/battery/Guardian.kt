@@ -259,14 +259,23 @@ object Guardian {
     const val SNAPSHOT_EVERY_MS = 55L * 60_000L
 
     /**
-     * 앱별 통계를 지금 남길 때인가: 1시간이 지났거나, 그 뒤 재시작했거나(바로 기준값을 남겨 1시간 뒤 다시 볼 수 있게), 최근 2시간 대기
-     * 소모가 대기 기준(시간당 3.2%)을 넘을 때
+     * 재시작한 뒤 이만큼 지나야 기준값을 남긴다 — 켜진 직후엔 동기화·업데이트가 몰려, 그게 첫 판단 창에 들어가면 시킨 대로 재시작한
+     * 사람에게 엉뚱한 'Play 서비스 과소모'를 보인다 (3차 리뷰)
+     */
+    const val POST_BOOT_SETTLE_MS = 10L * 60_000L
+
+    /**
+     * 앱별 통계를 지금 남길 때인가: 1시간이 지났거나, 최근 2시간 대기 소모가 대기 기준(시간당 3.2%)을 넘을 때. 마지막 스냅샷 뒤에
+     * 재시작했으면 켜진 지 [POST_BOOT_SETTLE_MS] 가 지난 첫 기록에서 바로(그 전엔 남기지 않음) — 1시간을 기다리지 않고 기준값을 남겨
+     * 1시간 뒤 다시 볼 수 있게
      */
     private fun snapshotDue(c: Context, now: Long, samples: List<com.mywatch.battery.core.BatterySample>): Boolean {
         val store = HealthStore(c)
         val last = store.lastAt()
-        if (last <= 0L || now < last || now - last >= SNAPSHOT_EVERY_MS) return true
-        if (store.rebootedSinceLast(HealthStore.Boot.now(c))) return true
+        if (last <= 0L) return true
+        val boot = HealthStore.Boot.now(c)
+        if (store.rebootedSinceLast(boot)) return boot.elapsedMs >= POST_BOOT_SETTLE_MS
+        if (now < last || now - last >= SNAPSHOT_EVERY_MS) return true
         val idle = com.mywatch.battery.core.Rates.idleWindow(samples, now, 2).percentPerHour
         return idle != null && idle >= com.mywatch.battery.core.Thresholds.IDLE_NORMAL
     }
@@ -280,7 +289,10 @@ object Guardian {
         val reader = source ?: HealthReader(c).takeIf { it.available } ?: return
         val store = HealthStore(c)
         if (now - store.lastAt() < maxAgeMs && now >= store.lastAt()) return
-        runCatching { store.record(now, reader.take(), HealthStore.Boot.now(c)) }.onFailure { ErrorLog.record("배터리·앱별 통계", it) }
+        // 재시작 직후엔 기준값을 남기지 않는다 (15분 기록과 같이 — 켜진 지 10분 뒤부터)
+        val boot = HealthStore.Boot.now(c)
+        if (store.rebootedSinceLast(boot) && boot.elapsedMs < POST_BOOT_SETTLE_MS) return
+        runCatching { store.record(now, reader.take(), boot) }.onFailure { ErrorLog.record("배터리·앱별 통계", it) }
         // 화면 켜짐·알림(One UI Watch 홈 과소모 판단용) — 15분 기록과 같은 읽기로 (화면 기록이 없으면 하루치로 '켜진 적 없음'인지)
         val raw = runCatching { ScreenUsage(c).readAll(now - SCREEN_LOOKBACK_MS, now) }.getOrNull()
         val screen = raw?.screen?.takeIf { it.isNotEmpty() } ?: runCatching { ScreenUsage(c).readScreen(now - SCREEN_FALLBACK_MS, now)?.spans }.getOrNull()
