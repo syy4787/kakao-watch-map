@@ -122,6 +122,8 @@ object BatterySummary {
         "wakes" to insights?.wakes?.wakes?.toDouble(),
         "short_wakes" to insights?.wakes?.shortWakes?.toDouble(),
         "gesture_wakes" to insights?.wakes?.gestureLikeWakes?.toDouble(),
+        // 밤(0~6시)에 알림 없이 금방 꺼진 화면 — 자다가 저절로 켜진 것 (PC 툴킷이 손목 올려 켜기 설명에)
+        "night_gesture_wakes" to insights?.wakes?.nightGestureWakes?.toDouble(),
         "notif_wakes" to insights?.wakes?.notificationWakes?.toDouble(),
         "notifications" to insights?.wakes?.notifications?.toDouble(),
         "drift" to a.drift?.driftPoints?.toDouble(),

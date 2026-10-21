@@ -13,6 +13,8 @@ data class ChargeHabits(
     val protectLikely: Boolean,
     val maxChargeTempC: Double?,
     val advice: List<String>,
+    /** [advice] 와 같은 차례의 '지금 할 일' 줄에 맞춘 짧은 제목·설명 */
+    val todos: List<Pair<String, String>> = emptyList(),
 ) {
     /** 배터리 보호를 권하나 (그러면 [advice] 의 첫 줄) */
     val protectAdvised: Boolean get() = !protectLikely && hoursAtFullPerDay >= FULL_ADVICE_HOURS
@@ -60,13 +62,16 @@ data class ChargeHabits(
             val protect = long.isNotEmpty() && long.all { it.maxLevel in 85..91 && it.heldAtMaxMs >= PROTECT_HOLD_MS }
             val tempC = maxTemp?.let { it / 10.0 }
             val advice = ArrayList<String>()
+            val todos = ArrayList<Pair<String, String>>()
             if (!protect && hoursAtFull >= FULL_ADVICE_HOURS) {
                 advice += "충전기에 100%로 하루 ${fmt(hoursAtFull)}시간 머뭅니다 — 설정 > 배터리 > 배터리 보호를 켜면 90%에서 멈춰(85% 아래면 다시 충전) 배터리가 덜 늙습니다"
+                todos += "충전기에서 하루 ${fmt(hoursAtFull)}시간 100%" to "설정 › 배터리 › 배터리 보호 켜기 (90%에서 멈춰 덜 늙음)"
             }
             if (tempC != null && tempC >= HOT_C) {
                 advice += "충전 중 최고 ${fmt(tempC)}℃ — 충전할 땐 워치를 벗기고 직사광선·이불 속·두꺼운 케이스를 피하세요 (열이 배터리를 가장 빨리 늙게 합니다)"
+                todos += "충전 중 최고 ${fmt(tempC)}℃" to "충전할 땐 벗기고 햇빛·이불 속·두꺼운 케이스 피하기"
             }
-            return ChargeHabits(covered, sessions.size, hoursAtFull, protect, tempC, advice)
+            return ChargeHabits(covered, sessions.size, hoursAtFull, protect, tempC, advice, todos)
         }
 
         private fun fmt(v: Double) = String.format(Locale.US, "%.1f", v).removeSuffix(".0")

@@ -261,7 +261,7 @@ object ChangeFinder {
             ChangeKind.APP -> when (c.subject) {
                 GMS -> "Play 서비스 업데이트 뒤 더 닳음" to "Play 서비스 앱 정보 › 저장공간 › 캐시 지우기 → 강제 재시작"
                 // 이름이 길면 줄에 들어가게 이름을 줄인다 (전체 이름은 '그 무렵 바뀐 것' 목록에)
-                else -> fit(SHORT[c.subject] ?: appName(c.subject, names), " ${if (c.to?.startsWith("+") == true) "설치" else "업데이트"} 뒤 더 닳음") to
+                else -> TodoText.fitTitle(SHORT[c.subject] ?: appName(c.subject, names), " ${if (c.to?.startsWith("+") == true) "설치" else "업데이트"} 뒤 더 닳음") to
                     "그 앱의 동기화·알림·측정 설정을 보거나, 하루 지워 두고 비교"
             }
             ChangeKind.FACE -> "시계 화면을 바꾼 뒤 더 닳음" to "삼성 기본 시계 화면으로 하루 써 보고 비교"
@@ -275,7 +275,7 @@ object ChangeFinder {
             ChangeKind.CONFIG -> {
                 // 이름에 따옴표가 있으면('Hey Google') 겹치지 않게 그대로
                 val n = (CONFIG_NAMES[c.subject] ?: c.subject).let { if ('\'' in it) it else "'$it'" }
-                ("지킴이 ${obj(n)} 끈 뒤 더 닳음".takeIf { width(it) <= TITLE_MAX } ?: "지킴이 설정을 끈 뒤 더 닳음") to
+                ("지킴이 ${obj(n)} 끈 뒤 더 닳음".takeIf { TodoText.fitsTitle(it) } ?: "지킴이 설정을 끈 뒤 더 닳음") to
                     "지킴이에서 ${obj(n)} 다시 켜 보세요"
             }
             ChangeKind.MORE_APPS -> "앱 여럿 업데이트 뒤 더 닳음" to "앱별 소모 1위 앱을 보세요 (Play 서비스면 캐시 지우기)"
@@ -283,35 +283,8 @@ object ChangeFinder {
         }
     }
 
-    /** 할 일 제목(13sp 두 줄)·설명(12sp 세 줄)에 들어가는 너비 — 한글 글자 수로 */
-    const val TITLE_MAX = 22.0
-    const val DETAIL_MAX = 50.0
-
     /** 할 일 제목에 쓰는 짧은 이름 */
     private val SHORT = mapOf(SHEALTH to "삼성 헬스")
-
-    /**
-     * 화면에서 차지하는 너비를 한글 한 글자 = 1 로 어림한다 (영문·숫자는 한글보다 좁다 — 'Samsung Health' 14자는 한글 8자쯤).
-     * 글자 수로 재면 영문 이름을 쓸데없이 줄이게 된다
-     */
-    fun width(s: String): Double = s.sumOf { ch ->
-        when {
-            ch in '가'..'힣' || ch.code in 0x3130..0x318F || ch.code in 0x4E00..0x9FFF || ch.code in 0xFF00..0xFFEF -> 1.0
-            ch == '…' || ch.code in 0x2190..0x21FF -> 1.0   // 말줄임표·화살표
-            ch == ' ' -> 0.3
-            ch in 'A'..'Z' -> 0.68
-            ch.isLetterOrDigit() -> 0.55
-            else -> 0.4
-        }
-    }
-
-    /** [name] + [tail] 을 제목 너비 안에 — 넘치면 이름을 줄여 '…' */
-    fun fit(name: String, tail: String): String {
-        if (width(name + tail) <= TITLE_MAX) return name + tail
-        var n = name
-        while (n.length > 1 && width(n.trimEnd() + "…" + tail) > TITLE_MAX) n = n.dropLast(1)
-        return n.trimEnd() + "…" + tail
-    }
 
     /**
      * 목적격 조사를 붙인다: 받침 있으면 '을', 없으면 '를' ("손목 올려 켜기를", "'잠자기 전 충전 알림'을").

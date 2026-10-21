@@ -42,6 +42,24 @@ class CatalogTest {
         assertTrue(plan.apply.map { it.id }.toString(), plan.apply.none { "com.kakao.talk" in it.packages || it.id == "trim-caches" || it.id == "gms-restart" })
     }
 
+    /**
+     * 덤프 순간 화면 꺼진 채 센서를 쥔 앱 하나로는 범인이 아니다 — 수면·운동 기록 앱이면 정상이라, 자동 치료가 뒤에서 제한해
+     * 기록이 조용히 끊기지 않게 (점검에서 찾음). 소견은 남기고, 제한은 사용자가 메뉴 4에서 직접
+     */
+    @Test
+    fun anAppJustHoldingASensorIsNotAutoRestricted() {
+        val f = Facts(packages = listOf(doctor.parse.PackageInfo("com.example.sleeptracker", 10201, true, true)))
+        val sensor = Finding("sensor:com.example.sleeptracker", Severity.CAUTION, "센서", listOf("Accelerometer 50Hz"),
+            packages = listOf("com.example.sleeptracker"), category = "sensor")
+        assertFalse(sensor.blames)
+        val levers = Catalog.levers(f, listOf(sensor))
+        assertTrue(levers.filter { "com.example.sleeptracker" in it.packages }.none { it.recommended })
+        val plan = Treat.decide(levers, strong = false)
+        assertTrue(plan.apply.map { it.id }.toString(), plan.apply.none { "com.example.sleeptracker" in it.packages })
+        // 판정의 범인 목록에도 오르지 않는다
+        assertFalse(Analyzer.verdict(f, listOf(sensor)).culprits.contains("com.example.sleeptracker"))
+    }
+
     @Test
     fun denyListBlocksCoreSystemPackages() {
         listOf("com.google.android.gms", "com.google.android.gsf", "com.android.vending", "com.samsung.android.wear.shealth", "com.samsung.android.wearable.sysui",
@@ -169,9 +187,12 @@ class CatalogTest {
         // 이미 꺼져 있거나 키가 없으면 항목 없음
         assertNull(Catalog.levers(Facts(settings = mapOf("global" to mapOf("ambient_tilt_to_wake" to "0"))), emptyList()).id("tilt-wake-off"))
         assertNull(Catalog.levers(Facts(), emptyList()).id("tilt-wake-off"))
-        // 워치 앱 요약의 지표: 알림 없이 5초 안에 꺼진 화면 120번 → 추천
-        val busy = f.copy(watchMetrics = mapOf("gesture_wakes" to 120.0))
-        assertTrue(Catalog.levers(busy, emptyList()).id("tilt-wake-off")!!.recommended)
+        // 낮에 금방 꺼진 화면 120번은 시계를 본 것 — 추천(★, 메뉴 4에서 엔터로 한꺼번에 적용)하지 않는다 (점검에서 찾음).
+        // 밤에 저절로 켜진 것이 많아도 통째로 끄기보다 밤에만 끄는 길(워치 지킴이·취침 모드)을 설명에 적는다
+        val busy = f.copy(watchMetrics = mapOf("gesture_wakes" to 120.0, "night_gesture_wakes" to 30.0))
+        val t2 = Catalog.levers(busy, emptyList()).id("tilt-wake-off")!!
+        assertFalse(t2.recommended)
+        assertTrue(t2.detail, t2.detail.contains("밤") && t2.detail.contains("30번"))
     }
 
     @Test

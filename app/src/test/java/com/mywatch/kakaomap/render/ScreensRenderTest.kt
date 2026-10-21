@@ -670,6 +670,29 @@ class ScreensRenderTest {
         shoot("battery_trend", rows, pages = 4)
     }
 
+    /** '지금 할 일' 후보 전부 — 제목 두 줄·설명 세 줄 안에 잘리지 않고 들어가는지 (TodoText 로 맞춘 글) */
+    @Test
+    fun batteryTodos() {
+        val now = 1_792_500_000_000L
+        val day = 24 * 3_600_000L
+        val gmsRank = com.mywatch.battery.core.AppDrainRank(com.mywatch.battery.core.UidUse("com.google.android.gms", cpuMs = 40 * 60_000L), 1e7, listOf("stuck"), com.mywatch.battery.core.Grade.ABNORMAL)
+        val faceRank = com.mywatch.battery.core.AppDrainRank(com.mywatch.battery.core.UidUse("com.example.face", cpuMs = 30 * 60_000L), 1e6, emptyList(), com.mywatch.battery.core.Grade.CAUTION)
+        val issues = com.mywatch.battery.core.KnownIssues.detect(listOf(gmsRank, faceRank), "com.example.face", 2 * 3_600_000L)
+        val drain = (0..96).map { i -> com.mywatch.battery.core.BatterySample(t = now - (96 - i) * 15 * 60_000L, level = (100 - 4.0 * i / 4).toInt()) }
+        val analysis = com.mywatch.battery.core.DrainAnalyzer(445, java.time.ZoneId.of("Asia/Seoul")).analyze(drain, now)
+        val wakes = com.mywatch.battery.core.WakeStats(400, 300, 120, 200, 600_000L, 150, listOf("com.kakao.talk" to 120), 20.0, 40, 120_000L)
+        val night = com.mywatch.battery.core.NightReport(0, 1, 7.0, emptyList(), listOf("…"), listOf("삼성 헬스 센서 밤새 시간당 118분" to "삼성 헬스 › 설정에서 수면 중 혈중 산소·피부 온도 측정 끄기"))
+        val charging = com.mywatch.battery.core.ChargeHabits(7.0, 7, 12.5, false, 44.5, listOf("a", "b"),
+            listOf("충전기에서 하루 12.5시간 100%" to "설정 › 배터리 › 배터리 보호 켜기 (90%에서 멈춰 덜 늙음)", "충전 중 최고 44.5℃" to "충전할 땐 벗기고 햇빛·이불 속·두꺼운 케이스 피하기"))
+        val ins = com.mywatch.kakaomap.battery.Insights(analysis, null, emptyList(), issues, com.mywatch.battery.core.LeverEffect(emptyList(), emptyList()), wakes, night,
+            charging = charging, bootAt = now - 12 * day)
+        val all = com.mywatch.kakaomap.battery.BatteryTodo.candidates(ins, permitted = false, label = { if (it == "com.kakao.talk") "카카오톡" else it }, now = now)
+        val rows = listOf<Row>(Row.Header("지금 할 일")) + all.mapIndexed { i, t ->
+            Row.Step(0xFFFFC107.toInt(), R.drawable.ic_warning, "${i + 1}", t.title, t.detail, key = "todo:$i")
+        }
+        shoot("battery_todos", rows, pages = 6)
+    }
+
     /** 실제 배터리 화면: 하루 반 기록(밤 충전 포함)으로 맨 위 지금 줄·그래프·지금 할 일·소모율·지킴이 칸 */
     @Test
     fun batteryScreen() {

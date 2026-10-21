@@ -5,7 +5,11 @@ import java.time.LocalTime
 import java.time.ZoneId
 
 /** 밤사이 뒤에서 배터리를 쓴 앱 순위와 할 일 */
-data class NightReport(val start: Long, val end: Long, val coveredHours: Double, val ranks: List<AppDrainRank>, val advice: List<String>)
+data class NightReport(
+    val start: Long, val end: Long, val coveredHours: Double, val ranks: List<AppDrainRank>, val advice: List<String>,
+    /** [advice] 와 같은 차례의 '지금 할 일' 줄에 맞춘 짧은 제목·설명 */
+    val todos: List<Pair<String, String>> = emptyList(),
+)
 
 /**
  * 가장 최근 밤(00~07시, 지금이 밤이면 지금까지)의 15분 차를 합쳐 순위를 낸다.
@@ -30,13 +34,15 @@ object NightCulprits {
         if (covered < MIN_COVERED_HOURS) return null
         val ranks = AppDrain.rank(AppDrain.sum(windows.map { it.uses }), windows.sumOf { it.ms }, ownPkg)
         val advice = ArrayList<String>()
+        val todos = ArrayList<Pair<String, String>>()
         ranks.firstOrNull { it.use.pkg.substringBefore('+') == SHEALTH }?.let { h ->
             val perH = h.use.sensorMs / 60_000.0 / covered
             if (perH > HEALTH_SENSOR_MIN_PER_H) {
                 advice += "삼성 헬스가 밤새 센서를 시간당 ${perH.toInt()}분 켜 둠 — 워치 삼성 헬스 설정에서 수면 중 혈중 산소·피부 온도 측정을 끄고, " +
                     "심박수 자동 측정을 '10분마다'로, 스트레스 상시 측정을 끄면 밤 소모가 줄어듭니다 (건강 기록이 필요한 것만 남기세요)"
+                todos += "삼성 헬스 센서 밤새 시간당 ${perH.toInt()}분" to "삼성 헬스 › 설정에서 수면 중 혈중 산소·피부 온도 측정 끄기"
             }
         }
-        return NightReport(start, end, covered, ranks.take(5), advice)
+        return NightReport(start, end, covered, ranks.take(5), advice, todos)
     }
 }

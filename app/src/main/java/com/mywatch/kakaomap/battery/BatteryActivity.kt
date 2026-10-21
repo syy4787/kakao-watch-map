@@ -112,7 +112,7 @@ class BatteryActivity : ComponentActivity() {
         insights?.chart?.let { rows += Row.Chart("day", it) }
         insights?.let { ins ->
             val permitted = Levers(this).canWriteSecure && HealthReader(this).available
-            val todo = BatteryTodo.pick(ins, permitted, { ins.appNames[it] ?: HealthStore.label(this, it) }, now)
+            val todo = BatteryTodo.pick(ins, permitted, { BatteryInsights.label(ins.appNames, it) }, now)
             if (todo.isNotEmpty()) {
                 rows += Row.Header("지금 할 일")
                 todo.forEachIndexed { i, t ->
@@ -145,10 +145,11 @@ class BatteryActivity : ComponentActivity() {
         rows += Row.Header("밤사이")
         rows += Row.Note(BatterySummary.overnightLine(a))
         insights?.night?.let { n ->
-            val top = n.ranks.filter { it.score > 0 }.take(3).joinToString("\n") { "${HealthStore.label(this, it.use.pkg)}: ${it.summary}" }
+            val top = n.ranks.filter { it.score > 0 }.take(3).joinToString("\n") { "${appLabel(it.use.pkg)}: ${it.summary}" }
             if (top.isNotEmpty()) rows += Row.Note("밤사이 뒤에서 (${BatterySummary.time(n.start)}~):\n$top")
-            n.advice.forEachIndexed { i, adv ->
-                rows += Row.Step(color(Grade.CAUTION), R.drawable.ic_warning, "할 일", adv.substringBefore(" — "), adv.substringAfter(" — ", ""), key = "night:$i")
+            // 할 일은 줄에 맞춘 짧은 글로 (눌러 펼치면 끝까지)
+            n.todos.forEachIndexed { i, (title, sub) ->
+                rows += Row.Step(color(Grade.CAUTION), R.drawable.ic_warning, "할 일", title, sub, key = "night:$i")
             }
         }
 
@@ -165,8 +166,8 @@ class BatteryActivity : ComponentActivity() {
         insights?.charging?.let { ch ->
             rows += Row.Header("충전 습관")
             rows += Row.Note(BatterySummary.chargingLine(ch))
-            ch.advice.forEachIndexed { i, adv ->
-                rows += Row.Step(color(Grade.CAUTION), R.drawable.ic_battery, "할 일", adv.substringBefore(" — "), adv.substringAfter(" — ", ""), key = "charge:$i")
+            ch.todos.forEachIndexed { i, (title, sub) ->
+                rows += Row.Step(color(Grade.CAUTION), R.drawable.ic_battery, "할 일", title, sub, key = "charge:$i")
             }
         }
 
@@ -306,13 +307,13 @@ class BatteryActivity : ComponentActivity() {
         if (!b.exactScreen) rows += Row.Note("PC 툴킷 메뉴 7(권한 주기) 뒤엔 화면 켜짐 시간까지 정확히 나눕니다")
         insights?.wakes?.let { w ->
             rows += Row.Note("화면 켜짐 ${w.wakes}번 — 5초 안에 꺼짐 ${w.shortWakes}번 · 알림이 켬 ${w.notificationWakes}번 (알림 ${w.notifications}개)")
-            w.advice { HealthStore.label(this, it) }.forEachIndexed { i, a ->
-                rows += Row.Step(color(Grade.CAUTION), R.drawable.ic_warning, "할 일", a.substringBefore(" — "), a.substringAfter(" — ", ""), key = "wake:$i")
+            listOfNotNull(w.gestureTodo(), w.notificationTodo { appLabel(it) }).forEachIndexed { i, (title, sub) ->
+                rows += Row.Step(color(Grade.CAUTION), R.drawable.ic_warning, "할 일", title, sub, key = "wake:$i")
             }
         }
         b.steepest.forEach { h ->
-            val on = h.screenOnMs?.let { "화면 ${it / 60_000}분" + (h.topApp?.let { p -> "(${HealthStore.label(this, p)})" } ?: "") }
-            val bg = h.culprit?.takeIf { it.score > 0 }?.let { "뒤에서: ${HealthStore.label(this, it.use.pkg)} ${it.summary}" }
+            val on = h.screenOnMs?.let { "화면 ${it / 60_000}분" + (h.topApp?.let { p -> "(${appLabel(p)})" } ?: "") }
+            val bg = h.culprit?.takeIf { it.score > 0 }?.let { "뒤에서: ${appLabel(it.use.pkg)} ${it.summary}" }
             val g = Thresholds.mixed24h(h.pph)
             rows += Row.Step(color(g), R.drawable.ic_battery, if (g == Grade.NORMAL) null else g.label,
                 "${hourLabel(h.start)} · ${DrainAnalyzer.fmt(h.dropPercent)}% (시간당 ${DrainAnalyzer.fmt(h.pph)}%)",
@@ -337,19 +338,19 @@ class BatteryActivity : ComponentActivity() {
             return rows
         }
         insights?.watchFace?.let { f ->
-            rows += Row.Note("지금 시계 화면: ${HealthStore.label(this, f)}" + if (KnownIssues.isSystemFace(f)) " (기본)" else " (타사)")
+            rows += Row.Note("지금 시계 화면: ${appLabel(f)}" + if (KnownIssues.isSystemFace(f)) " (기본)" else " (타사)")
         }
         insights?.issues?.forEach { i ->
             rows += Row.Step(color(i.grade), R.drawable.ic_warning, i.grade.label, i.title,
                 (listOf(i.why) + i.steps.mapIndexed { n, st -> "${n + 1}) $st" }).joinToString("\n"), key = "issue:${i.id}")
-            val name = if (i.pkg == KnownIssues.GMS) "Play 서비스" else HealthStore.label(this, i.pkg)
+            val name = if (i.pkg == KnownIssues.GMS) "Play 서비스" else appLabel(i.pkg)
             rows += Row.Action("$A_APP_INFO${i.pkg}", R.drawable.ic_edit, "$name 앱 정보 열기", accent = true)
         }
         val ranked = insights?.culprits.orEmpty()
         if (ranked.isEmpty()) { rows += Row.Note("아직 두 번째 기록 전입니다 (15분 뒤부터)"); return rows }
         ranked.take(8).forEach { r ->
             val sub = (r.flags.filter { it != "이 앱" } + r.summary).joinToString(" · ")
-            val name = HealthStore.label(this, r.use.pkg) + (if ("이 앱" in r.flags) " (이 앱)" else "")
+            val name = appLabel(r.use.pkg) + (if ("이 앱" in r.flags) " (이 앱)" else "")
             rows += Row.Step(color(r.grade), R.drawable.ic_battery, if (r.grade == Grade.NORMAL) null else r.grade.label, name, sub, key = "app:${r.use.pkg}")
         }
         return rows
@@ -472,6 +473,9 @@ class BatteryActivity : ComponentActivity() {
             reload()
         }
     }
+
+    /** 분석(IO 스레드)이 미리 찾아 둔 앱 이름 — 그리는 동안 패키지 관리자를 부르지 않게 */
+    private fun appLabel(pkg: String): String = BatteryInsights.label(insights?.appNames.orEmpty(), pkg)
 
     /**
      * '최근 며칠': 날마다 대기 소모 막대, 꺾인 날(늘었으면 주의) 과 그 무렵 바뀐 것 3개, 그 밖의 최근 7일 바뀐 것 5개.

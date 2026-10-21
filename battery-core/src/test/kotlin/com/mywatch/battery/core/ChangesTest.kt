@@ -161,8 +161,8 @@ class ChangesTest {
         // 워치 '지금 할 일' 줄(제목 두 줄·설명 세 줄)에 들어가게 짧게
         for (c in changes + listOf(null)) {
             // (이름을 모르는 앱은 패키지 이름이 길 수 있다 — 워치는 앱 이름을 찾아 쓴다)
-            if (c?.subject != "com.example.early") assertTrue(advice(c).first, ChangeFinder.width(advice(c).first) <= ChangeFinder.TITLE_MAX)
-            assertTrue(advice(c).second, ChangeFinder.width(advice(c).second) <= ChangeFinder.DETAIL_MAX)
+            if (c?.subject != "com.example.early") assertTrue(advice(c).first, TodoText.fitsTitle(advice(c).first))
+            assertTrue(advice(c).second, TodoText.fitsDetail(advice(c).second))
         }
     }
 
@@ -184,7 +184,10 @@ class ChangesTest {
         assertTrue(ChangeFinder.advice(worse, emptyList(), ::name, known = false).second.contains("모릅니다"))
         // 지킴이의 절약 설정을 끈 것은 늘어난 까닭이 된다 — 조사는 받침 따라
         val off = Change(at(18, 13), ChangeKind.CONFIG, "night_aod", "1", "0")
-        assertEquals("지킴이 '밤에 AOD 끄기'를 끈 뒤 더 닳음", ChangeFinder.advice(worse, listOf(off), ::name).first)
+        val a2 = ChangeFinder.advice(worse, listOf(off), ::name)
+        // 제목 두 줄에 이름까지는 안 들어가 '지킴이 설정' — 어느 것인지는 설명에 (조사는 받침 따라)
+        assertEquals("지킴이 설정을 끈 뒤 더 닳음", a2.first)
+        assertEquals("지킴이에서 '밤에 AOD 끄기'를 다시 켜 보세요", a2.second)
     }
 
     @Test
@@ -248,12 +251,12 @@ class ChangesTest {
         assertEquals("삼성 헬스 업데이트 뒤 더 닳음", ChangeFinder.advice(worse, listOf(all.first { it.subject == ChangeFinder.SHEALTH }), { null }).first)
         assertTrue(ChangeFinder.advice(worse, listOf(all.last()), { names[it] }).first.let { it.startsWith("Samsung Galaxy") && it.contains("… 업데이트 뒤 더 닳음") })
         // 너비는 한글 한 글자 = 1, 영문은 그보다 좁게
-        assertEquals(6.6, ChangeFinder.width("업데이트 뒤 더"), 0.01)   // 한글 6 + 띄어쓰기 2
-        assertTrue(ChangeFinder.width("Samsung Health") < 10)
+        assertEquals(6.6, TodoText.width("업데이트 뒤 더"), 0.01)   // 한글 6 + 띄어쓰기 2
+        assertTrue(TodoText.width("Samsung Health") < 10)
         for (c in all) {
             val (title, detail) = ChangeFinder.advice(worse, listOf(c), { names[it] })
-            assertTrue("$title (${ChangeFinder.width(title)})", ChangeFinder.width(title) <= ChangeFinder.TITLE_MAX)
-            assertTrue("$detail (${ChangeFinder.width(detail)})", ChangeFinder.width(detail) <= ChangeFinder.DETAIL_MAX)
+            assertTrue("$title (${TodoText.lines(title, TodoText.TITLE_LINE)}줄)", TodoText.fitsTitle(title))
+            assertTrue("$detail (${TodoText.lines(detail, TodoText.DETAIL_LINE)}줄)", TodoText.fitsDetail(detail))
             assertFalse(title, title.contains("''") || Regex("'[^']*'[^']*'[^']*'").containsMatchIn(title))
         }
     }

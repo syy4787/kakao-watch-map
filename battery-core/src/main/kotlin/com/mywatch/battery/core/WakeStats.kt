@@ -1,8 +1,12 @@
 package com.mywatch.battery.core
 
+import java.time.Instant
+import java.time.ZoneId
+
 /**
  * 하루 동안 화면이 켜진 횟수. [shortWakes] = [Wakes.SHORT_MS] 안에 꺼진 것, [notificationWakes] = 알림 직후([Wakes.NOTIF_WINDOW_MS] 안)
- * 켜진 것, [gestureLikeWakes] = 알림 없이 금방 꺼진 것(손목을 들 때 저절로 켜진 것으로 보임).
+ * 켜진 것, [gestureLikeWakes] = 알림 없이 금방 꺼진 것 — 낮엔 대개 시계를 본 것(손목 올려 켜기의 쓰임)이라 그 자체로는 조언하지 않는다.
+ * [nightGestureWakes] = 그중 밤(0~6시)의 것 — 자는 동안 손목이 움직여 저절로 켜진 것으로 보인다.
  */
 data class WakeStats(
     val wakes: Int,
@@ -16,10 +20,17 @@ data class WakeStats(
     val topNotifiers: List<Pair<String, Int>>,
     /** 화면 켜진 동안 시간당 % (모르면 null) */
     val screenPph: Double?,
+    /** 밤(0~6시)에 알림 없이 금방 꺼진 화면 수와 그 시간 */
+    val nightGestureWakes: Int = 0,
+    val nightGestureMs: Long = 0,
 ) {
     /** 금방 꺼진 화면들이 하루에 쓴 % 어림 — 켜진 시간 × 화면 소모율 + 한 번 깨어날 때마다 드는 몫 */
     val gestureCostPercent: Double
         get() = gestureLikeMs / 3_600_000.0 * (screenPph ?: Wakes.DEFAULT_SCREEN_PPH) + gestureLikeWakes * Wakes.WAKE_OVERHEAD_PERCENT
+
+    /** 밤에 저절로 켜진 화면들이 쓴 % 어림 */
+    val nightGestureCostPercent: Double
+        get() = nightGestureMs / 3_600_000.0 * (screenPph ?: Wakes.DEFAULT_SCREEN_PPH) + nightGestureWakes * Wakes.WAKE_OVERHEAD_PERCENT
 
     val notificationCostPercent: Double
         get() = notificationWakes * (Wakes.NOTIF_SCREEN_MS / 3_600_000.0 * (screenPph ?: Wakes.DEFAULT_SCREEN_PPH) + Wakes.WAKE_OVERHEAD_PERCENT)
@@ -27,10 +38,19 @@ data class WakeStats(
     /** 많을 때만: 무엇을 끄면 되는지. [label] = 패키지 이름 → 보일 이름 */
     fun advice(label: (String) -> String = { it }): List<String> = listOfNotNull(gestureAdvice(), notificationAdvice(label))
 
-    /** 손목 올림으로 저절로 켜진 화면이 많을 때 (설정 > 디스플레이) */
-    fun gestureAdvice(): String? = if (gestureLikeWakes < Wakes.GESTURE_ADVICE) null else
-        "알림 없이 5초 안에 꺼진 화면 ${gestureLikeWakes}번 — 손목을 들 때 저절로 켜진 것으로 보입니다. " +
-            "설정 > 디스플레이에서 '손목 올려 켜기'(화면 켜기 제스처)를 끄면 하루 약 ${DrainAnalyzer.fmt(gestureCostPercent)}% 아낍니다"
+    /**
+     * 밤에 저절로 켜진 화면이 많을 때 — 낮의 짧은 켜짐은 시계를 본 것이라 세지 않는다(점검에서 찾음: 낮에 시계 보는 것을 '오작동'으로 세어
+     * 손목 올려 켜기를 통째로 끄라고 하던 것). 밤에만 끄는 길(취침 모드·지킴이)을 권한다
+     */
+    fun gestureAdvice(): String? = if (nightGestureWakes < Wakes.NIGHT_GESTURE_ADVICE) null else
+        "밤(0~6시)에 알림 없이 5초 안에 꺼진 화면 ${nightGestureWakes}번 — 자는 동안 손목이 움직여 저절로 켜진 것으로 보입니다. " +
+            "취침 모드를 켜거나 지킴이 '밤에 손목·터치 켜기 끄기'로 밤에만 끄면 하루 약 ${DrainAnalyzer.fmt(nightGestureCostPercent)}% 아낍니다 " +
+            "(낮에 시계를 볼 때 켜지는 것은 그대로)"
+
+    /** [gestureAdvice] 의 '지금 할 일' 줄 */
+    fun gestureTodo(): Pair<String, String>? = if (nightGestureWakes < Wakes.NIGHT_GESTURE_ADVICE) null else
+        "밤에 저절로 켜진 화면 ${nightGestureWakes}번" to
+            "취침 모드나 지킴이 '밤에 손목·터치 켜기 끄기'로 밤에만 끄기 (하루 약 ${DrainAnalyzer.fmt(nightGestureCostPercent)}%)"
 
     /** 알림이 화면을 켠 일이 많을 때 (폰의 Galaxy Wearable 앱) */
     fun notificationAdvice(label: (String) -> String = { it }): String? {
@@ -38,6 +58,15 @@ data class WakeStats(
         val top = topNotifiers.take(2).joinToString(", ") { "${label(it.first)} ${it.second}번" }
         return "알림이 화면을 ${notificationWakes}번 켬 (많이 보낸 앱: $top) — Galaxy Wearable 앱 > 워치 설정 > 알림 > 고급 알림 설정에서 " +
             "'화면 켜기'를 끄거나 그 앱의 워치 알림을 끄면 하루 약 ${DrainAnalyzer.fmt(notificationCostPercent)}% 아낍니다"
+    }
+
+    /** [notificationAdvice] 의 '지금 할 일' 줄 — 가장 많이 보낸 앱 하나만 (이름이 길면 줄여) */
+    fun notificationTodo(label: (String) -> String = { it }): Pair<String, String>? {
+        if (notificationWakes < Wakes.NOTIF_ADVICE) return null
+        val save = "(하루 약 ${DrainAnalyzer.fmt(notificationCostPercent)}%)"
+        val top = topNotifiers.firstOrNull()?.let { TodoText.clip(label(it.first)) }
+        return "알림이 화면을 ${notificationWakes}번 켬" to
+            (if (top != null) "폰 Galaxy Wearable 앱 › 알림에서 '$top' 끄기 $save" else "폰 Galaxy Wearable 앱 › 알림 › '화면 켜기' 끄기 $save")
     }
 }
 
@@ -52,6 +81,10 @@ object Wakes {
     /** 한 번 깨어날 때(프로세서·화면 켜기) 드는 몫 % — 경험칙 */
     const val WAKE_OVERHEAD_PERCENT = 0.005
     const val GESTURE_ADVICE = 80
+    /** 밤(0~6시)에 저절로 켜진 화면이 이만큼이면 밤에만 끄기를 권한다 */
+    const val NIGHT_GESTURE_ADVICE = 10
+    const val NIGHT_FROM_HOUR = 0
+    const val NIGHT_UNTIL_HOUR = 6
     const val NOTIF_ADVICE = 50
 
     /** 알림이 잠깐 켠 화면으로 보는 길이 (이보다 오래 켜져 있으면 읽은 것) */
@@ -70,7 +103,10 @@ object Wakes {
         }
     }
 
-    fun analyze(screen: List<Span>, notifications: List<Pair<String, Long>>, from: Long, to: Long, screenPph: Double?): WakeStats {
+    fun analyze(
+        screen: List<Span>, notifications: List<Pair<String, Long>>, from: Long, to: Long, screenPph: Double?,
+        zone: ZoneId = ZoneId.systemDefault(),
+    ): WakeStats {
         val spans = screen.filter { it.start >= from && it.start < to }.sortedBy { it.start }
         val notes = notifications.filter { it.second in from until to }.sortedBy { it.second }
         val noteTimes = notes.map { it.second }
@@ -85,14 +121,20 @@ object Wakes {
         var notif = 0
         var gesture = 0
         var gestureMs = 0L
+        var night = 0
+        var nightMs = 0L
         for (s in spans) {
             val isShort = s.ms < SHORT_MS
             val byNote = afterNotification(s.start)
             if (isShort) short++
             if (byNote) notif++
-            if (isShort && !byNote) { gesture++; gestureMs += s.ms }
+            if (isShort && !byNote) {
+                gesture++; gestureMs += s.ms
+                val h = Instant.ofEpochMilli(s.start).atZone(zone).hour
+                if (h >= NIGHT_FROM_HOUR && h < NIGHT_UNTIL_HOUR) { night++; nightMs += s.ms }
+            }
         }
         val top = notes.groupingBy { it.first }.eachCount().entries.sortedByDescending { it.value }.map { it.key to it.value }
-        return WakeStats(spans.size, short, notif, gesture, gestureMs, notes.size, top, screenPph)
+        return WakeStats(spans.size, short, notif, gesture, gestureMs, notes.size, top, screenPph, night, nightMs)
     }
 }

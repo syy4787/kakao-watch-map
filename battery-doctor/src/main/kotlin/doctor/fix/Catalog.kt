@@ -116,13 +116,14 @@ object Catalog {
                 undo = { b -> listOf(if (b == null || b == "null") listOf("shell", "settings", "delete", ns, "ambient_enabled") else listOf("shell", "settings", "put", ns, "ambient_enabled", b)) })
         }
 
-        // 화면 켜기 제스처·음성 호출 (Wear OS 설정 키 — 켜져 있을 때만). 손목 올림은 워치 앱이 센 '알림 없이 금방 꺼진 화면'이 많으면 추천
-        val gestureWakes = f.watchMetrics["gesture_wakes"]
+        // 화면 켜기 제스처·음성 호출 (Wear OS 설정 키 — 켜져 있을 때만). 손목 올려 켜기는 시계를 보는 기본 방법이라 추천(★)하지 않는다 —
+        // 낮의 짧은 켜짐은 시계를 본 것이고, 밤에 저절로 켜지는 것은 밤에만 끄면 된다(워치 지킴이·취침 모드)
+        val nightWakes = f.watchMetrics["night_gesture_wakes"]
         global["ambient_tilt_to_wake"]?.takeIf { it.trim() == "1" }?.let {
             out += wearSetting("tilt-wake-off", "ambient_tilt_to_wake", "손목 올려 켜기 끄기",
-                "global/ambient_tilt_to_wake 를 0 으로 — 손목을 들어도 화면이 저절로 켜지지 않습니다(버튼·터치로 켬)." +
-                    (gestureWakes?.let { g -> " 워치 앱 기록: 알림 없이 5초 안에 꺼진 화면 하루 ${g.toInt()}번" } ?: ""),
-                recommended = gestureWakes != null && gestureWakes >= com.mywatch.battery.core.Wakes.GESTURE_ADVICE)
+                "global/ambient_tilt_to_wake 를 0 으로 — 손목을 들어도 화면이 저절로 켜지지 않습니다(버튼·터치로 켬). 시계를 볼 때 늘 버튼을 눌러야 해서 권하지 않습니다." +
+                    (nightWakes?.takeIf { it >= 1.0 }?.let { n -> " 워치 앱 기록: 밤(0~6시)에 저절로 켜진 화면 ${n.toInt()}번 — 밤에만 끄려면 워치 배터리 화면의 지킴이 '밤에 손목·터치 켜기 끄기'나 취침 모드" } ?: ""),
+                recommended = false)
         }
         global["ambient_touch_to_wake"]?.takeIf { it.trim() == "1" }?.let {
             out += wearSetting("touch-wake-off", "ambient_touch_to_wake", "화면 터치로 켜기 끄기",

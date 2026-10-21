@@ -41,6 +41,8 @@ class ChargeHabitsTest {
         assertTrue(h.hoursAtFullPerDay.toString(), h.hoursAtFullPerDay in 6.0..9.0)
         assertFalse(h.protectLikely)
         assertTrue(h.advice.joinToString(), h.advice.any { it.contains("배터리 보호") })
+        // 할 일 줄에 맞춘 짧은 글이 같은 차례로
+        assertTrue(h.todos.toString(), h.todos.size == h.advice.size && h.todos.all { (t, d) -> TodoText.fitsTitle(t) && TodoText.fitsDetail(d) })
     }
 
     @Test
@@ -56,6 +58,7 @@ class ChargeHabitsTest {
         val h = ChargeHabits.analyze(nights(3, tempDeciC = 445), at(13, 7))!!
         assertEquals(44.5, h.maxChargeTempC!!, 0.01)
         assertTrue(h.advice.joinToString(), h.advice.any { it.contains("44.5℃") })
+        assertTrue(h.todos.toString(), h.todos.size == h.advice.size && h.todos.all { (t, d) -> TodoText.fitsTitle(t) && TodoText.fitsDetail(d) })
     }
 
     @Test

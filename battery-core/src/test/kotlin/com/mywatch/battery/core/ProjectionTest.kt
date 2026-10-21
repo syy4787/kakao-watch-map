@@ -71,6 +71,6 @@ class ProjectionTest {
         assertEquals("내일 15% 새벽 3:24 · 0% 오전 7:40", Forecast(40, 4.0, t(22, 3, 24), t(22, 7, 40)).short(zone, now))
         assertEquals("15% 오후 10:05 · 0% 내일 새벽 2:10", Forecast(20, 4.0, t(21, 22, 5), t(22, 2, 10)).short(zone, at(21, 50)))
         assertEquals("0% 오후 11:30", Forecast(10, 4.0, null, t(21, 23, 30)).short(zone, now))
-        assertTrue(ChangeFinder.width(Forecast(40, 4.0, t(22, 3, 24), t(22, 7, 40)).short(zone, now)) <= 22)
+        assertTrue(TodoText.width(Forecast(40, 4.0, t(22, 3, 24), t(22, 7, 40)).short(zone, now)) <= 22)
     }
 }

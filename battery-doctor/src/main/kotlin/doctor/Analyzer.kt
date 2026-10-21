@@ -148,7 +148,7 @@ object Analyzer {
         if (f.screenOffAtDump) {
             val byPkg = f.sensors.filter { it.active && (it.isMotion || it.isHeartRate) && f.isThirdParty(it.pkg) }.groupBy { it.pkg }
             for ((pkg, uses) in byPkg) {
-                out += Finding("sensor:$pkg", Severity.CAUTION, "$pkg 이(가) 화면 꺼진 상태에서 센서를 계속 등록 중 — 주의",
+                out += Finding("sensor:$pkg", Severity.CAUTION, "$pkg 이(가) 화면 꺼진 상태에서 센서를 계속 등록 중 — 수면·운동 기록 앱이 아니면 의심",
                     uses.map { "${it.sensor}${it.rateHz?.let { hz -> " ${fmt1(hz)}Hz" } ?: ""}" } + listOf("덤프 시점 화면 상태: 꺼짐"),
                     packages = listOf(pkg), source = Rules.SOURCE_SENSOR, category = "sensor")
             }
@@ -395,7 +395,7 @@ object Analyzer {
         val swAbnormal = ofCat(*softwareCats, min = Severity.ABNORMAL)
         val swCaution = findings.filter { it.category in softwareCats && it.severity == Severity.CAUTION }
         // 핵심 시스템 패키지(거부 목록)는 범인으로 지목하지 않는다 — Play 서비스만 2026년 패턴 안내를 위해 남긴다
-        val culprits = (swAbnormal + swCaution).flatMap { it.packages }.distinct().filter { it == GMS || !Catalog.isDenied(it) }
+        val culprits = (swAbnormal + swCaution).filter { it.blames }.flatMap { it.packages }.distinct().filter { it == GMS || !Catalog.isDenied(it) }
         if (swAbnormal.isNotEmpty()) {
             return DoctorVerdict(Cause.SOFTWARE, confidence(swAbnormal.size, hasWatch),
                 "소프트웨어(서비스) 과소모 — " + (culprits.takeIf { it.isNotEmpty() }?.let { "범인: ${it.take(3).joinToString(", ")}" } ?: swAbnormal.first().title),

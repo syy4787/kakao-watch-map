@@ -34,6 +34,14 @@ data class GaugeDrift(
             else -> "표시 ${reported}% · 전압 기준 약 ${voltageSoc}% — 잔량 표시 정상 범위"
         }
 
+    /** '지금 할 일' 줄에 맞춘 짧은 제목·설명 — 확실할 때만 할 일에 오른다 */
+    val todo: Pair<String, String>?
+        get() = when {
+            driftPoints < 0 -> "잔량 표시가 ${-driftPoints}포인트 낮음" to "실제로는 더 남음 — 충전기 위에서 강제 재시작하면 맞춰짐"
+            driftPoints > 0 -> "잔량 표시가 ${driftPoints}포인트 높음" to "갑자기 꺼질 수 있어 미리 충전 — 강제 재시작하면 맞춰짐"
+            else -> null
+        }
+
     val advice: String?
         get() = when {
             driftPoints <= -GaugeDriftRule.SUSPECT_POINTS -> "홈 + 뒤로 가기 버튼을 꺼질 때까지(7초 이상) 눌러 강제 재시작하면 게이지가 전압 기준으로 다시 맞춰집니다 — 충전기 위에서 하면 안전합니다. 그 전까지 표시보다 실제 잔량이 더 많다고 보면 됩니다"

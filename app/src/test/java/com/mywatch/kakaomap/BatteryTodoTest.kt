@@ -22,7 +22,7 @@ class BatteryTodoTest {
     private val face = KnownIssue("watch-face-heavy", "com.example.face", "지금 시계 화면이 배터리를 많이 씀", "CPU",
         listOf("기본 삼성 시계 화면으로 바꿔 비교"), Grade.CAUTION)
     private val busyWrist = WakeStats(wakes = 300, shortWakes = 200, notificationWakes = 10, gestureLikeWakes = 190, gestureLikeMs = 190 * 3_000L,
-        notifications = 40, topNotifiers = emptyList(), screenPph = 20.0)
+        notifications = 40, topNotifiers = emptyList(), screenPph = 20.0, nightGestureWakes = 30, nightGestureMs = 30 * 2_000L)
 
     @Test
     fun anAbnormalKnownIssueComesFirstThenWristWakesThenTheRest() {
@@ -31,7 +31,30 @@ class BatteryTodoTest {
         assertEquals("Google Play 서비스 과소모", t[0].title)
         assertEquals("Play 서비스 앱 정보 > 저장공간 > 캐시 지우기", t[0].detail)
         assertEquals("지금 시계 화면이 배터리를 많이 씀", t[1].title)
-        assertTrue(t[2].title, t[2].title.contains("5초 안에 꺼진 화면"))
+        assertTrue(t[2].title, t[2].title.contains("밤에 저절로 켜진 화면"))
+    }
+
+    /** 할 일로 오를 수 있는 글은 모두 워치 줄(제목 두 줄·설명 세 줄)에 들어간다 — 잘려 다른 뜻으로 읽히지 않게 (점검에서 찾음: '(데이터 지…') */
+    @Test
+    fun everyCandidateFitsTheWatchLine() {
+        val now = 1_792_500_000_000L
+        val day = 24 * 3_600_000L
+        val gmsRank = com.mywatch.battery.core.AppDrainRank(com.mywatch.battery.core.UidUse("com.google.android.gms", cpuMs = 40 * 60_000L), 1e7, listOf("stuck"), Grade.ABNORMAL)
+        val faceRank = com.mywatch.battery.core.AppDrainRank(com.mywatch.battery.core.UidUse("com.example.face", cpuMs = 30 * 60_000L), 1e6, emptyList(), Grade.CAUTION)
+        val issues = com.mywatch.battery.core.KnownIssues.detect(listOf(gmsRank, faceRank), "com.example.face", 2 * 3_600_000L)
+        val drain = (0..96).map { i -> com.mywatch.battery.core.BatterySample(t = now - (96 - i) * 15 * 60_000L, level = (100 - 4.0 * i / 4).toInt()) }
+        val analysis = com.mywatch.battery.core.DrainAnalyzer(445, java.time.ZoneId.of("Asia/Seoul")).analyze(drain, now)
+        val wakes = busyWrist.copy(notificationWakes = 120, topNotifiers = listOf("com.example.notifier" to 120))
+        val night = com.mywatch.battery.core.NightReport(0, 1, 7.0, emptyList(), listOf("삼성 헬스 …"), listOf("삼성 헬스 센서 밤새 시간당 118분" to "삼성 헬스 › 설정에서 수면 중 혈중 산소·피부 온도 측정 끄기"))
+        val charging = com.mywatch.battery.core.ChargeHabits(7.0, 7, 12.5, false, 44.5, listOf("a", "b"),
+            listOf("충전기에서 하루 12.5시간 100%" to "설정 › 배터리 › 배터리 보호 켜기 (90%에서 멈춰 덜 늙음)", "충전 중 최고 44.5℃" to "충전할 땐 벗기고 햇빛·이불 속·두꺼운 케이스 피하기"))
+        val ins = insights(issues, wakes).copy(analysis = analysis, bootAt = now - 12 * day, night = night, charging = charging)
+        val all = BatteryTodo.candidates(ins, permitted = false, label = { "Samsung Galaxy Wearable Plugin Service" }, now = now)
+        assertTrue(all.size >= 7)
+        for (t in all) {
+            assertTrue("제목: ${t.title}", com.mywatch.battery.core.TodoText.fitsTitle(t.title))
+            assertTrue("설명: ${t.detail}", com.mywatch.battery.core.TodoText.fitsDetail(t.detail ?: ""))
+        }
     }
 
     /** 최근 7일 안에 대기 소모가 늘어 꺾였으면 비정상 알려진 문제 다음에 — 그 무렵 가장 그럴듯한 변화(여기선 Play 서비스 업데이트)의 할 일 */
@@ -72,7 +95,8 @@ class BatteryTodoTest {
         val t = BatteryTodo.pick(insights(listOf(gms), busyWrist), permitted = true)
         assertEquals(BatteryTodo.Action.AppInfo("com.google.android.gms", "Play 서비스"), t[0].action)
         assertEquals("Play 서비스 앱 정보", t[0].action!!.label)
-        assertEquals(BatteryTodo.Action.Display, t.first { it.title.contains("5초 안에 꺼진 화면") }.action)
+        // 밤에 저절로 켜진 화면은 밤에만 끄는 길(취침 모드·지킴이)을 권하므로 설정 바로 가기는 없다
+        assertEquals(null, t.first { it.title.contains("밤에 저절로 켜진 화면") }.action)
         val shift = com.mywatch.battery.core.Shift(java.time.LocalDate.of(2026, 10, 17), java.time.LocalDate.of(2026, 10, 18), 1.0, 2.5, 4, 3)
         fun trendWith(c: com.mywatch.battery.core.Change) =
             insights().copy(trend = com.mywatch.battery.core.TrendReport(emptyList(), shift, listOf(c), emptyList(), null, fresh = true))
@@ -82,7 +106,8 @@ class BatteryTodoTest {
         assertEquals(BatteryTodo.Action.Display, BatteryTodo.pick(trendWith(aod), permitted = true).single().action)
         val face = com.mywatch.battery.core.Change(1L, com.mywatch.battery.core.ChangeKind.FACE, "face", null, "com.example.face")
         assertEquals(null, BatteryTodo.pick(trendWith(face), permitted = true).single().action)
-        val charging = com.mywatch.battery.core.ChargeHabits(7.0, 7, 8.0, false, 33.0, listOf("충전기에 100%로 하루 8시간 머뭅니다 — 설정 > 배터리 > 배터리 보호를 켜면 90%에서 멈춰 배터리가 덜 늙습니다"))
+        val charging = com.mywatch.battery.core.ChargeHabits(7.0, 7, 8.0, false, 33.0, listOf("충전기에 100%로 하루 8시간 머뭅니다 — …"),
+            listOf("충전기에서 하루 8시간 100%" to "설정 › 배터리 › 배터리 보호 켜기 (90%에서 멈춰 덜 늙음)"))
         assertEquals(BatteryTodo.Action.Battery, BatteryTodo.pick(insights().copy(charging = charging), permitted = true).single().action)
     }
 

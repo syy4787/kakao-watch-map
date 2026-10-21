@@ -35,6 +35,9 @@ class NightCulpritsTest {
         assertEquals("com.samsung.android.wear.shealth", r.ranks.first().use.pkg)
         assertTrue(r.advice.toString(), r.advice.single().contains("혈중 산소"))
         assertTrue(r.advice.toString(), r.advice.single().contains("시간당 120분"))
+        val (t, d) = r.todos.single()
+        assertTrue(t, t.contains("120분") && TodoText.fitsTitle(t))
+        assertTrue(d, TodoText.fitsDetail(d))
     }
 
     @Test

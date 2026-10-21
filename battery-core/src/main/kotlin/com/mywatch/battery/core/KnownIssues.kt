@@ -12,6 +12,8 @@ data class KnownIssue(
     val steps: List<String>,
     /** 비정상이면 알림까지, 주의면 화면에만 */
     val grade: Grade = Grade.CAUTION,
+    /** '지금 할 일' 줄에 맞춘 짧은 제목·설명 ([TodoText]) — 없으면 제목과 첫 단계 */
+    val todo: Pair<String, String>? = null,
 )
 
 /**
@@ -56,6 +58,8 @@ object KnownIssues {
                         "또 돌아오면 PC 툴킷 메뉴 8(자동 치료) — 모든 앱 캐시 정리와 Play 서비스 다시 시작을 대신 합니다. 워치 Play 스토어의 업데이트도 확인하세요",
                     ),
                     r.grade,
+                    // 줄에 맞게 — '캐시만'(데이터는 지우지 않음)이 잘려 '데이터 지…'로 읽히지 않게
+                    todo = "Play 서비스 과소모" to "앱 정보 › 저장공간 › 캐시만 지우기 → 30분 뒤 그대로면 강제 재시작",
                 )
             }
         }
@@ -76,6 +80,7 @@ object KnownIssues {
                             "Play 스토어의 그 시계 화면 정보에 '배터리 사용량이 많음' 경고가 있으면 다른 것으로",
                         ),
                         if (r.grade == Grade.NORMAL) Grade.CAUTION else r.grade,
+                        todo = "시계 화면이 많이 씀" to "기본 삼성 시계 화면으로 하루 써 보고 비교",
                     )
                 }
             }

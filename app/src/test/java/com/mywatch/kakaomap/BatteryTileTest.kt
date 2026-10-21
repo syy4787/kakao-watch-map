@@ -52,7 +52,7 @@ class BatteryTileTest {
         assertTrue(s.rate, s.rate.contains("시간당 4."))
         // 소모율은 위 줄에 있으니 언제 15%·0% 인지만 짧게 — 작은 글씨 두 줄에 0% 시각이 잘리지 않게 (점검에서 찾음)
         assertTrue(s.forecast, s.forecast.contains("15% ") && s.forecast.contains("0% ") && !s.forecast.contains("시간당"))
-        assertTrue(s.forecast, com.mywatch.battery.core.ChangeFinder.width(s.forecast) <= 22)
+        assertTrue(s.forecast, com.mywatch.battery.core.TodoText.width(s.forecast) <= 22)
         assertTrue(s.status, s.status.contains("지킴이"))
     }
 

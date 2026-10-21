@@ -1,8 +1,11 @@
 package com.mywatch.battery.core
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.time.LocalDateTime
+import java.time.ZoneId
 
 /**
  * 화면이 하루에 몇 번 켜졌고, 그중 몇 번이 알림 때문인지·몇 번이 금방 꺼졌는지(손목 올려 켜기 오작동 의심) —
@@ -31,7 +34,7 @@ class WakeStatsTest {
         repeat(20) { screen += Span(t, t + 60 * s); t += 10 * 60_000L }
         // 화면을 안 켠 알림(이미 켜져 있었거나 조용한 것)
         notes += "com.kakao.talk" to t + 1_000_000L
-        val w = Wakes.analyze(screen, notes, t0, t0 + day, screenPph = 24.0)
+        val w = Wakes.analyze(screen, notes, t0, t0 + day, screenPph = 24.0, zone = ZoneId.of("UTC"))
         assertEquals(280, w.wakes)
         assertEquals(200, w.shortWakes)
         assertEquals(60, w.notificationWakes)
@@ -41,8 +44,35 @@ class WakeStatsTest {
         // 2초 × 200번 = 400초 ≈ 0.11시간 × 24%/h ≈ 2.7% + 깨어날 때 드는 몫
         assertTrue("${w.gestureCostPercent}", w.gestureCostPercent in 2.5..6.0)
         val advice = w.advice()
-        assertTrue(advice.toString(), advice.any { it.contains("손목") && it.contains("200번") })
+        // 낮(9~17시 UTC)의 짧은 켜짐은 시계를 본 것 — 손목 올려 켜기를 끄라고 하지 않는다
+        assertTrue(advice.toString(), advice.none { it.contains("손목") })
         assertTrue(advice.toString(), advice.any { it.contains("알림") && it.contains("com.kakao.talk") })
+        val (title, detail) = w.notificationTodo()!!
+        assertTrue(title, title.contains("60번") && TodoText.fitsTitle(title))
+        assertTrue(detail, detail.contains("com.kakao") && TodoText.fitsDetail(detail))
+    }
+
+    /**
+     * 낮에 금방 꺼진 화면은 시계를 본 것 — 오작동으로 세지 않는다. 밤(0~6시)에 저절로 켜진 것이 많을 때만 '밤에만 끄기'를 권한다
+     * (점검에서 찾음: 시계 보기를 오작동으로 세어 손목 올려 켜기를 통째로 끄라고 하던 것)
+     */
+    @Test
+    fun onlyNightWakesCountAsMisfires() {
+        val zone = ZoneId.of("Asia/Seoul")
+        fun at(h: Int, m: Int) = LocalDateTime.of(2026, 10, 20, h, m).atZone(zone).toInstant().toEpochMilli()
+        val glances = (0 until 150).map { k -> at(8, 0) + k * 5 * 60_000L }.map { Span(it, it + 3 * s) }   // 8시부터 5분마다 3초
+        val w = Wakes.analyze(glances, emptyList(), at(0, 0), at(23, 59), 20.0, zone)
+        assertEquals(150, w.gestureLikeWakes)
+        assertEquals(0, w.nightGestureWakes)
+        assertNull(w.gestureAdvice())
+        assertNull(w.gestureTodo())
+        val night = (0 until 24).map { k -> at(1, 0) + k * 10 * 60_000L }.map { Span(it, it + 2 * s) }   // 1~5시 10분마다 2초
+        val n = Wakes.analyze(glances + night, emptyList(), at(0, 0), at(23, 59), 20.0, zone)
+        assertEquals(24, n.nightGestureWakes)
+        assertTrue(n.gestureAdvice()!!.contains("밤에만"))
+        val (title, detail) = n.gestureTodo()!!
+        assertTrue(title, TodoText.fitsTitle(title))
+        assertTrue(detail, TodoText.fitsDetail(detail))
     }
 
     @Test

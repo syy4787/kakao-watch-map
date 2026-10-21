@@ -280,33 +280,39 @@ class BatteryInsightsTest {
     fun manyShortWakesAndNotificationWakesGetAdvice() {
         allowUsage()
         val now = System.currentTimeMillis()
-        var t = now - 20 * 3_600_000L
-        repeat(120) {          // 손목을 들 때 켜졌다 2초 만에 꺼짐
+        // 23시간 내내 5분마다 2초씩 켜졌다 꺼짐 (지금 시각과 상관없이 그 안에 밤 0~6시가 4시간은 들어 있다 — 48번 넘게)
+        var t = now - 23 * 3_600_000L
+        var count = 0
+        while (t < now - 3_600_000L) {
             event("android", t, UsageEvents.Event.SCREEN_INTERACTIVE)
             event("android", t + 2_000L, UsageEvents.Event.SCREEN_NON_INTERACTIVE)
             t += 5 * 60_000L
+            count++
         }
-        repeat(60) {           // 카카오톡 알림이 화면을 켬
+        repeat(60) {           // 카카오톡 알림이 화면을 켬 (마지막 한 시간)
             event("com.kakao.talk", t, ScreenUsage.NOTIFICATION_INTERRUPTION)
             event("android", t + 400L, UsageEvents.Event.SCREEN_INTERACTIVE)
             event("android", t + 8_000L, UsageEvents.Event.SCREEN_NON_INTERACTIVE)
-            t += 3 * 60_000L
+            t += 30_000L
         }
         val u = ScreenUsage(context).readAll(now - 24 * 3_600_000L, now)!!
         assertEquals(60, u.notifications.size)
-        assertEquals(180, u.screen.size)
+        assertEquals(count + 60, u.screen.size)
         // 표본: 화면 기록과 상관없이 하루치
         var level = 95.0
         var s = now - 22 * 3_600_000L
         while (s <= now) { log.append(BatterySample(s, level.toInt())); level -= 0.6; s += q }
         val (_, adapter) = open()
         val rows = adapter.rows
-        assertTrue(rows.filterIsInstance<Row.Note>().any { it.text.startsWith("화면 켜짐 180번") })
+        assertTrue(rows.filterIsInstance<Row.Note>().any { it.text.startsWith("화면 켜짐 ${count + 60}번") })
         val todo = rows.filterIsInstance<Row.Step>().filter { it.key.startsWith("wake:") }
         assertEquals(2, todo.size)
-        assertTrue(todo[0].title, todo[0].title.contains("120번"))
-        assertTrue(todo[0].sub ?: "", (todo[0].sub ?: "").contains("손목 올려 켜기"))
+        // 낮의 짧은 켜짐(시계 보기)은 세지 않고 밤 것만 — 밤에만 끄는 길을 권한다
+        assertTrue(todo[0].title, todo[0].title.startsWith("밤에 저절로 켜진 화면"))
+        assertTrue(todo[0].sub ?: "", (todo[0].sub ?: "").contains("밤에만"))
         assertTrue(todo[1].title, todo[1].title.contains("알림이 화면을 60번"))
+        // 가장 많이 보낸 앱 (이름을 모르면 패키지 이름을 줄에 맞게 줄여)
+        assertTrue(todo[1].sub ?: "", (todo[1].sub ?: "").contains("com.kakao"))
     }
 
     /** 밤사이 뒤에서 쓴 앱과, 삼성 헬스가 밤새 센서를 켜 두면 측정 설정 할 일 */

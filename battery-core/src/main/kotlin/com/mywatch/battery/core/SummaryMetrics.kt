@@ -6,7 +6,7 @@ import java.util.Locale
  * 워치 앱 요약(summary.txt)의 '[지표] 이름=값 …' 한 줄 — 사람이 읽는 글 사이에 기계가 읽을 숫자를 둔다.
  * 워치 앱이 [line] 으로 쓰고, PC 툴킷이 [parse] 로 읽어 조치 추천과 치료 전후 비교에 쓴다.
  * 이름: idle_pph(대기 %/h) · day_pph(24시간 평균) · night_pph(밤사이) · screen_pph(화면 켜진 동안) · screen_share(화면 몫 0~1) ·
- * wakes · short_wakes · gesture_wakes(알림 없이 5초 안에 꺼짐) · notif_wakes · notifications · drift(잔량 표시 오차 포인트)
+ * wakes · short_wakes · gesture_wakes(알림 없이 5초 안에 꺼짐) · night_gesture_wakes(그중 밤 0~6시) · notif_wakes · notifications · drift(잔량 표시 오차 포인트)
  */
 object SummaryMetrics {
     const val TAG = "[지표]"

@@ -29,8 +29,11 @@ data class Finding(
     val source: String? = null,
     val category: String = "info",
 ) {
-    /** 이 소견이 [packages] 를 범인으로 지목하나 — '언제부터'(그 무렵 바뀐 것)는 우연일 수 있어 아니다 */
-    val blames: Boolean get() = category != Analyzer.TREND && severity != Severity.INFO
+    /**
+     * 이 소견이 [packages] 를 범인으로 지목하나 — '언제부터'(그 무렵 바뀐 것)는 우연일 수 있어 아니고, 덤프 순간 센서를 쥔 것도
+     * (수면·운동 기록 앱이면 정상이라) 그것만으로는 아니다 — 자동 치료가 그 앱을 제한해 기록이 끊기지 않게
+     */
+    val blames: Boolean get() = category != Analyzer.TREND && category != "sensor" && severity != Severity.INFO
 }
 
 enum class Cause { INSUFFICIENT, GAUGE, SOFTWARE, USAGE, HARDWARE, NORMAL;

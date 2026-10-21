@@ -358,11 +358,19 @@ class RowAdapter(
                         backgroundTintList = ColorStateList.valueOf(row.color)
                     }
                 }
-                v.text(R.id.title).text = row.title
-                v.text(R.id.sub).show(row.sub)
+                val title = v.text(R.id.title)
+                val sub = v.text(R.id.sub)
+                title.text = row.title
+                sub.show(row.sub)
                 v.text(R.id.live).show(row.live?.let(Format::glued))
-                v.setOnClickListener(null)
-                v.isClickable = false
+                // 눌러서 펼치기 — 두·세 줄에서 잘린 글도 끝까지 보게 (다시 쓰는 뷰는 접힌 채로 시작)
+                title.maxLines = STEP_TITLE_LINES
+                sub.maxLines = STEP_SUB_LINES
+                v.setOnClickListener {
+                    val open = title.maxLines != Int.MAX_VALUE
+                    title.maxLines = if (open) Int.MAX_VALUE else STEP_TITLE_LINES
+                    sub.maxLines = if (open) Int.MAX_VALUE else STEP_SUB_LINES
+                }
             }
             is Row.Chart -> {
                 (v as DrainChartView).model = row.model
@@ -694,5 +702,9 @@ class RowAdapter(
 
     companion object {
         fun color(view: View, res: Int) = ContextCompat.getColor(view.context, res)
+
+        /** 단계 줄의 접힌 줄 수 (item_step.xml 과 같게) — 할 일 글은 이 안에 맞춘다(TodoText) */
+        const val STEP_TITLE_LINES = 2
+        const val STEP_SUB_LINES = 3
     }
 }

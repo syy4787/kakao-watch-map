@@ -76,7 +76,7 @@ object BatteryInsights {
         val breakdown = runCatching {
             UsageSplit.analyze(samples, usage?.screen, usage?.apps.orEmpty(), HealthStore(c).windows(24, now), now, zone, ownPkg = c.packageName)
         }.onFailure { ErrorLog.record("배터리·사용 내역", it) }.getOrNull()
-        val wakes = usage?.let { u -> runCatching { Wakes.analyze(u.screen, u.notifications, now - 24 * 3_600_000L, now, breakdown?.screenPph) }.getOrNull() }
+        val wakes = usage?.let { u -> runCatching { Wakes.analyze(u.screen, u.notifications, now - 24 * 3_600_000L, now, breakdown?.screenPph, zone) }.getOrNull() }
         val (culprits, window) = runCatching { Guardian.culpritsInWindow(c, now) }.getOrDefault(emptyList<AppDrainRank>() to 0L)
         val night = runCatching { NightCulprits.lastNight(HealthStore(c).windows(24, now), now, zone, c.packageName) }.getOrNull()
         val face = runCatching { watchFace(c) }.getOrNull()
@@ -92,17 +92,29 @@ object BatteryInsights {
         val cover = runCatching { ScreenUsage(c).readScreen(now - DayTrend.DAYS * 24 * 3_600_000L, now) }.getOrNull()
         val trend = runCatching { TrendReport.of(samples, now, zone, cover) }.onFailure { ErrorLog.record("배터리·추세", it) }.getOrNull()
         val bootAt = (System.currentTimeMillis() - android.os.SystemClock.elapsedRealtime()).takeIf { it > 0 }
-        val names = trend?.let { t ->
-            val label = appName(c)
+        // 화면이 보일 앱 이름을 여기(IO 스레드)서 미리 찾아 둔다 — 그리는 동안 패키지 관리자를 부르지 않게
+        val label = appName(c)
+        val changed = trend?.let { t ->
             (t.suspects + t.recent).flatMap { ch ->
                 when (ch.kind) {
                     com.mywatch.battery.core.ChangeKind.APP -> listOf(ch.subject)
                     com.mywatch.battery.core.ChangeKind.FACE -> listOfNotNull(ch.to)
                     else -> emptyList()
                 }
-            }.distinct().mapNotNull { pkg -> label(pkg)?.let { pkg to it } }.toMap()
+            }
         }.orEmpty()
+        val shown = changed + wakes?.topNotifiers?.take(3)?.map { it.first }.orEmpty() + issues.map { it.pkg } +
+            culprits.take(12).map { it.use.pkg } + night?.ranks?.map { it.use.pkg }.orEmpty() + listOfNotNull(face) +
+            breakdown?.steepest.orEmpty().flatMap { h -> listOfNotNull(h.topApp, h.culprit?.use?.pkg) }
+        val names = shown.map { it.substringBefore('+') }.distinct().mapNotNull { pkg -> label(pkg)?.let { pkg to it } }.toMap()
         return Insights(analysis, breakdown, culprits, issues, effect, wakes, night, levers, chart, face, charging, trend, bootAt, names)
+    }
+
+    /** 미리 찾아 둔 이름으로 보일 이름 (공유 uid 의 '+N' 은 ' 외 N') — 화면을 그리는 동안 패키지 관리자를 부르지 않게 */
+    fun label(names: Map<String, String>, pkg: String): String {
+        val first = pkg.substringBefore('+')
+        val extra = pkg.substringAfter('+', "").takeIf { it.isNotEmpty() }?.let { " 외 $it" } ?: ""
+        return (names[first] ?: first) + extra
     }
 
     /** 패키지 → 앱 이름 (모르면 null — 지운 앱 등) */
