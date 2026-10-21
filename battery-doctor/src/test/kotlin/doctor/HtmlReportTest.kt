@@ -142,7 +142,7 @@ class HtmlReportTest {
     fun settingsCheckListsWakeKeysAndEveryRelatedKeyOnThisWatch() {
         val f = Facts(settings = mapOf(
             "global" to mapOf("ambient_tilt_to_wake" to "1", "hotword_detection_enabled" to "1", "wifi_on" to "1", "samsung_aod_style" to "2"),
-            "system" to mapOf("aod_mode" to "1", "screen_brightness" to "120"),
+            "system" to mapOf("aod_mode" to "1", "screen_brightness" to "120", "noti_screen_on" to "1", "turn_on_screen_by_noti" to "0"),
         ))
         val html = HtmlReport.render(f, emptyList(), DoctorVerdict(Cause.NORMAL, "낮음", "h", emptyList(), listOf("1", "2", "3"), emptyList()), emptyMap(), zone)
         val section = Regex("<h2>설정 점검.*?</section>", RegexOption.DOT_MATCHES_ALL).find(html)!!.value
@@ -152,6 +152,9 @@ class HtmlReportTest {
         assertTrue(section.contains("화면 켜기·AOD·절전 관련 키"))
         assertTrue(section.contains("global/samsung_aod_style=2"))
         assertTrue(section.contains("system/aod_mode=1"))
+        // 알림이 오면 화면 켜기('알림 받으면 화면 켜기')일 법한 키도 — 삼성 키 이름을 실제 수집으로 찾으려고
+        assertTrue(section.contains("system/noti_screen_on=1"))
+        assertTrue(section.contains("system/turn_on_screen_by_noti=0"))
         assertFalse(section.contains("screen_brightness=120"))
     }
 

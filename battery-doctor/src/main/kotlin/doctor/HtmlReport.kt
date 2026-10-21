@@ -373,8 +373,8 @@ object HtmlReport {
     private fun pct(x: Double) = String.format(Locale.US, "%.1f", x)
     private val stampFmt = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
 
-    /** 화면 켜기·AOD·절전에 관한 설정 키 이름 (삼성 고유 키 찾기용) */
-    private val RELATED_KEY = Regex("aod|ambient|always_on|wake|tilt|wrist|raise|gesture|hotword|talk|assistant|theater|bedtime|power_sav|battery_saver|low_power|doze", RegexOption.IGNORE_CASE)
+    /** 화면 켜기·AOD·절전에 관한 설정 키 이름 (삼성 고유 키 찾기용 — '알림 받으면 화면 켜기'일 법한 screen_on·turn_on 도) */
+    private val RELATED_KEY = Regex("aod|ambient|always_on|wake|tilt|wrist|raise|gesture|hotword|talk|assistant|theater|bedtime|power_sav|battery_saver|low_power|doze|screen_on|turn_on", RegexOption.IGNORE_CASE)
     private fun stamp(t: Long, zone: ZoneId) = Instant.ofEpochMilli(t).atZone(zone).format(stampFmt)
 
     private const val CSS = """
