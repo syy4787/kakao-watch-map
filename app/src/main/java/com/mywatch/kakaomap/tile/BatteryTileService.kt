@@ -90,7 +90,8 @@ class BatteryTileService : Material3TileService() {
         /** 기록(최근 2일)과 지금 값으로 타일 글을 만든다 — 시험에서 바로 부를 수 있게 */
         fun snapshot(context: Context, now: Long = System.currentTimeMillis(), zone: ZoneId = ZoneId.systemDefault()): Snapshot {
             val c = context.applicationContext
-            val samples = BatteryLog(c).readRecent(2, now).let { logged ->
+            // 시계가 뒤로 갔으면 '미래' 시각의 기록은 빼고 (시계가 따라잡을 때까지 묵은 잔량이 제목에 남지 않게)
+            val samples = BatteryLog(c).readRecent(2, now).filter { it.t <= now }.let { logged ->
                 // 지금 값(기록하지 않음)을 끝에 붙여 15분 사이의 변화도 반영
                 val live = runCatching { BatteryProbe.read(c, Event.APP_OPEN) }.getOrNull()?.takeIf { s -> logged.lastOrNull()?.let { s.t > it.t } ?: true }
                 if (live != null) logged + live.copy(t = now) else logged

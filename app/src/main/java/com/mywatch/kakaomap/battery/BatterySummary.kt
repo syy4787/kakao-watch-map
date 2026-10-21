@@ -146,13 +146,24 @@ object BatterySummary {
         // PC 툴킷이 방금 쓴 요약이면 자동 치료(캐시 정리·Play 서비스 다시 시작)를 고르는 데 쓴다
         "app_window_min" to insights?.appWindowMs?.takeIf { it > 0 }?.let { it / 60_000.0 },
     ).apply {
+        // 이틀 안에 짚었는데 지금은 안 보이는 문제 — 몇 시간 전인지(재시작·치료 뒤 다시 보는 중이거나 사라짐). 재시작 직후 PC 수집이 충전 뒤
+        // 통계(재시작 전 소모가 남음)만 보고 하드웨어로 단정하지 않게. 지금 짚은 문제면 문제 칸이 말하니 적지 않는다
+        fun seen(id: String, key: String) {
+            val at = insights?.earlier?.get(id) ?: return
+            if (insights.issues.any { it.id == id }) return
+            put(key, ((now - at).coerceAtLeast(0L) / 360_000L) / 10.0)
+        }
+        seen(com.mywatch.battery.core.KnownIssues.PLAY_SERVICES_LOOP, "seen_gms_h")
+        seen(com.mywatch.battery.core.KnownIssues.HOME_HOG, "seen_home_h")
         val ins = insights?.takeIf { it.appWindowMs >= com.mywatch.battery.core.KnownIssues.MIN_WINDOW_MS } ?: return@apply
         put("issue_gms", issueCode(ins, com.mywatch.battery.core.KnownIssues.PLAY_SERVICES_LOOP))
         put("issue_home", issueCode(ins, com.mywatch.battery.core.KnownIssues.HOME_HOG))
         put("issue_face", issueCode(ins, com.mywatch.battery.core.KnownIssues.WATCH_FACE_HEAVY))
-        // 재시작 뒤에도 또 나타났는지 — 문제마다 (한 문제가 다시 나타났다고 다른 문제까지 그렇게 적지 않게)
-        put("back_gms", if (ins.issues.any { it.id == com.mywatch.battery.core.KnownIssues.PLAY_SERVICES_LOOP && it.cameBack }) 1.0 else 0.0)
-        put("back_home", if (ins.issues.any { it.id == com.mywatch.battery.core.KnownIssues.HOME_HOG && it.cameBack }) 1.0 else 0.0)
+        // 재시작 뒤에도 또 나타났는지 — 문제마다 (한 문제가 다시 나타났다고 다른 문제까지 그렇게 적지 않게). 몇 번째 단계인지 그대로:
+        // 0 처음 · 1 재시작 뒤에도 또 · 2 다음 단계 뒤에도 계속 (예전 PC 툴킷은 1 이상을 '또 나타남'으로 읽는다)
+        fun stage(id: String) = (ins.issues.firstOrNull { it.id == id }?.stage ?: 0).toDouble()
+        put("back_gms", stage(com.mywatch.battery.core.KnownIssues.PLAY_SERVICES_LOOP))
+        put("back_home", stage(com.mywatch.battery.core.KnownIssues.HOME_HOG))
     })
 
     /** summary.txt 본문 */

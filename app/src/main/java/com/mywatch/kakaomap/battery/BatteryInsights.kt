@@ -62,6 +62,10 @@ data class Insights(
     val rebootPending: Boolean = false,
     /** 최근(일주일 안) 마지막 재시작 전후 대기 소모 — 시킨 대로 재시작한 뒤 나아졌는지 */
     val restart: com.mywatch.battery.core.RestartEffect? = null,
+    /** 이틀 안에 짚었던 알려진 문제(id → 마지막으로 본 때, [Guardian.lastSeen]) — 재시작·치료로 지금은 안 보여도 PC 툴킷이 알게 */
+    val earlier: Map<String, Long> = emptyMap(),
+    /** PC 치료 뒤 새 기준값 전 (10분 뒤 첫 기록부터 다시 모음 — [Guardian.treatPending]) */
+    val treatPending: Boolean = false,
 )
 
 
@@ -94,7 +98,7 @@ object BatteryInsights {
         val face = runCatching { watchFace(c) }.getOrNull()
         // 화면이 켜져 있던 시간·받은 알림(사용 통계, 하루치)을 같이 — One UI Watch 홈은 화면을 그리고 알림을 보여 주는 몫을 빼고 본다
         // (15분 기록과 같은 판단: 앱별 통계의 기록 구간들과 겹친 만큼)
-        val issues = Guardian.issuesIn(cw, face, usage?.screen, usage?.notifications?.map { it.second }, now - 24 * 3_600_000L, Guardian.cameBack(c, now), label)
+        val issues = Guardian.issuesIn(cw, face, usage?.screen, usage?.notifications?.map { it.second }, now - 24 * 3_600_000L, Guardian.stages(c, now), label)
         val effect = runCatching { LeverEffects.nightMode(samples, GuardianJournal(c).nightSessions(now), now, zone) }
             .getOrDefault(LeverEffect(emptyList(), emptyList()))
         val levers = runCatching { Levers(c).checkLine(Guardian.state(c).saverBroken) }.getOrNull()
@@ -123,8 +127,9 @@ object BatteryInsights {
         val rebootPending = runCatching { HealthStore(c).rebootedSinceLast(HealthStore.Boot.now(c)) }.getOrDefault(false)
         // 실제로 켜진 때(지금 − 켜진 뒤 시간)도 함께 — 부팅 기록보다 밀린 15분 기록이 먼저 남아도 재시작을 걸친 구간을 뺄 수 있게
         val restart = runCatching { com.mywatch.battery.core.RestartEffects.last(samples, now, bootAt) }.getOrNull()
+        val earlier = runCatching { Guardian.lastSeen(c, now) }.getOrDefault(emptyMap())
         return Insights(analysis, breakdown, culprits, issues, effect, wakes, night, levers, chart, face, charging, trend, bootAt, names, tileDevice, HomeUid.of(c),
-            cw.windowMs, rebootPending, restart)
+            cw.windowMs, rebootPending, restart, earlier, runCatching { Guardian.treatPending(c) }.getOrDefault(false))
     }
 
     /** 미리 찾아 둔 이름으로 보일 이름 (공유 uid 의 '+N' 은 ' 외 N') — 화면을 그리는 동안 패키지 관리자를 부르지 않게 */

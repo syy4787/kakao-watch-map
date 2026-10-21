@@ -42,6 +42,8 @@ class GaugeDriftTest {
         assertEquals("중간", d.confidence)   // 표본 8개, 다른 증거 없음
         assertTrue(GaugeDriftRule.shouldNotify(d, now, null))
         assertFalse(GaugeDriftRule.shouldNotify(d, now, now - 3_600_000L))   // 12시간 쿨다운
+        // 시계가 뒤로 가 미래가 된 마지막 알림 시각은 쿨다운으로 치지 않는다 (시나리오 점검)
+        assertTrue(GaugeDriftRule.shouldNotify(d, now, now + 3 * 3_600_000L))
     }
 
     @Test

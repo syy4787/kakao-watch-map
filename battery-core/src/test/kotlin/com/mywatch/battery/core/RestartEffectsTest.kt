@@ -6,7 +6,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * 재시작 효과: 시킨 대로 강제 재시작한 뒤 대기(화면 꺼짐·충전 안 함) 소모가 줄었는지 — 재시작 전 12시간과 재시작 30분 뒤부터를 견준다.
+ * 재시작 효과: 시킨 대로 강제 재시작한 뒤 대기(화면 꺼짐·충전 안 함) 소모가 줄었는지 — 재시작 직전의 대기 3시간과 재시작 30분 뒤부터를 견준다.
  * 재시작을 걸친 구간·부팅 표본에서 시작하는 구간(게이지가 잔량을 다시 잼)은 어느 쪽에도 넣지 않는다
  */
 class RestartEffectsTest {
@@ -139,6 +139,27 @@ class RestartEffectsTest {
             val e = RestartEffects.last(samples, b + 30 * 60_000L + 2 * h + shift)!!
             assertTrue("phase $phase: ${e.verdict} ${e.after}", e.verdict == null || e.verdict == RestartEffect.Verdict.SAME)
         }
+    }
+
+    /**
+     * '그 전'은 재시작 직전의 대기 3시간 — 12시간 전체로 평균하면 재시작 직전 한두 시간의 과소모가 묽어져(10시간 시간당 1.2% + 1시간 15분
+     * 5% → 1.6%), 과소모가 사라졌는데도 '비슷합니다'로 읽혔다 (시나리오 점검)
+     */
+    @Test
+    fun theBeforeWindowIsTheLastFewIdleHours() {
+        val b = t0 + 12 * h
+        val before = ArrayList<BatterySample>()
+        var level = 95.0
+        var t = t0
+        while (t <= b - q) {
+            before += BatterySample(t = t, level = level.toInt())
+            level -= (if (t >= b - 90 * 60_000L) 5.0 else 1.2) / 4   // 재시작 직전 1시간 15분만 과소모
+            t += q
+        }
+        val samples = before + boot(b, level.toInt()) + idle(b + q, b + 5 * h, level.toInt().toDouble(), 1.2)
+        val e = RestartEffects.last(samples, b + 5 * h)!!
+        assertTrue(e.before.toString(), e.before.percentPerHour!! > 2.2)
+        assertEquals(RestartEffect.Verdict.BETTER, e.verdict)
     }
 
     /** 충전 중·화면 켜진 구간은 대기가 아니다 */

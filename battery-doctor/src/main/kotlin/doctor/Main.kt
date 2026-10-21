@@ -101,19 +101,23 @@ object Main {
     }
 
     /**
-     * 이 수집 바로 앞의 수집과 비교해 콘솔에 보이고 돌려준다 (보고서에도 싣는다) — 처음 수집이거나 비교할 값이 없으면 null.
-     * collect / analyze / treat 가 같이 쓴다
+     * 이 수집을 치료 전 수집([Collect.baseline] — 조치가 없으면 바로 앞 수집)과 비교해 콘솔에 보이고 돌려준다 (보고서에도 싣는다) —
+     * 처음 수집이거나 비교할 값이 없으면 null. collect / analyze / treat 가 같이 쓴다
      */
     fun compareWithPrevious(io: Console, dataDir: File, snap: Snapshot, after: Facts, journal: Journal, zone: ZoneId): Comparison? {
-        val prev = Collect.before(dataDir, snap) ?: return null
-        val c = runCatching { Compare.of(Analyzer.facts(prev, zone), after, journal.entries(), zone) }.getOrNull() ?: return null
+        val entries = journal.entries()
+        val prev = Collect.baseline(dataDir, snap, entries) ?: return null
+        val between = (prev.pcTime + 1)..snap.pcTime
+        val c = runCatching { Compare.of(Analyzer.facts(prev, zone), after, entries, zone, actionsBetween = between) }.getOrNull() ?: return null
         val fmt = DateTimeFormatter.ofPattern("M/d HH:mm")
+        // 바로 앞 수집을 건너뛰고 조치 전 수집과 견주면 그렇다고 (보고서도 같은 말로)
+        val since = prev.dir != Collect.before(dataDir, snap)?.dir
         io.println()
-        io.println("━━ 지난 수집과 비교 (${Instant.ofEpochMilli(c.beforeAt).atZone(zone).format(fmt)} → ${Instant.ofEpochMilli(c.afterAt).atZone(zone).format(fmt)})" +
+        io.println("━━ ${if (since) "조치 전 수집과 비교" else "지난 수집과 비교"} (${Instant.ofEpochMilli(c.beforeAt).atZone(zone).format(fmt)} → ${Instant.ofEpochMilli(c.afterAt).atZone(zone).format(fmt)})" +
             (if (c.actions.isNotEmpty()) " — 사이에 한 조치: ${c.actions.joinToString(", ")}" else ""))
         io.println("   ${c.headline}")
         c.rows.forEach { r -> io.println(String.format("    - %s: %s → %s (%s)", r.label, r.before, r.after, r.change.label)) }
-        return c
+        return c.copy(sinceAction = since)
     }
 
     /** 판정 요약을 콘솔에 — collect / analyze / treat 가 같이 쓴다. [opened] 가 null 이면 브라우저 안내를 생략 */
@@ -324,6 +328,11 @@ object Main {
                 else -> {
                     io.println(" 번호  시각              상태        조치")
                     entries.forEachIndexed { i, e ->
+                        if (e.id == Fixer.UNDO_ALL) {
+                            // '모두 되돌리기'를 한 기록 — 되돌릴 조치가 아니다
+                            io.println(String.format(" %3d   %s  %-8s  %s — %s%s", i + 1, stamp(e.time), "기록", Evidence.describeLever(e.id), e.note ?: "", if (e.ok) "" else " (일부 실패)"))
+                            return@forEachIndexed
+                        }
                         val state = when { e.undone -> "되돌림"; e.undo == null -> "되돌릴 수 없음"; !e.ok -> "적용 실패"; else -> "적용됨" }
                         io.println(String.format(" %3d   %s  %-8s  %s (%s)%s", i + 1, stamp(e.time), state, Evidence.describeLever(e.id), e.id, e.before?.let { "  이전 값: $it" } ?: ""))
                     }
@@ -336,7 +345,7 @@ object Main {
                 }
             }
             val adb = device() ?: return 1
-            val n = Fixer.undo(adb, j, index)
+            val n = Fixer.undo(adb, j, index, clock())
             io.println("되돌린 조치: ${n}개" + (Fixer.lastError?.let { " — 실패: $it" } ?: ""))
             return if (Fixer.lastError == null) 0 else 1
         }

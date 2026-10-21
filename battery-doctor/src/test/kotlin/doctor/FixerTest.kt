@@ -87,6 +87,27 @@ class FixerTest {
         assertTrue(adb.calls.isEmpty())
     }
 
+    /** 모두 되돌리기는 끝에 그렇다는 기록을 남긴다 — 번호로 하나씩 되돌린 것과 가르려고(치료 전후 비교의 기준 · 리뷰). 번호로 되돌리면 남기지 않는다 */
+    @Test
+    fun undoAllLeavesAMarkerButUndoOneDoesNot() {
+        val adb = FakeAdb().apply { on("shell settings get global wifi_scan_always_enabled", "1\n") }
+        val j = journal()
+        Fixer.apply(adb, wifi, j, now = 1)
+        Fixer.apply(adb, bg, j, now = 2)
+        Fixer.undo(adb, j, 1, now = 3)
+        assertEquals(listOf("wifi-scan-off", "bg-restrict:com.example.drain"), j.entries().map { it.id })
+        Fixer.undo(adb, j, null, now = 4)
+        val last = j.entries().last()
+        assertEquals(Fixer.UNDO_ALL, last.id)
+        assertEquals(4L, last.time)
+        assertFalse(last.undone)
+        assertEquals(null, last.undo)
+        assertEquals("되돌린 기록 1개", last.note)
+        // 되돌린 것이 없으면(0개) 남기지 않는다 — 아무것도 바뀌지 않았으니 앞의 일회성 조치도 그대로 (리뷰)
+        Fixer.undo(adb, j, null, now = 5)
+        assertEquals(1, j.entries().count { it.id == Fixer.UNDO_ALL })
+    }
+
     @Test
     fun undoOneByIndex() {
         val adb = FakeAdb().apply { on("shell settings get global wifi_scan_always_enabled", "0\n") }

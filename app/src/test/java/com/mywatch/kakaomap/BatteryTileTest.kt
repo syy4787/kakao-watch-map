@@ -56,6 +56,15 @@ class BatteryTileTest {
         assertTrue(s.status, s.status.contains("지킴이"))
     }
 
+    /** 시계가 뒤로 갔으면 '미래' 시각의 기록으로 잔량을 보이지 않는다 — 시계가 따라잡을 때까지 묵은 잔량이 제목에 남지 않게 (시나리오 점검) */
+    @Test
+    fun aSampleFromTheFutureDoesNotTakeTheTitle() {
+        val now = at(12)
+        drain(now, 9, 63.0, 4.0)                       // 12:00 에 55%
+        log.append(BatterySample(at(13), 70))          // 시계가 한 시간 뒤로 가기 전에 남은 기록
+        assertEquals("배터리 55%", BatteryTileService.snapshot(context, now, zone).title)
+    }
+
     @Test
     fun chargingSaysSo() {
         val now = at(12)

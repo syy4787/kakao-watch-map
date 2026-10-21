@@ -127,14 +127,15 @@ class HealthStore(context: Context) {
 
     /**
      * 지금 스냅샷을 기록하고 직전과의 차를 돌려준다. 빈 목록(기준값만)인 때: 첫 기록 · [boot] 로 본 재시작 뒤 첫 스냅샷 · 직전 스냅샷이
-     * 부팅을 안 적은 예전 형식(업데이트 직후 — 그 사이 재시작했는지 모른다) · 시계가 뒤로 감. 재시작을 걸친 구간은 재시작 앞뒤 사용이
+     * 부팅을 안 적은 예전 형식(업데이트 직후 — 그 사이 재시작했는지 모른다) · 시계가 뒤로 감 · [boundary](PC 자동 치료 — 재시작처럼
+     * 부팅 차례를 하나 올리고 그 앞의 사용량은 빼고 새로 잰다). 재시작을 걸친 구간은 재시작 앞뒤 사용이
      * 섞이고, 강제 재시작은 저장 못 한 통계를 잃어 누적값이 줄기도 한다 — 그 줄어듦을 '충전 뒤 통계가 비워짐'으로 보면 충전 뒤 전부가
      * 한 구간 사용으로 잡혀 엉뚱한 과소모로 짚었다 (리뷰에서 찾음)
      */
-    fun record(now: Long, snapshot: Map<String, UidUse>, boot: Boot? = null): List<UidUse> = synchronized(LOCK) {
+    fun record(now: Long, snapshot: Map<String, UidUse>, boot: Boot? = null, boundary: Boolean = false): List<UidUse> = synchronized(LOCK) {
         dir.mkdirs()
         val prev = readLast()
-        val rebooted = boot != null && prev != null && (prev.boot == null || boot.rebootedSince(prev.boot))
+        val rebooted = prev != null && (boundary || boot != null && (prev.boot == null || boot.rebootedSince(prev.boot)))
         val seq = (prev?.seq ?: 0) + if (rebooted) 1 else 0
         val d = if (prev == null || rebooted || now <= prev.t) emptyList() else AppDrain.delta(prev.uses, snapshot)
         writeLast(now, snapshot, boot, seq)

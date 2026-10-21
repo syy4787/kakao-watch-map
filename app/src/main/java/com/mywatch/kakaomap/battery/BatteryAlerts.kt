@@ -51,14 +51,17 @@ object BatteryAlerts {
     fun check(context: Context, log: BatteryLog, now: Long = System.currentTimeMillis()) =
         check(context, log.readRecent(1, now), now, null)
 
-    /** [samples] 최근 표본, [screenOnMs] 최근 2시간 화면 켜짐(사용 통계로 알 때) */
+    /**
+     * [samples] 최근 표본, [screenOnMs] 최근 2시간 화면 켜짐(사용 통계로 알 때), [freshFrom] 기록을 새로 재기 시작한 때(재시작·PC 치료 —
+     * 그 앞의 표본은 섞지 않는다)
+     */
     fun check(
         context: Context, samples: List<com.mywatch.battery.core.BatterySample>, now: Long, screenOnMs: Long?,
-        zone: ZoneId = ZoneId.systemDefault(),
+        zone: ZoneId = ZoneId.systemDefault(), freshFrom: Long? = null,
     ) {
         val prefs = context.getSharedPreferences(BatteryLog.PREFS, Context.MODE_PRIVATE)
         val last = prefs.getLong(KEY_ALERT_AT, 0L).takeIf { it > 0 }
-        val alert = AlertRule.check(samples, now, last, screenOnMs) ?: return
+        val alert = AlertRule.check(samples, now, last, screenOnMs, freshFrom) ?: return
         if (runCatching { notify(context, alert, quiet(now, zone)) }.isSuccess) prefs.edit().putLong(KEY_ALERT_AT, now).apply()
     }
 

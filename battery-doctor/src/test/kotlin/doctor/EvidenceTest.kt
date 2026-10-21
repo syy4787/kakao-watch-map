@@ -119,6 +119,9 @@ class EvidenceTest {
         assertTrue(l1.contains("Galaxy Wearable"))
         assertTrue(l1.contains("오류 보내기"))
         assertTrue(l1.contains("5분"))
+        // 워치 앱 할 일과 같은 길 — 삼성전자서비스 안내 그대로 (리뷰)
+        assertTrue(l1, l1.contains("Galaxy Wearable 앱 › 아래 가운데 대시보드 › 오른쪽 위 ⋮(더보기) › 설정 › 문의하기 › 오류 보내기") &&
+            l1.contains("Samsung Members › 도움 받기 › 질문/오류 보내기") && l1.contains("2~3분"))
         assertTrue(l1.contains("시스템 로그"))
         assertTrue(l1.contains("Wi-Fi 꺼도 스캔 허용 끄기") || l1.contains("wifi-scan-off"))
         assertTrue(l1.contains("com.example.drain"))
@@ -139,6 +142,66 @@ class EvidenceTest {
         assertTrue(l3.contains("1년"))
         assertTrue(l3.contains("74일"))                      // 2026-08-07 → 2026-10-20
         assertTrue(l3.contains("지금 단계: 구입 1개월 이후"))
+    }
+
+    /**
+     * 신고문에 워치 기록의 켜짐(부팅)을 날짜·시각으로, 마지막 켜짐 전후 대기 소모, 워치 앱이 본 단계(다시 켜진 뒤에도 또 나타남 등)를 채운다 —
+     * 기억해서 적지 않아도 '재시작해도 그대로'가 증거로 남게. 켜짐은 사용자가 한 재시작만이 아니라(방전 뒤 켜짐·업데이트도) 증상 쪽에 본 그대로
+     * 적고(강제 재시작 표시가 앞뒤에 있으면 그렇다고, 충전 안 하던 1~3% 다음 충전기에서 켜졌으면 그 기록을), '시도한 조치'엔 사용자가 워치에
+     * 남긴 '강제 재시작' 표시만 (리뷰: 모든 켜짐을 사용자가 해 본 재시작으로 적으면 하지 않은 조치를 했다고 쓰는 셈). 표시가 없으면 빈칸 그대로
+     */
+    @Test
+    fun bootsFromTheWatchLogAreFactsAndOnlyMarkedRestartsAreTriedSteps() {
+        val q = 15 * 60_000L
+        val h = 3_600_000L
+        val m = 60_000L
+        val now = java.time.LocalDateTime.of(2026, 10, 20, 22, 0).atZone(zone).toInstant().toEpochMilli()
+        val start = now - 12 * h                                   // 10:00 부터 화면 꺼진 채 시간당 3%
+        val boots = listOf(now - 10 * h, now - 5 * h)              // 12:00, 17:00 켜짐
+        fun level(t: Long) = (90 - 3.0 * (t - start) / h).toInt()
+        val samples = ArrayList<com.mywatch.battery.core.BatterySample>()
+        var t = start
+        while (t <= now) { samples += com.mywatch.battery.core.BatterySample(t, level(t)); t += q }
+        for (b in boots) samples += com.mywatch.battery.core.BatterySample(b + m, level(b), event = com.mywatch.battery.core.Event.BOOT)
+        fun mark(at: Long) = com.mywatch.battery.core.BatterySample(at, level(at), event = com.mywatch.battery.core.Event.USER_NOTE,
+            note = com.mywatch.battery.core.GaugeDriftRule.NOTE_FORCED_RESTART)
+        samples += mark(boots[0] + 15 * m)                         // 켠 뒤에 남긴 표시 (12:15)
+        samples += mark(boots[1] - 2 * m)                          // 켜기 전에 남긴 표시 (16:58)
+        // 하루 전: 충전 안 하던 1% 다음 충전기에서 켜짐(17:00), 충전 중 2%에서 다시 켜짐(20:00 — 충전 중이라 방전 뒤라 하지 않는다)
+        samples += com.mywatch.battery.core.BatterySample(now - 30 * h, 1)
+        samples += com.mywatch.battery.core.BatterySample(now - 29 * h, 3, plugged = true, event = com.mywatch.battery.core.Event.BOOT)
+        samples += com.mywatch.battery.core.BatterySample(now - 26 * h - 15 * m, 2, plugged = true)
+        samples += com.mywatch.battery.core.BatterySample(now - 26 * h, 2, plugged = true, event = com.mywatch.battery.core.Event.BOOT)
+        val wm = mapOf("at" to (now - 5 * 60_000L).toDouble(), "app_window_min" to 120.0, "issue_home" to 2.0, "back_home" to 2.0)
+        val f = Facts(model = "SM-L350", collectedAt = now, watchSamples = samples.sortedBy { it.t }, watchMetrics = wm,
+            packages = listOf(doctor.parse.PackageInfo(Analyzer.HOME, 10123, true, false)))
+        val fs = Analyzer.findings(f)
+        assertTrue(fs.any { it.id == "watch-home" })
+        val letters = Evidence.letters(f, fs, Analyzer.verdict(f, fs), emptyList(), null, LocalDate.of(2026, 10, 20), zone)
+        for (name in listOf(Evidence.LETTER_MEMBERS, Evidence.LETTER_CENTER)) {
+            val l = letters.getValue(name)
+            val boot = l.lines().single { it.startsWith("- 워치 켜짐(부팅) 기록") }
+            assertTrue(boot, boot.contains("최근 7일 4번: 10/19 17:00(직전 기록 1% · 충전기에서 켜짐), 10/19 20:00, 10/20 12:01(강제 재시작 표시), 10/20 17:01(강제 재시작 표시)"))
+            val effect = l.lines().single { it.startsWith("- 마지막 켜짐(10/20 17:01) 전후 대기") }
+            assertTrue(effect, effect.contains("시간당 3.0% → 2.9%") && effect.endsWith("비슷합니다"))
+            // 워치 앱이 본 단계는 워치가 아는 말로 — 다시 켜진 횟수(사용자가 재시작했다고 하지 않음)
+            val stage = l.lines().single { it.startsWith("- 워치 앱 지킴이") }
+            assertTrue(stage, stage.contains("One UI Watch 홈") && stage.contains("두 번 이상 다시 켜진 뒤에도 계속") && !stage.contains("재시작을"))
+            // 켜짐·효과·단계는 증상 쪽 — '시도한 조치' 앞
+            val tried = l.indexOf(if (name == Evidence.LETTER_MEMBERS) "[시도한 조치]" else "시도한 조치:")
+            assertTrue(l, l.indexOf(boot) in 0 until tried && l.indexOf(effect) < tried && l.indexOf(stage) < tried)
+            // 시도한 조치엔 사용자가 남긴 '강제 재시작' 표시만
+            val mark = l.lines().single { it.startsWith("- 강제 재시작(홈 + 뒤로 가기 7초 이상)") }
+            assertTrue(mark, mark.endsWith("10/20 12:15, 10/20 16:58") && l.indexOf(mark) > tried)
+        }
+        // 단계 줄이 풀어 적는 소견은 주요 소견에서 빼고 (같은 말을 두 번 적지 않게), 요구서에도 단계 줄
+        assertTrue(letters.getValue(Evidence.LETTER_MEMBERS).lines().none { it.contains("워치 앱: One UI Watch 홈 과소모") })
+        assertTrue(letters.getValue(Evidence.LETTER_LAW).lines().any { it.startsWith("- 워치 앱 지킴이") })
+        // 켜짐·표시 기록이 없으면 빈칸 그대로
+        val bare = Facts(model = "SM-L350", collectedAt = now, watchSamples = samples.filter { it.event == com.mywatch.battery.core.Event.PERIODIC })
+        val l0 = Evidence.letters(bare, emptyList(), Analyzer.verdict(bare, emptyList()), emptyList(), null, LocalDate.of(2026, 10, 20), zone).getValue(Evidence.LETTER_MEMBERS)
+        assertTrue(l0, l0.contains("강제 재시작(홈 + 뒤로 가기 7초 이상): ${Evidence.BLANK}"))
+        assertTrue(l0, l0.lines().none { it.startsWith("- 워치 켜짐(부팅) 기록") })
     }
 
     @Test

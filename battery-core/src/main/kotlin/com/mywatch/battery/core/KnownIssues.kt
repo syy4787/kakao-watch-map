@@ -16,16 +16,25 @@ data class KnownIssue(
     val todo: Pair<String, String>? = null,
     /** 타일 한 줄 (문제와 그 할 일) — 없으면 제목 */
     val tile: String? = null,
-    /** 재시작해도 그대로라 다음 단계를 주는 것 ([KnownIssues.detect] 의 cameBack) */
-    val cameBack: Boolean = false,
-)
+    /**
+     * 몇 번째 단계인가 — 0 처음 · 1 재시작 뒤에도 또 나타나 다음 단계 · 2 그 다음 단계를 보인 뒤 또 재시작했는데도(Play 서비스는 그 뒤
+     * PC 치료로 다시 시작했는데도) 계속 ([KnownIssues.detect] 의 cameBack·again)
+     */
+    val stage: Int = 0,
+    /** 문제 앱의 앱 정보(저장공간 › 캐시 삭제) 바로 가기가 할 일에 쓸모 있나 — 남은 단계가 오류 보내기·업데이트뿐이면 false */
+    val appInfo: Boolean = true,
+) {
+    /** 재시작해도 그대로라 다음 단계를 주는 것 */
+    val cameBack: Boolean get() = stage >= 1
+}
 
 /**
  * 알려진 문제를 앱별 사용량 순위에서 짚어 낸다.
  *
  * Google Play 서비스: 2026년 4·6·7월 갤럭시워치(6·7·8·울트라 등, 워치9 사용자 보고 포함)에서 Play 서비스가 멈춘 채 돌며
  * 화면이 꺼져 있어도 배터리를 먹는 문제가 되풀이됐다(배터리 사용 1위, 16%~99%). 알려진 해결은 Play 서비스 캐시 지우기 →
- * 재시작 → 그래도 안 되면 업데이트를 기다리거나 초기화 (Android Authority 2026-07-24, 9to5Google 2026-04-13 보도).
+ * 재시작 → 그래도 안 되면 업데이트를 기다리거나 초기화 (Android Authority 2026-07-24, 9to5Google 2026-04-13 보도). 모두에게 듣는
+ * 해결은 없고, 충전 중 앱 업데이트가 도움이 됐다는 보고와, 초기화가 가장 꾸준히 들었지만 잠깐뿐이었다는 보고가 함께 있다(Gadget Hacks 2026).
  * Play 서비스가 순위 1위이거나 전체 사용량의 40% 넘게 차지하면서 '주의' 이상일 때만 짚는다 — 다른 앱이 훨씬 많이 쓰면 엉뚱한 해결을 주지 않게.
  */
 object KnownIssues {
@@ -35,6 +44,15 @@ object KnownIssues {
     const val HOME = "com.samsung.android.wearable.sysui"
     const val HOME_HOG = "watch-home-hog"
     const val SHARE = 0.4
+
+    /**
+     * 오류 보내기 — 삼성전자서비스 안내(2024-03, solution/98474: 폰의 Galaxy Wearable 앱 › 아래 가운데 대시보드 › 오른쪽 위 ⋮ › 설정 › 문의하기 ›
+     * 오류 보내기 · Samsung Members › 도움 받기 › 질문/오류 보내기, '증상 발생 2~3분 내'; 앱 버전에 따라 메뉴가 다르다 — 2020 안내(25167)는
+     * 왼쪽 위 메뉴 › 문의하기)와 삼성 호주 안내(2026-07: '시스템 로그 데이터 보내기' 체크, 5분 안에). 과소모가 이어지는 동안 보내야 로그에
+     * 남는다. 워치 앱과 PC 툴킷이 같은 말을 쓴다
+     */
+    const val REPORT = "오류 보내기 — 폰의 Galaxy Wearable 앱 › 대시보드 › ⋮ › 설정 › 문의하기 › 오류 보내기 또는 Samsung Members › 도움 받기 › " +
+        "질문/오류 보내기 › 보내기 › 오류 보내기 (기기는 워치로, '시스템 로그 데이터 보내기' 체크, 삼성 안내: 증상 2~3분 안에)"
 
     /** 삼성·구글 기본 시계 화면과 Watch Face Format 렌더러 — 시계 화면 문제로 짚지 않는다 */
     private val SYSTEM_FACES = listOf(
@@ -46,12 +64,14 @@ object KnownIssues {
 
     /**
      * [watchFace] = 지금 시계 화면의 패키지 (모르면 null), [windowMs] = 순위를 모은 시간 — 시계 화면은 늘 '보이는' 상태라
-     * 화면 밖 CPU 표시가 붙지 않으므로 CPU 를 시간당으로 따로 본다. [cameBack] = 재시작한 뒤에도 또 나타난 문제(id) — 그대로였든 몇 시간
-     * 뒤 다시 나타났든 같은 '재시작'을 되풀이하지 않고 다음 단계로 ('재시작해도 그대로'라고 단정하지 않는다)
+     * 화면 밖 CPU 표시가 붙지 않으므로 CPU 를 시간당으로 따로 본다. [cameBack] = 재시작한 뒤에도 또 나타난 문제(id) — 그대로였든
+     * 몇 시간 뒤 다시 나타났든 같은 '재시작'을 되풀이하지 않고 다음 단계로 ('재시작해도 그대로'라고 단정하지 않는다). [again] = 그 다음
+     * 단계를 보인 뒤 또 재시작했는데도(Play 서비스는 PC 치료로 다시 시작했는데도) 또 나타난 문제 — 사용자가 할 일이 거의 남지 않아
+     * 오류 보내기·업데이트·밤 모드로
      */
     fun detect(
         ranks: List<AppDrainRank>, watchFace: String? = null, windowMs: Long? = null, screenOnMs: Long? = null,
-        notifications: Int = 0, label: (String) -> String? = { null }, cameBack: Set<String> = emptySet(),
+        notifications: Int = 0, label: (String) -> String? = { null }, cameBack: Set<String> = emptySet(), again: Set<String> = emptySet(),
     ): List<KnownIssue> {
         if (ranks.isEmpty()) return emptyList()
         // 창이 1시간쯤(55분)은 돼야 — 짧으면(첫 스냅샷·재시작 직후·폰에서 알림 다시 받기) 잠깐의 일이 시간당으로 부풀려진다.
@@ -59,32 +79,55 @@ object KnownIssues {
         if (windowMs != null && windowMs < MIN_WINDOW_MS) return emptyList()
         val total = ranks.sumOf { it.score }
         val out = ArrayList<KnownIssue>()
+        fun stage(id: String) = if (id in again) 2 else if (id in cameBack) 1 else 0
         ranks.withIndex().firstOrNull { (_, r) -> r.use.pkg.substringBefore('+') == GMS }?.let { (i, r) ->
             if (r.grade != Grade.NORMAL && (i == 0 || r.score >= total * SHARE)) {
                 // 메뉴 이름은 삼성 한국어 화면 그대로 (저장공간 › 캐시 삭제 / 데이터 삭제)
                 val cache = "Play 서비스 앱 정보 > 저장공간 > 캐시 삭제 (데이터 삭제는 하지 마세요 — 계정이 다시 동기화됩니다)"
                 // PC 툴킷은 자기 보고서(충전 뒤 통계)가 Play 서비스를 짚어야 캐시 정리·다시 시작을 한다 — 늘 해 준다고 하지 않는다 (리뷰)
-                val pc = "PC 툴킷 메뉴 8(자동 치료) — PC 보고서도 Play 서비스를 짚으면 모든 앱 캐시 정리와 Play 서비스 다시 시작을 대신 합니다. 워치 Play 스토어의 업데이트도 확인하세요"
+                val pc = "PC 툴킷 메뉴 8(자동 치료) — PC 보고서도 Play 서비스를 짚으면 모든 앱 캐시 정리와 Play 서비스 다시 시작을 대신 합니다"
                 val why = (r.flags.filter { it != "이 앱" } + r.summary).joinToString(" · ")
-                out += if (PLAY_SERVICES_LOOP in cameBack) KnownIssue(
-                    PLAY_SERVICES_LOOP, GMS,
-                    "Google Play 서비스 과소모 — 재시작 뒤에도 또 나타남",
-                    why,
-                    listOf("아직 안 했으면 $cache", "그래도 그대로면 $pc", "고쳐질 때까지 밤엔 지킴이 밤 모드"),
-                    r.grade,
-                    todo = "재시작 뒤에도 Play 서비스 과소모" to "캐시만 지우기(아직이면) → 그대로면 PC 툴킷 메뉴 8(자동 치료)",
-                    tile = "Play 서비스 과소모 — 캐시·PC 치료",
-                    cameBack = true,
-                ) else KnownIssue(
-                    PLAY_SERVICES_LOOP, GMS,
-                    "Google Play 서비스 과소모 — 2026년 갤럭시워치에 되풀이된 문제",
-                    why,
-                    listOf(cache, "30분 뒤에도 그대로면 홈 + 뒤로 버튼을 꺼질 때까지(7초 이상) 눌러 강제 재시작", "또 돌아오면 $pc"),
-                    r.grade,
-                    // 줄에 맞게 — '캐시만'(데이터는 지우지 않음)이 잘려 '데이터 지…'로 읽히지 않게
-                    todo = "Play 서비스 과소모" to "앱 정보 › 저장공간 › 캐시만 지우기 → 30분 뒤 그대로면 강제 재시작",
-                    tile = "Play 서비스 과소모 — 캐시 지우기",
-                )
+                out += when (stage(PLAY_SERVICES_LOOP)) {
+                    // 캐시·재시작·PC 치료 중 다음 단계를 보인 뒤에도(PC 치료로 왔든 재시작 두 번으로 왔든) — 모두에게 듣는 해결은 없다: 남은 것만
+                    // 마저 하고, 업데이트를 받고, 알리고, 밤엔 덜 쓰게 버틴다. 앱 정보로 할 일은 없다
+                    2 -> KnownIssue(
+                        PLAY_SERVICES_LOOP, GMS,
+                        "Google Play 서비스 과소모 — 다음 단계 뒤에도 계속",
+                        why,
+                        listOf(
+                            "아직 안 했으면 강제 재시작(홈 + 뒤로 7초 이상) · $pc",
+                            "충전기에 올려 둔 채 워치 Play 스토어 › 내 앱 › 모두 업데이트 — 도움이 됐다는 사용자 보고가 있습니다(앞서 되풀이된 때는 얼마 뒤 잦아들었다는 보도가 있습니다)",
+                            "과소모가 이어지는 동안 $REPORT · 고쳐질 때까지 밤엔 지킴이 밤 모드 · 초기화는 마지막 수단(가장 꾸준히 들었다는 보고와 잠깐뿐이었다는 보고가 함께 있습니다 — 백업 먼저)",
+                        ),
+                        r.grade,
+                        todo = "Play 서비스 과소모 계속" to "Play 스토어 앱 모두 업데이트 → 오류 보내기 · 밤엔 밤 모드",
+                        tile = "Play 서비스 과소모 계속 — 업데이트·오류 보내기",
+                        stage = 2,
+                        appInfo = false,
+                    )
+                    1 -> KnownIssue(
+                        PLAY_SERVICES_LOOP, GMS,
+                        "Google Play 서비스 과소모 — 재시작 뒤에도 또 나타남",
+                        why,
+                        listOf("아직 안 했으면 $cache", "그래도 그대로면 $pc. 워치 Play 스토어의 업데이트도 확인하세요", "고쳐질 때까지 밤엔 지킴이 밤 모드"),
+                        r.grade,
+                        todo = "재시작 뒤에도 Play 서비스 과소모" to "캐시만 지우기(아직이면) → 그대로면 PC 툴킷 메뉴 8(자동 치료)",
+                        tile = "Play 서비스 과소모 — 캐시·PC 치료",
+                        stage = 1,
+                    )
+                    // 알려진 해결 순서대로 캐시 삭제 뒤 바로 강제 재시작 — '30분 뒤에도 그대로면'은 최근 2시간으로 보는 판단과 맞지 않아
+                    // (캐시를 지워도 1~2시간은 계속 짚임) 쓸데없는 재시작을 시켰다 (시나리오 점검)
+                    else -> KnownIssue(
+                        PLAY_SERVICES_LOOP, GMS,
+                        "Google Play 서비스 과소모 — 2026년 갤럭시워치에 되풀이된 문제",
+                        why,
+                        listOf(cache, "캐시를 지운 뒤 바로 홈 + 뒤로 버튼을 꺼질 때까지(7초 이상) 눌러 강제 재시작 — 돌고 있는 Play 서비스까지 새로 시작하게", "또 돌아오면 $pc. 워치 Play 스토어의 업데이트도 확인하세요"),
+                        r.grade,
+                        // 줄에 맞게 — '캐시만'(데이터는 지우지 않음)이 잘려 '데이터 지…'로 읽히지 않게
+                        todo = "Play 서비스 과소모" to "앱 정보 › 저장공간 › 캐시만 지우고 강제 재시작",
+                        tile = "Play 서비스 과소모 — 캐시 지우고 재시작",
+                    )
+                }
             }
         }
         // 타사 시계 화면이 웨이크락·CPU 를 많이 씀 — 기본 시계 화면으로 바꿔 비교 (Play 스토어도 2025년부터 배터리 경고를 단다)
@@ -134,31 +177,49 @@ object KnownIssues {
                     val name = label(HOME) ?: "One UI Watch 홈"
                     val why = (listOf(cpuNote) + r.flags.filter { it != "이 앱" }).joinToString(" · ")
                     val cache = "설정 › 애플리케이션 › $name › 저장공간 › 캐시 삭제 (데이터 삭제는 하지 마세요 — 홈 화면 배치가 초기화됩니다)"
-                    val report = "계속되면 Samsung Members 앱으로 오류 보고(삼성 안내) — 고쳐질 때까지 밤엔 지킴이 밤 모드"
-                    out += if (HOME_HOG in cameBack) KnownIssue(
-                        HOME_HOG, HOME,
-                        "One UI Watch 홈이 화면 꺼진 채 많이 씀 — 재시작 뒤에도 또 나타남",
-                        why,
-                        listOf(cache, "캐시를 지운 뒤 한 번 더 강제 재시작(홈 + 뒤로 7초 이상) — 캐시만 지우면 돌고 있는 홈은 그대로라서", report),
-                        grade,
-                        // 캐시만 지우면 돌고 있는 홈은 그대로 — 할 일 줄에도 강제 재시작을 같이 (리뷰)
-                        todo = "재시작 뒤에도 홈 과소모" to "앱 정보 › 저장공간 › 캐시만 지우고 강제 재시작 → 그대로면 오류 보고",
-                        tile = "One UI Watch 홈 과소모 — 홈 캐시 지우기",
-                        cameBack = true,
-                    ) else KnownIssue(
-                        HOME_HOG, HOME,
-                        "One UI Watch 홈이 화면 꺼진 채 많이 씀 — 2026년 업데이트 뒤 보고된 문제",
-                        why,
-                        listOf(
-                            "홈 + 뒤로 버튼을 꺼질 때까지(7초 이상) 눌러 강제 재시작 — 보통 재시작으론 안 풀리고 강제 재시작으로 나아졌다는 보고가 있습니다",
-                            "업데이트한 지 며칠 안 됐으면 적응 기간일 수 있습니다 — 충전기 위에서 하룻밤 지나도 그대로면 다음 단계",
-                            cache,
-                            report,
-                        ),
-                        grade,
-                        todo = "One UI Watch 홈 과소모" to "홈+뒤로 버튼 7초 넘게 눌러 강제 재시작 → 그대로면 홈 앱 캐시만 지우기",
-                        tile = "One UI Watch 홈 과소모 — 강제 재시작",
-                    )
+                    val report = "계속되면 과소모가 이어지는 동안 $REPORT — 고쳐질 때까지 밤엔 지킴이 밤 모드"
+                    out += when (stage(HOME_HOG)) {
+                        // 강제 재시작 → 홈 캐시 삭제·재시작을 보인 뒤에도 — 할 수 있는 건 알리고 고쳐질 때까지 버티는 것 (같은 단계를 되풀이하지 않게)
+                        2 -> KnownIssue(
+                            HOME_HOG, HOME,
+                            "One UI Watch 홈이 화면 꺼진 채 많이 씀 — 다음 단계 뒤에도 계속",
+                            why,
+                            listOf(
+                                "아직 안 했으면 $cache 뒤 강제 재시작(홈 + 뒤로 7초 이상)",
+                                "과소모가 이어지는 동안 $REPORT",
+                                "새 소프트웨어 확인: 폰의 Galaxy Wearable 앱 › 워치 설정 › 워치 소프트웨어 업데이트 — 고쳐질 때까지 밤엔 지킴이 밤 모드",
+                            ),
+                            grade,
+                            todo = "홈 과소모 계속" to "오류 보내기 · 워치 소프트웨어 업데이트 확인",
+                            tile = "One UI Watch 홈 과소모 계속 — 오류 보내기",
+                            stage = 2,
+                        )
+                        1 -> KnownIssue(
+                            HOME_HOG, HOME,
+                            "One UI Watch 홈이 화면 꺼진 채 많이 씀 — 재시작 뒤에도 또 나타남",
+                            why,
+                            listOf(cache, "캐시를 지운 뒤 한 번 더 강제 재시작(홈 + 뒤로 7초 이상) — 캐시만 지우면 돌고 있는 홈은 그대로라서", report),
+                            grade,
+                            // 캐시만 지우면 돌고 있는 홈은 그대로 — 할 일 줄·타일에도 강제 재시작을 같이 (리뷰·시나리오 점검)
+                            todo = "재시작 뒤에도 홈 과소모" to "앱 정보 › 저장공간 › 캐시만 지우고 강제 재시작 → 그대로면 오류 보내기",
+                            tile = "One UI Watch 홈 과소모 — 홈 캐시 지우고 재시작",
+                            stage = 1,
+                        )
+                        else -> KnownIssue(
+                            HOME_HOG, HOME,
+                            "One UI Watch 홈이 화면 꺼진 채 많이 씀 — 2026년 업데이트 뒤 보고된 문제",
+                            why,
+                            listOf(
+                                "홈 + 뒤로 버튼을 꺼질 때까지(7초 이상) 눌러 강제 재시작 — 보통 재시작으론 안 풀리고 강제 재시작으로 나아졌다는 보고가 있습니다",
+                                "업데이트한 지 며칠 안 됐으면 적응 기간일 수 있습니다 — 충전기 위에서 하룻밤 지나도 그대로면 다음 단계",
+                                cache,
+                                report,
+                            ),
+                            grade,
+                            todo = "One UI Watch 홈 과소모" to "홈+뒤로 버튼 7초 넘게 눌러 강제 재시작 → 그대로면 홈 앱 캐시만 지우기",
+                            tile = "One UI Watch 홈 과소모 — 강제 재시작",
+                        )
+                    }
                 }
             }
         }

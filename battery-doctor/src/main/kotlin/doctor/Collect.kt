@@ -40,6 +40,10 @@ data class Snapshot(val dir: File) {
                 LocalDateTime.parse(dir.name, Collect.DIR_FORMAT).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
             }.getOrElse { dir.lastModified() }
         }
+
+    /** 수집을 시작한 때 — PC 시계(조치 기록과 같은 시계). 없으면 [time] */
+    val pcTime: Long
+        get() = meta.getProperty("time")?.toLongOrNull() ?: time
 }
 
 /** 스펙 3장의 수집 목록을 돌려 스냅샷 폴더를 만든다 */
@@ -49,6 +53,8 @@ object Collect {
     /** 워치 앱의 셸 전용 받는 곳(DUMP 권한 — 다른 앱은 못 보냄)과 '지금 요약 쓰기' 신호 */
     const val SHELL_RECEIVER = "com.mywatch.kakaomap/.battery.ShellRestoreReceiver"
     const val SUMMARY_ACTION = "com.mywatch.kakaomap.battery.SHELL_SUMMARY"
+    /** 자동 치료를 마치고 보내는 '치료함' — 워치 앱이 앱별 기록을 거기서 새로 잰다 */
+    const val TREATED_ACTION = "com.mywatch.kakaomap.battery.SHELL_TREATED"
     val DIR_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss")
 
     /** 이름 → `adb shell` 뒤에 붙는 인자 */
@@ -149,6 +155,40 @@ object Collect {
     /** 가장 최근 스냅샷(폴더 이름 순) */
     fun latest(root: File): Snapshot? =
         File(root, "snapshots").listFiles()?.filter { it.isDirectory }?.maxByOrNull { it.name }?.let { Snapshot(it) }
+
+    /** 치료 전 수집을 찾을 때 이보다 오래된 조치는 보지 않는다 (그땐 바로 앞 수집과) */
+    const val BASELINE_ACTION_MS = 7L * 24 * 3_600_000L
+
+    /**
+     * 치료 전후 비교의 '전' — [snap] 전에 한 조치([actions]) 가운데 가장 늦은 것보다 앞선 마지막 수집. 자동 치료 10분 뒤에 확인하려고 한
+     * 번 더 수집했어도(초기화 직후라 비교할 값이 없음) 하루 뒤 수집이 그것이 아니라 치료 전 수집과 견주게 (시나리오 점검). 조치와 수집은
+     * PC 시계([Snapshot.pcTime])로 견준다. 조치가 없거나 일주일이 넘었으면 바로 앞 수집, 처음 수집이면 null
+     */
+    fun baseline(root: File, snap: Snapshot, journal: List<doctor.fix.JournalEntry>): Snapshot? {
+        val earlier = File(root, "snapshots").listFiles()?.filter { it.isDirectory && it.name < snap.dir.name }?.sortedBy { it.name }?.map { Snapshot(it) }
+        if (earlier.isNullOrEmpty()) return null
+        val at = snap.pcTime
+        val last = actions(journal).filter { it.time < at && at - it.time <= BASELINE_ACTION_MS }.maxOfOrNull { it.time }
+        return last?.let { t -> earlier.lastOrNull { it.pcTime < t } } ?: earlier.last()
+    }
+
+    /** 효과가 그때 한 번으로 끝나는 되돌릴 수 없는 조치 — 캐시 정리·Play 서비스 다시 시작·재시작·통계 초기화·강제 종료 */
+    private val ONE_SHOT = setOf("trim-caches", "gms-restart", "reboot", "batterystats-reset")
+    private fun oneShot(id: String) = id in ONE_SHOT || id.startsWith("force-stop:")
+
+    /**
+     * 치료 전후 비교에서 '조치'로 치는 기록 ([baseline] 과 [Compare] 의 '사이에 한 조치'가 같이 쓴다) — 성공했고, 되돌리지 않았고, 무언가를
+     * 바꾼 것(이미 있던 권한처럼 되돌릴 것이 없는 기록은 빼고). 되돌릴 수 없는 일회성 조치([oneShot])는 그 뒤에 '모두 되돌리기'(undo --all —
+     * [doctor.fix.Fixer.UNDO_ALL] 기록)를 했으면 그때 함께 끝난 것으로 보고, 번호로 골라 되돌렸으면 그대로(되돌릴 수 있는 것을 하나씩 다
+     * 되돌렸어도). 앱 데이터 삭제·업데이트 제거처럼 효과가 남는 조치는 되돌림과 상관없이 조치. 기록 차례로 견준다 — 시계가 바뀌어도 (리뷰)
+     */
+    fun actions(journal: List<doctor.fix.JournalEntry>): List<doctor.fix.JournalEntry> {
+        val lastUndoAll = journal.indexOfLast { it.id == doctor.fix.Fixer.UNDO_ALL }
+        return journal.filterIndexed { i, e ->
+            e.id != doctor.fix.Fixer.UNDO_ALL && e.ok && !e.undone && !(e.undo != null && e.undo.isEmpty()) &&
+                !(e.undo == null && oneShot(e.id) && i < lastUndoAll)
+        }
+    }
 
     /** [snap] 바로 앞의 수집 (치료 전후 비교용) — 없으면 null */
     fun before(root: File, snap: Snapshot): Snapshot? =

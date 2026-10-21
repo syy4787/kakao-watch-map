@@ -118,6 +118,15 @@ am_cmd() {
         printf '갤럭시워치 배터리 기록 요약\n[판정] 주의 — 대기 소모 시간당 3.1%%\n[알려진 문제] Google Play 서비스 과소모 — CPU 시간당 16분\n[지표] at=%s idle_pph=3.1 app_window_min=120 issue_gms=2 issue_home=0 issue_face=0 back_gms=0 back_home=0\n' "$at" > "$STATE/summary.txt"
         echo "Broadcasting: Intent { flg=0x400000 }"
         echo 'Broadcast completed: result=0, data="summary:ok"'
+      # 자동 치료를 마치고 보내는 '치료함' — 워치 앱이 앱별 기록을 거기서 새로 잰다 (받은 횟수를 남김)
+      elif printf '%s ' "$@" | grep -q "SHELL_TREATED"; then
+        echo treated >> "$STATE/treated"
+        echo "Broadcasting: Intent { flg=0x400000 }"
+        echo 'Broadcast completed: result=0, data="treated:ok"'
+      # 권한을 거두기 전 '모두 되돌리기'
+      elif printf '%s ' "$@" | grep -q "SHELL_RESTORE"; then
+        echo "Broadcasting: Intent { flg=0x400000 }"
+        echo 'Broadcast completed: result=0, data="restored"'
       else
         echo "fake-adb: am broadcast ?" >&2; exit 1
       fi ;;

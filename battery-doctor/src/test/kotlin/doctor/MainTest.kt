@@ -93,6 +93,7 @@ class MainTest {
         first.dir.listFiles()!!.filter { it.isFile && it.name != "report.html" }.forEach { it.copyTo(File(second, it.name), overwrite = true) }
         val t1 = Snapshot(first.dir).time
         File(second, "date.txt").writeText(((t1 + 35 * 3_600_000L) / 1000).toString())
+        File(second, "meta.properties").writeText("time=${t1 + 35 * 3_600_000L}\n")   // 수집마다 제 PC 시각
         Journal(File(data, "journal.jsonl")).append(doctor.fix.JournalEntry(t1 + 3_600_000L, "trim-caches", null, emptyList(), null, false))
         val (code, out) = run(fakeAdb(), data, "analyze")
         assertEquals(out, 0, code)
@@ -103,12 +104,15 @@ class MainTest {
         // 처음 수집이면 비교 없음
         val (_, firstOut) = run(fakeAdb(), data, "analyze", first.dir.path)
         assertFalse(firstOut.contains("지난 수집과 비교"))
-        // 10분 뒤 또 수집(충전 없이 이어짐 — 자동 치료가 다시 수집하는 경우): 겹치는 측정이라 비교하지 않는다
+        // 10분 뒤 또 수집: 바로 앞(겹치는 측정)이 아니라 치료 전 수집과 견준다 — 치료 뒤 몇 번을 수집해도 '치료 전과 비교' (시나리오 점검)
         val third = File(data, "snapshots/20261021-091000").apply { mkdirs() }
         second.listFiles()!!.filter { it.isFile && it.name != "report.html" }.forEach { it.copyTo(File(third, it.name), overwrite = true) }
         File(third, "date.txt").writeText(((t1 + 35 * 3_600_000L + 10 * 60_000L) / 1000).toString())
+        File(third, "meta.properties").writeText("time=${t1 + 35 * 3_600_000L + 10 * 60_000L}\n")
         val (_, thirdOut) = run(fakeAdb(), data, "analyze")
-        assertFalse(thirdOut, thirdOut.contains("지난 수집과 비교"))
+        assertTrue(thirdOut, thirdOut.contains("조치 전 수집과 비교") && thirdOut.contains("trim-caches"))
+        // 보고서도 같은 말로 (리뷰)
+        assertTrue(File(third, "report.html").readText().contains("조치 전 수집"))
     }
 
     @Test
@@ -156,7 +160,8 @@ class MainTest {
         val (code2, out2) = run(adb, data, "undo", "--all")
         assertEquals(out2, 0, code2)
         assertEquals(listOf("shell cmd appops set com.example.drain RUN_ANY_IN_BACKGROUND allow", "shell settings put global wifi_scan_always_enabled 1"), adb.joined().filter { it != "devices" })
-        assertTrue(journal.entries().all { it.undone })
+        assertTrue(journal.entries().dropLast(1).all { it.undone })
+        assertEquals(doctor.fix.Fixer.UNDO_ALL, journal.entries().last().id)      // '모두 되돌리기' 기록
     }
 
     @Test
@@ -205,6 +210,19 @@ class MainTest {
         val entries = Journal(File(data, "journal.jsonl")).entries()
         assertTrue(entries[0].undone)
         assertFalse(entries[1].undone)
+    }
+
+    /** 메뉴 5 목록에서 '모두 되돌리기'는 되돌릴 조치가 아니라 기록으로 — 몇 개를 되돌렸는지와 함께 (리뷰) */
+    @Test
+    fun theUndoListShowsTheUndoAllMarkerAsARecord() {
+        val data = tmp.newFolder("data")
+        sampleSnapshot(data)
+        val adb = fakeAdb()
+        run(adb, data, "fix", "--apply", "wifi-scan-off")
+        run(adb, data, "undo", "--all")
+        val (_, out) = run(adb, data, "undo", answers = listOf(""))
+        val row = out.lines().single { it.contains("모두 되돌리기") }
+        assertTrue(row, row.contains("기록") && row.contains("되돌린 기록 1개") && !row.contains("되돌릴 수 없음"))
     }
 
     @Test

@@ -75,6 +75,15 @@ class BatteryLogTest {
         assertEquals(0, log.readAll().size)
     }
 
+    /** 시계가 뒤로 가 '마지막으로 자른 때'가 미래가 돼도 하루 한 번 자르기는 이어진다 — 시계가 따라잡을 때까지 멈추지 않게 (시나리오 점검) */
+    @Test
+    fun aPruneStampFromTheFutureDoesNotStopPruning() {
+        context.getSharedPreferences(BatteryLog.PREFS, android.content.Context.MODE_PRIVATE).edit().putLong("pruned_at", now + 5 * 86_400_000L).commit()
+        log.append(BatterySample(now - 40L * 86_400_000L, 90))
+        log.pruneIfDue(now)
+        assertEquals(0, log.readAll().size)
+    }
+
     @Test
     fun writesASummaryNextToTheLog() {
         val f = log.writeSummary("요약")

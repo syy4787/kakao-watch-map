@@ -2,7 +2,8 @@ package com.mywatch.battery.core
 
 /**
  * 마지막 재시작 전후의 대기(화면 꺼짐·충전 안 함) 소모 — 시킨 대로 강제 재시작한 뒤 나아졌는지 숫자로 보여 준다.
- * [before] = 재시작 전 [RestartEffects.BEFORE_HOURS]시간(그 안에 앞 재시작이 있으면 그 30분 뒤부터),
+ * [before] = 재시작 직전의 대기 [RestartEffects.BEFORE_IDLE_HOURS]시간 (재시작 전 [RestartEffects.BEFORE_HOURS]시간 안에서, 앞 재시작이
+ * 있으면 그 30분 뒤부터 — 재시작하게 만든 직전의 과소모가 그 앞의 조용한 시간에 묽어지지 않게),
  * [after] = 재시작 [RestartEffects.SETTLE_MS] 뒤부터 [RestartEffects.AFTER_HOURS]시간 — 며칠 뒤 다시 나빠진 것까지 평균하지 않게.
  */
 data class RestartEffect(val bootAt: Long, val before: Rate, val after: Rate) {
@@ -43,8 +44,13 @@ data class RestartEffect(val bootAt: Long, val before: Rate, val after: Rate) {
 }
 
 object RestartEffects {
-    /** 재시작 전 이만큼을 '그 전'으로 */
+    /** 재시작 전 이만큼 안에서 '그 전'을 찾는다 */
     const val BEFORE_HOURS = 12
+    /**
+     * '그 전'은 재시작 직전의 대기 이만큼 — 12시간 전체로 평균하면 재시작 직전 한두 시간의 과소모가 묽어져(10시간 시간당 1.2% +
+     * 1시간 15분 5% → 1.6%) 과소모가 사라졌는데도 '비슷합니다'로 읽혔다 (시나리오 점검). 잔량이 1% 단위라 너무 짧게는 잡지 않는다
+     */
+    const val BEFORE_IDLE_HOURS = 3.0
     /** 재시작 뒤 이만큼을 '그 뒤'로 */
     const val AFTER_HOURS = 12
     /** 재시작 직후는 동기화·업데이트가 몰려 빼고 본다 */
@@ -72,10 +78,25 @@ object RestartEffects {
         val beforeEnd = minOf(at, boot.t - BOOT_ROW_LAG_MS)
         val prev = boots.getOrNull(boots.size - 2)
         val beforeStart = maxOf(at - BEFORE_HOURS * 3_600_000L, prev?.let { it.t + SETTLE_MS } ?: Long.MIN_VALUE)
-        val before = Rates.rateWithin(segs.filter { it.to.t <= beforeEnd }, beforeStart, beforeEnd)
+        val near = segs.filter { it.to.t <= beforeEnd && it.to.t > beforeStart }
+        val before = Rates.rateWithin(near, lastIdleStart(near, beforeStart), beforeEnd)
         if (before.hours < MIN_HOURS || before.percentPerHour == null) return null
         val afterStart = boot.t + SETTLE_MS
         val after = Rates.rateWithin(segs.filter { it.from.t >= at }, afterStart, minOf(now, afterStart + AFTER_HOURS * 3_600_000L))
         return RestartEffect(boot.t, before, after)
+    }
+
+    /**
+     * [segs] 를 뒤에서부터 세어 대기 [BEFORE_IDLE_HOURS]시간이 차는 때 (모자라면 [floor]) — [floor] 에 걸친 구간은 그 뒤만 세고,
+     * 다 차는 구간은 시간 비례로 자른다 ([Rates.rateWithin] 과 같이)
+     */
+    private fun lastIdleStart(segs: List<Segment>, floor: Long): Long {
+        var needMs = (BEFORE_IDLE_HOURS * 3_600_000L).toLong()
+        for (s in segs.sortedByDescending { it.to.t }) {
+            val ms = s.to.t - maxOf(s.from.t, floor)
+            if (ms >= needMs) return s.to.t - needMs
+            needMs -= ms
+        }
+        return floor
     }
 }

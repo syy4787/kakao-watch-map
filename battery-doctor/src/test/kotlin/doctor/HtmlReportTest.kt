@@ -171,6 +171,10 @@ class HtmlReportTest {
         assertTrue(html.contains("trim-caches"))
         assertTrue(html.contains("좋아짐"))
         assertFalse(HtmlReport.render(f, fs, Analyzer.verdict(f, fs), emptyMap(), zone).contains("치료 전후 비교"))
+        assertTrue(html.contains("지난 수집 "))
+        // 바로 앞이 아니라 조치 전 수집과 견줬으면 그렇다고 (콘솔과 같게)
+        val since = HtmlReport.render(f, fs, Analyzer.verdict(f, fs), emptyMap(), zone, comparison = c.copy(sinceAction = true))
+        assertTrue(since.contains("조치 전 수집 ") && !since.contains("지난 수집 "))
     }
 
     @Test

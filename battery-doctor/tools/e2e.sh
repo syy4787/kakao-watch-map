@@ -28,6 +28,9 @@ echo "[e2e] 작업 폴더 $WORK"
 run() { "${JAVA:-java}" -Dfile.encoding=UTF-8 -Dsun.jnu.encoding=UTF-8 -Djava.awt.headless=true -Dbd.adb="$FAKE" -jar "$JAR" "$@" 2>&1 | grep -v JAVA_TOOL_OPTIONS || true; }
 fake() { bash "$FAKE" "$@"; }
 fail() { echo "[e2e] 실패: $*"; exit 1; }
+# 출력을 다 받은 뒤 찾는다 — 'cmd | grep -q' 는 찾자마자 끝나 줄마다 쓰는 cmd 가 SIGPIPE 로 끝날 수 있고, pipefail 이라 맞아도 실패로
+# (부정 검사면 거짓 통과로) 보였다 (가끔 'DUMP 이 회수되지 않음'으로 실패 — 상태는 맞았음)
+has() { local pat="$1"; shift; local out; out="$("$@")"; grep -q -- "$pat" <<<"$out"; }
 
 echo "[e2e] connect"
 run connect 192.168.0.50:5555 | tee connect.log | tail -3
@@ -70,6 +73,8 @@ grep -q "되돌린 조치: 2개" undo.log || fail "되돌린 개수"
 [ "$(fake shell settings get global wifi_scan_always_enabled)" = "1" ] || fail "wifi_scan 이 복구되지 않음"
 [ "$(fake shell cmd appops get com.example.drain RUN_ANY_IN_BACKGROUND)" = "RUN_ANY_IN_BACKGROUND: allow" ] || fail "appops 가 복구되지 않음"
 [ "$(grep -c '"undone":true' data/journal.jsonl)" = "2" ] || fail "journal 되돌림 표시"
+# 모두 되돌리기는 끝에 그렇다는 기록을 남긴다 (치료 전후 비교가 번호로 하나씩 되돌린 것과 가르게)
+[ "$(grep -c '"id":"undo-all"' data/journal.jsonl)" = "1" ] || fail "모두 되돌리기 기록 없음"
 run undo --all | grep -q "되돌린 조치: 0개" || fail "두 번째 undo 는 0개여야 함"
 
 echo "[e2e] evidence"
@@ -95,9 +100,10 @@ grep -q " 8  자동 치료" menu.log || fail "메뉴 8 없음"
 echo "[e2e] treat (자동 치료: 권한 주기 → 수집·분석 → 조치 → 측정 시작)"
 OUR=com.mywatch.kakaomap
 BEFORE_LINES="$(wc -l < data/journal.jsonl)"
+BEFORE_UNDONE="$(grep -c '"undone":true' data/journal.jsonl)"
 RESETS_BEFORE="$( [ -f "$FAKE_ADB_STATE/resets" ] && wc -l < "$FAKE_ADB_STATE/resets" || echo 0 )"
 [ "$(fake shell settings get global wifi_scan_always_enabled)" = "1" ] || fail "treat 전 wifi_scan 값(되돌린 뒤라 1 이어야)"
-fake shell dumpsys package $OUR | grep -q "android.permission.BATTERY_STATS: granted=false" || fail "treat 전 권한 상태"
+has "android.permission.BATTERY_STATS: granted=false" fake shell dumpsys package $OUR || fail "treat 전 권한 상태"
 run treat | tee treat.log | tail -32
 grep -q "자동 치료 요약" treat.log || fail "treat 요약 없음"
 grep -q "권한 주기: 6개 모두 성공" treat.log || fail "권한 주기 결과가 '모두 성공'이 아님"
@@ -111,21 +117,24 @@ grep -q "clear:com.example.drain.*--strong" treat.log || fail "강함 후보 안
 grep -qE "범인 앱: .*com\.example\.drain" treat.log || fail "범인 앱 없음"
 grep -q "24시간 뒤 메뉴 2" treat.log || fail "다음 안내 없음"
 grep -q "배터리 통계 초기화: 완료" treat.log || fail "측정 시작 안내 없음"
+# 캐시 정리·Play 서비스 다시 시작을 했으니 워치 앱에 '치료함'을 한 번 알린다 (워치가 앱별 기록을 거기서 새로 잰다)
+[ "$(wc -l < "$FAKE_ADB_STATE/treated")" = "1" ] || fail "treat: 워치 앱에 치료를 알리지 않음"
+grep -q "워치 앱에 치료를 알렸습니다" treat.log || fail "treat: 워치 앱에 알렸다는 줄 없음"
 grep -q "report.html" treat.log || fail "보고서 경로 없음"
 ! grep -q "정말 적용하려면" treat.log || fail "treat 가 질문을 함"
 # journal: 새 기록 = 권한 6건 + 안전 4건(캐시 정리 포함) + 범인 앱 주의 3건 + Play 서비스 다시 시작 1건, 전부 성공·미되돌림, 금지 조치 없음
 NEW="$(tail -n +$((BEFORE_LINES + 1)) data/journal.jsonl)"
 for id in grant:android.permission.BATTERY_STATS grant:android.permission.WRITE_SECURE_SETTINGS grant:android.permission.DUMP grant:android.permission.READ_LOGS grant:GET_USAGE_STATS grant:WRITE_SETTINGS \
           wifi-scan-off ble-scan-off adaptive-battery-on trim-caches bg-restrict:com.example.drain bucket-restricted:com.example.drain doze-unwhitelist:com.example.drain gms-restart; do
-  printf '%s\n' "$NEW" | grep -q "\"id\":\"$id\"" || fail "journal 에 $id 없음"
+  grep -q "\"id\":\"$id\"" <<<"$NEW" || fail "journal 에 $id 없음"
 done
 [ "$(printf '%s\n' "$NEW" | grep -c '"id":')" = "14" ] || fail "treat 의 journal 기록 수 $(printf '%s\n' "$NEW" | grep -c '"id":') != 14"
 [ -s "$FAKE_ADB_STATE/trims" ] || fail "treat: 캐시 정리(pm trim-caches)가 실행되지 않음"
-! printf '%s\n' "$NEW" | grep -q '"undone":true' || fail "새 기록이 되돌림으로 표시됨"
-! printf '%s\n' "$NEW" | grep -q '"ok":false' || fail "treat 중 실패한 조치가 있음"
-! printf '%s\n' "$NEW" | grep -qE '"id":"(aod-off|clear:|reboot|gms-rollback|rollback:|force-stop:|disable:|app-standby-on)' || fail "자동 치료가 적용하면 안 되는 조치를 적용함"
-printf '%s\n' "$NEW" | grep -q '"id":"grant:android.permission.DUMP".*"undo":\[\["shell","pm","revoke","com.mywatch.kakaomap","android.permission.DUMP"\]\]' || fail "grant 기록의 undo 가 pm revoke 가 아님"
-printf '%s\n' "$NEW" | grep -q '"id":"grant:GET_USAGE_STATS".*"undo":\[\["shell","appops","set","com.mywatch.kakaomap","GET_USAGE_STATS","default"\]\]' || fail "appops grant 기록의 undo 가 default 가 아님"
+! grep -q '"undone":true' <<<"$NEW" || fail "새 기록이 되돌림으로 표시됨"
+! grep -q '"ok":false' <<<"$NEW" || fail "treat 중 실패한 조치가 있음"
+! grep -qE '"id":"(aod-off|clear:|reboot|gms-rollback|rollback:|force-stop:|disable:|app-standby-on)' <<<"$NEW" || fail "자동 치료가 적용하면 안 되는 조치를 적용함"
+grep -q '"id":"grant:android.permission.DUMP".*"undo":\[\["shell","pm","revoke","com.mywatch.kakaomap","android.permission.DUMP"\]\]' <<<"$NEW" || fail "grant 기록의 undo 가 pm revoke 가 아님"
+grep -q '"id":"grant:GET_USAGE_STATS".*"undo":\[\["shell","appops","set","com.mywatch.kakaomap","GET_USAGE_STATS","default"\]\]' <<<"$NEW" || fail "appops grant 기록의 undo 가 default 가 아님"
 # 가짜 상태가 바뀌었나
 [ "$(fake shell settings get global wifi_scan_always_enabled)" = "0" ] || fail "treat: wifi_scan 이 0 으로 안 바뀜"
 [ "$(fake shell settings get global ble_scan_always_enabled)" = "0" ] || fail "treat: ble_scan 이 0 으로 안 바뀜"
@@ -133,10 +142,10 @@ printf '%s\n' "$NEW" | grep -q '"id":"grant:GET_USAGE_STATS".*"undo":\[\["shell"
 [ "$(fake shell settings get global app_standby_enabled)" = "1" ] || fail "treat: app_standby 는 그대로 1 이어야"
 [ "$(fake shell cmd appops get com.example.drain RUN_ANY_IN_BACKGROUND)" = "RUN_ANY_IN_BACKGROUND: ignore" ] || fail "treat: appops 가 ignore 로 안 바뀜"
 [ "$(fake shell am get-standby-bucket com.example.drain)" = "restricted" ] || fail "treat: 대기 버킷이 restricted 로 안 바뀜"
-! fake shell cmd deviceidle whitelist | grep -q ",com.example.drain," || fail "treat: Doze 예외가 안 풀림"
-fake shell cmd deviceidle whitelist | grep -q ",com.google.android.gms," || fail "treat: 시스템 Doze 예외를 건드림"
+! has ",com.example.drain," fake shell cmd deviceidle whitelist || fail "treat: Doze 예외가 안 풀림"
+has ",com.google.android.gms," fake shell cmd deviceidle whitelist || fail "treat: 시스템 Doze 예외를 건드림"
 for perm in BATTERY_STATS WRITE_SECURE_SETTINGS DUMP READ_LOGS; do
-  fake shell dumpsys package $OUR | grep -q "android.permission.$perm: granted=true" || fail "treat: $perm 이 granted=true 가 아님"
+  has "android.permission.$perm: granted=true" fake shell dumpsys package $OUR || fail "treat: $perm 이 granted=true 가 아님"
 done
 [ "$(fake shell appops get $OUR GET_USAGE_STATS)" = "GET_USAGE_STATS: allow" ] || fail "treat: GET_USAGE_STATS 가 allow 가 아님"
 [ "$(fake shell appops get $OUR WRITE_SETTINGS)" = "WRITE_SETTINGS: allow" ] || fail "treat: WRITE_SETTINGS 가 allow 가 아님"
@@ -154,13 +163,14 @@ grep -q "되돌린 조치: 12개" undo2.log || fail "되돌린 개수(12 기대)
 [ "$(fake shell settings get global adaptive_battery_management_enabled)" = "0" ] || fail "undo2: 적응형 배터리 복구 안 됨"
 [ "$(fake shell cmd appops get com.example.drain RUN_ANY_IN_BACKGROUND)" = "RUN_ANY_IN_BACKGROUND: allow" ] || fail "undo2: appops 복구 안 됨"
 [ "$(fake shell am get-standby-bucket com.example.drain)" = "10" ] || fail "undo2: 대기 버킷 복구 안 됨"
-fake shell cmd deviceidle whitelist | grep -q ",com.example.drain," || fail "undo2: Doze 예외 복구 안 됨"
+has ",com.example.drain," fake shell cmd deviceidle whitelist || fail "undo2: Doze 예외 복구 안 됨"
 for perm in BATTERY_STATS WRITE_SECURE_SETTINGS DUMP READ_LOGS; do
-  fake shell dumpsys package $OUR | grep -q "android.permission.$perm: granted=false" || fail "undo2: $perm 이 회수되지 않음"
+  has "android.permission.$perm: granted=false" fake shell dumpsys package $OUR || fail "undo2: $perm 이 회수되지 않음"
 done
 [ "$(fake shell appops get $OUR GET_USAGE_STATS)" = "GET_USAGE_STATS: default" ] || fail "undo2: GET_USAGE_STATS 회수 안 됨"
 [ "$(fake shell appops get $OUR WRITE_SETTINGS)" = "WRITE_SETTINGS: default" ] || fail "undo2: WRITE_SETTINGS 회수 안 됨"
-[ "$(grep -c '"undone":true' data/journal.jsonl)" = "$((BEFORE_LINES + 12))" ] || fail "journal 되돌림 표시 수"
+[ "$(grep -c '"undone":true' data/journal.jsonl)" = "$((BEFORE_UNDONE + 12))" ] || fail "journal 되돌림 표시 수"
+[ "$(tail -n 1 data/journal.jsonl | grep -c '"id":"undo-all"')" = "1" ] || fail "treat 되돌리기 뒤 모두 되돌리기 기록 없음"
 run undo --all | grep -q "되돌린 조치: 0개" || fail "treat 뒤 두 번째 undo 는 0개여야 함"
 
 echo "[e2e] OK  (작업 폴더: $WORK)"

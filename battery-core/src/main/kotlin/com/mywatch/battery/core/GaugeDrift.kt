@@ -165,7 +165,8 @@ object GaugeDriftRule {
     /** 알림이 필요한가: 낮게 세는 드리프트가 확실하고(신뢰도 중간 이상) 잔량 표시가 낮을 때, 12시간에 한 번 */
     fun shouldNotify(d: GaugeDrift?, now: Long, lastAt: Long?): Boolean {
         if (d == null || d.confidence == "낮음") return false
-        if (lastAt != null && now - lastAt < NOTIFY_COOLDOWN_MS) return false
+        // 시계가 뒤로 가 미래가 된 마지막 알림 시각은 쉼으로 치지 않는다
+        if (lastAt != null && now - lastAt in 0 until NOTIFY_COOLDOWN_MS) return false
         return d.driftPoints <= -CERTAIN_POINTS && d.reported <= NOTIFY_LEVEL
     }
 

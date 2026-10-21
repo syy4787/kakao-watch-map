@@ -70,7 +70,7 @@ object HtmlReport {
         comparison?.let { c ->
             sb.append("<section class=\"card\"><h2>치료 전후 비교</h2>")
             sb.append("<p class=\"headline\">${esc(c.headline)}</p>")
-            sb.append("<p class=\"meta\">지난 수집 ${esc(stamp(c.beforeAt, zone))} → 이번 수집 ${esc(stamp(c.afterAt, zone))}")
+            sb.append("<p class=\"meta\">${if (c.sinceAction) "조치 전 수집" else "지난 수집"} ${esc(stamp(c.beforeAt, zone))} → 이번 수집 ${esc(stamp(c.afterAt, zone))}")
             if (c.actions.isNotEmpty()) sb.append(" · 사이에 한 조치: ${c.actions.joinToString(", ") { "<code>${esc(it)}</code>" }}")
             sb.append("</p><table><tr><th>항목</th><th>전</th><th>후</th><th>변화</th></tr>")
             for (r in c.rows) {

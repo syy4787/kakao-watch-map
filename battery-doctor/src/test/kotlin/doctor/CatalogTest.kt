@@ -3,6 +3,7 @@ package doctor
 import doctor.fix.Catalog
 import doctor.fix.Lever
 import doctor.fix.Tier
+import doctor.parse.PackageInfo
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -38,6 +39,15 @@ class CatalogTest {
         val levers = Catalog.levers(f, listOf(shift))
         assertTrue(levers.filter { "com.kakao.talk" in it.packages }.none { it.recommended })
         assertFalse(levers.id("trim-caches")!!.recommended)
+        // 워치가 홈 과소모를 짚었을 때: 재시작 뒤에도 또(1단계)면 캐시 정리를 추천하지만, 그다음 단계(2)면 이미 해 본 것 — 되풀이하지 않는다 (리뷰)
+        val now = 1_792_414_865_000L
+        fun home(stage: Double): List<Lever> {
+            val hf = Facts(collectedAt = now, packages = listOf(PackageInfo(Analyzer.HOME, 10123, true, false)),
+                watchMetrics = mapOf("at" to (now - 5 * 60_000L).toDouble(), "issue_home" to 2.0, "back_home" to stage, "app_window_min" to 90.0))
+            return Catalog.levers(hf, Analyzer.findings(hf))
+        }
+        assertTrue(home(1.0).id("trim-caches")!!.recommended)
+        assertFalse(home(2.0).id("trim-caches")!!.recommended)
         val plan = Treat.decide(levers, strong = false)
         assertTrue(plan.apply.map { it.id }.toString(), plan.apply.none { "com.kakao.talk" in it.packages || it.id == "trim-caches" || it.id == "gms-restart" })
     }

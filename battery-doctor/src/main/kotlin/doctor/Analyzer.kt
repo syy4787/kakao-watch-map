@@ -35,6 +35,8 @@ import java.util.Locale
 /** 사실(facts) → 소견(findings) → 판정(verdict) */
 object Analyzer {
     const val GMS = "com.google.android.gms"
+    /** 오류 보내기 — 워치 앱과 같은 길·같은 말([com.mywatch.battery.core.KnownIssues.REPORT])에 붙여 넣을 글(메뉴 6 증거 패키지)까지 */
+    const val REPORT = "${com.mywatch.battery.core.KnownIssues.REPORT} — 붙여 넣을 글은 메뉴 6(증거 패키지)의 ${Evidence.LETTER_MEMBERS}"
     /** One UI Watch 홈 (시스템 UI) */
     const val HOME = "com.samsung.android.wearable.sysui"
     /** 시스템 uid (android.os.Process.SYSTEM_UID) */
@@ -191,24 +193,63 @@ object Analyzer {
         val watchFresh = (wm["app_window_min"] ?: 0.0) >= 55.0 &&
             wm["at"]?.let { at -> f.collectedAt?.let { c -> c - at.toLong() in -WATCH_AHEAD_MS..WATCH_FRESH_MS } } == true
         if (watchFresh) {
-            fun back(key: String) = if ((wm[key] ?: 0.0) >= 1.0) " — 재시작 뒤에도 또 나타남" else ""
+            // 워치가 적은 단계: 0 처음 · 1 재시작 뒤에도 또 · 2 다음 단계 뒤에도 계속 (예전 워치 앱은 1까지만)
+            fun stage(key: String) = (wm[key] ?: 0.0).let { if (it >= 2.0) 2 else if (it >= 1.0) 1 else 0 }
+            fun back(key: String) = when (stage(key)) { 2 -> " — 다음 단계 뒤에도 계속"; 1 -> " — 재시작 뒤에도 또 나타남"; else -> "" }
             val minutes = wm["app_window_min"]!!.toInt()
             wm["issue_gms"]?.takeIf { it >= 1.0 }?.let { g ->
                 out += Finding("watch-gms", if (g >= 2.0) Severity.ABNORMAL else Severity.CAUTION, "워치 앱: 최근 Google Play 서비스 과소모${back("back_gms")}",
                     listOf("워치 앱 지킴이가 최근 ${minutes}분 앱별 통계(화면 꺼진 동안의 CPU·웨이크락)로 짚었습니다 — 이 보고서의 충전 뒤 통계와 따로 잰 것",
-                        "자동 치료(메뉴 8)가 모든 앱 캐시 정리와 Play 서비스 다시 시작을 합니다(데이터·로그인은 그대로)"),
+                        "자동 치료(메뉴 8)가 모든 앱 캐시 정리와 Play 서비스 다시 시작을 합니다(데이터·로그인은 그대로)") +
+                        // 캐시·재시작·치료를 다 보인 뒤에도 — 모두에게 듣는 해결은 없다 (워치 앱 할 일과 같게)
+                        if (stage("back_gms") >= 2) listOf("치료·재시작 뒤에도 계속되면: 충전기에 올려 둔 채 워치 Play 스토어 › 내 앱 › 모두 업데이트(도움이 됐다는 보고), " +
+                            "고쳐질 때까지 밤엔 워치 앱 지킴이 밤 모드, 과소모가 이어지는 동안 $REPORT") else emptyList(),
                     packages = listOf(GMS), source = "워치 앱 지킴이(앱별 건강 통계, 최근 2시간)", category = "gms")
             }
             wm["issue_home"]?.takeIf { it >= 1.0 }?.let { g ->
                 // 홈은 시스템 앱 — 범인으로 제한하지 않는다(DENY). 재시작 뒤에도 또 나타났으면 캐시 정리를 추천(워치의 다음 단계와 같게)
-                val cameBack = (wm["back_home"] ?: 0.0) >= 1.0
                 out += Finding("watch-home", if (g >= 2.0) Severity.ABNORMAL else Severity.CAUTION, "워치 앱: One UI Watch 홈 과소모${back("back_home")}",
                     listOf("워치 앱 지킴이가 최근 ${minutes}분 앱별 통계로 짚었습니다(화면 켜짐·받은 알림 몫을 빼고 남은 CPU)") +
-                        if (cameBack) listOf("강제 재시작 뒤에도 또 나타났습니다 — 자동 치료(메뉴 8)의 '모든 앱 캐시 정리'가 홈 캐시도 지웁니다. 그 뒤 한 번 더 강제 재시작")
-                        else listOf("홈 + 뒤로 버튼을 꺼질 때까지(7초 이상) 눌러 강제 재시작 — 보통 재시작으론 안 풀리고 강제 재시작으로 나아졌다는 보고",
-                            "그래도 또 나타나면 자동 치료(메뉴 8)의 '모든 앱 캐시 정리'가 홈 캐시도 지웁니다 — 그 뒤 한 번 더 강제 재시작"),
+                        when (stage("back_home")) {
+                            2 -> listOf("다음 단계(홈 캐시 삭제 → 강제 재시작)를 보인 뒤 또 재시작했는데도 계속됩니다(홈 캐시를 아직 안 지웠으면 그것부터) — " +
+                                "폰의 Galaxy Wearable 앱 › 워치 설정 › 워치 소프트웨어 업데이트 확인, 고쳐질 때까지 밤엔 워치 앱 지킴이 밤 모드, " +
+                                "과소모가 이어지는 동안 $REPORT")
+                            1 -> listOf("강제 재시작 뒤에도 또 나타났습니다 — 자동 치료(메뉴 8)의 '모든 앱 캐시 정리'가 홈 캐시도 지웁니다. 그 뒤 한 번 더 강제 재시작")
+                            else -> listOf("홈 + 뒤로 버튼을 꺼질 때까지(7초 이상) 눌러 강제 재시작 — 보통 재시작으론 안 풀리고 강제 재시작으로 나아졌다는 보고",
+                                "그래도 또 나타나면 자동 치료(메뉴 8)의 '모든 앱 캐시 정리'가 홈 캐시도 지웁니다 — 그 뒤 한 번 더 강제 재시작")
+                        },
                     source = "워치 앱 지킴이(앱별 건강 통계, 최근 2시간)", category = "home")
             }
+        }
+
+        // 워치가 이틀 안에 짚었는데 지금은 안 보이는 것(요약의 seen_*_h) — 재시작·치료 뒤 다시 보는 중이거나 들은 것. 이 보고서의 충전 뒤
+        // 통계엔 그 전 소모가 남아 소모율이 높게 나올 수 있어 하드웨어로 단정하지 않게 '주의'로 (범인으로 짚지는 않는다)
+        val summaryAt = wm["at"]?.toLong()
+        val summaryFresh = summaryAt != null && f.collectedAt?.let { c -> c - summaryAt in -WATCH_AHEAD_MS..WATCH_FRESH_MS } == true
+        if (summaryFresh) {
+            val window = wm["app_window_min"]?.toInt()
+            // 그때가 이 보고서가 잰 창(충전 뒤 dumpsys · 워치 기록 24시간까지 — 기록이 그보다 짧으면 그 길이) 안이어야 지금 소모율에 섞여
+            // 있다 — 그래야 판정을 바꾼다 (리뷰)
+            val statsHours = s?.onBatteryHours ?: 0.0
+            val watchHours = if (f.hasWatchLog) minOf(24.0, f.watch?.spanHours ?: 0.0) else 0.0
+            fun earlier(key: String, id: String, name: String, category: String) {
+                // 'N시간 전'은 수집 때부터 (요약은 수집 몇 분~3시간 전에 쓰였을 수 있다)
+                val hours = (wm[key] ?: return) + ((f.collectedAt ?: summaryAt!!) - summaryAt!!).coerceAtLeast(0L) / 3_600_000.0
+                if (out.any { it.id == id }) return
+                val inWindow = hours <= maxOf(statsHours, watchHours)
+                val now = when {
+                    window == null -> "지금은 앱별 기록이 없어(재시작·PC 치료 직후이거나 앱별 통계 권한이 없음) 지금 상태는 아직 모릅니다"
+                    window >= 55 -> "최근 ${window}분 앱별 기록에선 지금은 조용합니다"
+                    else -> "지금은 앱별 기록이 ${window}분치라 아직 다시 보는 중입니다(1시간쯤 쌓이면 봄 — 재시작·PC 치료 뒤엔 기록을 새로 모음)"
+                }
+                out += Finding("$id-earlier", if (inWindow) Severity.CAUTION else Severity.INFO, "워치 앱: ${fmt1(hours).removeSuffix(".0")}시간 전 $name — 지금은 안 보임",
+                    listOf("워치 앱 지킴이가 최근 48시간 안에 짚었습니다 — $now") +
+                        if (inWindow) listOf("이 보고서가 잰 구간(충전 뒤 통계·워치 기록 최근 24시간)에 그때의 소모가 섞여 소모율이 높게 나올 수 있습니다 — 하드웨어로 단정하기 전에 메뉴 3(측정 시작)으로 초기화하고 하루 뒤 다시 수집(메뉴 2)해 견주세요")
+                        else listOf("그때는 이 보고서가 잰 구간보다 앞이라 지금 소모율과는 따로입니다 — 참고로만"),
+                    source = "워치 앱 지킴이(최근 48시간)", category = category)
+            }
+            earlier("seen_gms_h", "watch-gms", "Google Play 서비스 과소모", "gms")
+            earlier("seen_home_h", "watch-home", "One UI Watch 홈 과소모", "home")
         }
 
         // One UI Watch 홈이 시스템 uid(1000)를 같이 쓰면 앱별 통계에서 홈만 따로 셀 수 없다 — 이 보고서의 순위도, 워치 앱의
@@ -227,7 +268,7 @@ object Analyzer {
             // 증상이었다). 화면 꺼진 동안의 CPU 는 워치 앱 지킴이가 화면 켜짐 몫을 빼고 본다
             val homeNote = top.take(3).firstOrNull { it.pkg == HOME }?.let {
                 "One UI Watch 홈이 위쪽 — 순위만으로는 고장이라 단정할 수 없습니다. 화면이 꺼진 채 CPU 를 많이 쓰는지는 워치 앱 지킴이가 " +
-                    "화면 켜짐 몫을 빼고 봅니다(알려진 문제 'One UI Watch 홈 과소모' → 강제 재시작)"
+                    "화면 켜짐 몫을 빼고 봅니다(알려진 문제 'One UI Watch 홈 과소모' — 할 일은 단계마다 달라 워치 배터리 화면 '지금 할 일'에)"
             }
             out += Finding("power-top", Severity.INFO, "추정 전력 사용 상위 ${top.size}개",
                 top.mapIndexed { i, p -> "${i + 1}. ${p.display}: ${fmt1(p.mah)} mAh${p.percent?.let { " (${pct(it)}%)" } ?: ""}" } + listOfNotNull(homeNote),
@@ -420,7 +461,8 @@ object Analyzer {
         // home = 워치 앱이 짚은 One UI Watch 홈 과소모 — 범인 앱은 없어도(시스템 앱) 하드웨어 의심으로 넘기지 않게
         val softwareCats = arrayOf("awake", "wakelock", "alarm", "sensor", "gms", "home")
         val homeFlagged = findings.any { it.id == "watch-home" }
-        val homeBack = homeFlagged && (f.watchMetrics["back_home"] ?: 0.0) >= 1.0
+        // 워치가 적은 홈 과소모 단계: 0 처음 · 1 재시작 뒤에도 또 · 2 다음 단계 뒤에도 계속
+        val homeStage = if (!homeFlagged) 0 else (f.watchMetrics["back_home"] ?: 0.0).let { if (it >= 2.0) 2 else if (it >= 1.0) 1 else 0 }
         val drainAbnormal = ofCat("drain", min = Severity.ABNORMAL)
         val rates = findings.filter { it.category == "drain" }.map { it.title }
 
@@ -443,7 +485,7 @@ object Analyzer {
                 listOf(Rules.FORCED_RESTART + " — 잔량 점프는 재시작 뒤 사라지는 경우가 많습니다",
                     "워치 배터리 화면 '잔량 표시 점검' → '게이지 보정 시작'(완충 + 1시간 → 10% 아래까지 사용 → 다시 완충 + 1시간)으로 게이지가 용량을 다시 배우게 하세요. 끝나면 같은 화면에서 오차가 줄었는지 보입니다",
                     "메뉴 6(증거 패키지)으로 지금 상태를 보관하세요 — 잔량 점프·급락 기록(워치 CSV)이 핵심 증거입니다",
-                    "서비스센터(1588-3366)에 '잔량 표시 오류·과소모'로 접수하고 배터리 효율 측정값을 서면으로 요구하세요 (02_서비스센터_접수메모.txt 참고). 삼성멤버스 '오류 보내기'는 증상 직후 5분 안에"),
+                    "서비스센터(1588-3366)에 '잔량 표시 오류·과소모'로 접수하고 배터리 효율 측정값을 서면으로 요구하세요 (02_서비스센터_접수메모.txt 참고). 잔량이 튀거나 급락하면 바로 $REPORT"),
                 gauge.flatMap { it.packages }.distinct())
         }
 
@@ -451,10 +493,12 @@ object Analyzer {
         val swCaution = findings.filter { it.category in softwareCats && it.severity == Severity.CAUTION }
         // 핵심 시스템 패키지(거부 목록)는 범인으로 지목하지 않는다 — Play 서비스만 2026년 패턴 안내를 위해 남긴다
         val culprits = (swAbnormal + swCaution).filter { it.blames }.flatMap { it.packages }.distinct().filter { it == GMS || !Catalog.isDenied(it) }
+        // 워치가 이틀 안에 짚었는데 지금은 안 보이는 것(이 보고서가 잰 구간 안) — 할 일 맨 앞에 다시 재서 견주기를
+        val earlierSeen = findings.filter { it.id.endsWith("-earlier") && it.severity == Severity.CAUTION }
         if (swAbnormal.isNotEmpty()) {
             return DoctorVerdict(Cause.SOFTWARE, confidence(swAbnormal.size, hasWatch),
                 "소프트웨어(서비스) 과소모 — " + (culprits.takeIf { it.isNotEmpty() }?.let { "범인: ${it.take(3).joinToString(", ")}" } ?: swAbnormal.first().title),
-                swAbnormal.map { it.title } + swCaution.map { it.title } + rates, softwareTodo(culprits, homeFlagged, homeBack), culprits)
+                swAbnormal.map { it.title } + swCaution.map { it.title } + rates, softwareTodo(culprits, homeFlagged, homeStage, gmsStage(f, findings), earlierSeen), culprits)
         }
 
         val idleAbnormal = f.watch?.let { Thresholds.idle(it.idle24.percentPerHour) == Grade.ABNORMAL || Thresholds.overnight(it.overnight?.percentPerHour) == Grade.ABNORMAL } ?: false
@@ -472,13 +516,13 @@ object Analyzer {
         if (drainAbnormal.isNotEmpty()) {
             if (swCaution.isNotEmpty()) {
                 return DoctorVerdict(Cause.SOFTWARE, "낮음", "소프트웨어 과소모 가능성 — 뚜렷한 범인은 없지만 주의 소견이 있고 소모율이 비정상",
-                    swCaution.map { it.title } + rates, softwareTodo(culprits, homeFlagged, homeBack), culprits)
+                    swCaution.map { it.title } + rates, softwareTodo(culprits, homeFlagged, homeStage, gmsStage(f, findings), earlierSeen), culprits)
             }
             return DoctorVerdict(Cause.HARDWARE, confidence(drainAbnormal.size, hasWatch),
                 "하드웨어(배터리) 의심 — 앱·알람·센서가 조용한데도 ${drainAbnormal.first().title}",
                 drainAbnormal.map { it.title } + findings.filter { it.category == "capacity" }.map { it.title } + listOf("웨이크락·알람·센서·설정 소견에 비정상 없음"),
                 listOf("워치 배터리 화면의 '실험 시작'으로 비행기 모드 또는 시계만 사용 모드를 6시간 이상 재서, 무선·앱을 꺼도 소모율이 그대로인지 확인하세요 (경험칙: 2%/h 초과면 이상)",
-                    "메뉴 6(증거 패키지)을 만들고 삼성멤버스 '오류 보내기'(Galaxy Wearable > ⋮ > 설정 > 문의하기 > 오류 보내기, 시스템 로그 포함, 증상 직후 5분 안)로 제출하세요",
+                    "소모가 이어지는 동안 $REPORT",
                     "서비스센터(1588-3366)에 '배터리 과소모'로 접수하고 수리내역서·배터리 효율 측정값을 받으세요. 같은 하자로 2회 수리 뒤 재발하면 교환·환급 요구 근거가 됩니다(03_소비자분쟁해결기준_요구서.txt)"),
                 emptyList())
         }
@@ -494,20 +538,47 @@ object Analyzer {
             emptyList())
     }
 
-    private fun softwareTodo(culprits: List<String>, home: Boolean = false, homeBack: Boolean = false): List<String> {
+    /**
+     * 워치가 적은 Play 서비스 과소모 단계 (0 처음 · 1 재시작 뒤에도 또 · 2 다음 단계 뒤에도 계속) — 방금 쓴 요약으로 워치가 지금 짚었을 때만
+     * ('watch-gms' 소견이 있을 때 — 묵은 요약의 단계로 dumpsys 만 짚은 할 일을 바꾸지 않게 · 리뷰)
+     */
+    private fun gmsStage(f: Facts, findings: List<Finding>): Int = if (findings.none { it.id == "watch-gms" }) 0
+        else (f.watchMetrics["back_gms"] ?: 0.0).let { if (it >= 2.0) 2 else if (it >= 1.0) 1 else 0 }
+
+    private fun softwareTodo(culprits: List<String>, home: Boolean = false, homeStage: Int = 0, gmsStage: Int = 0, earlier: List<Finding> = emptyList()): List<String> {
         val actionable = culprits.filterNot { Catalog.isDenied(it) }
+        // 워치가 전에 짚었는데 지금은 안 보이는 것만 있으면(재시작·치료 직후 수집 등) 먼저 다시 재서 견주기 (리뷰)
+        val earlierStep = earlier.takeIf { it.isNotEmpty() }?.let { e ->
+            "워치가 ${e.joinToString(", ") { it.title.removePrefix("워치 앱: ").substringBefore(" — ") }}를 봤고 지금은 안 보입니다 — 메뉴 3(측정 시작)으로 통계를 비우고 " +
+                "하루 뒤 메뉴 2로 다시 수집해 견주세요(그 전 소모가 이 통계에 섞여 있어서)"
+        }
         // 워치가 One UI Watch 홈 과소모를 짚었으면 그 해결 순서를 맨 앞에 (홈은 시스템 앱이라 차단 조치 대상이 아니다) —
-        // 재시작 뒤에도 또 나타났으면 캐시 정리부터 (소견·워치와 같은 순서)
-        val homeStep = if (homeBack) "One UI Watch 홈 과소모(재시작 뒤에도 또 나타남): 메뉴 8(자동 치료)의 '모든 앱 캐시 정리'(홈 캐시 포함) → " +
-            "한 번 더 강제 재시작(홈 + 뒤로 7초 이상) → 계속되면 Samsung Members 오류 보고"
-        else "One UI Watch 홈 과소모: 홈 + 뒤로 버튼을 꺼질 때까지(7초 이상) 눌러 강제 재시작 → 그래도 또 나타나면 메뉴 8(자동 치료)의 " +
-            "'모든 앱 캐시 정리'(홈 캐시 포함) 뒤 한 번 더 강제 재시작 → 계속되면 Samsung Members 오류 보고"
-        return listOfNotNull(homeStep.takeIf { home },
+        // 재시작 뒤에도 또 나타났으면 캐시 정리부터, 그 뒤에도 계속이면 오류 보고·업데이트 (소견·워치와 같은 순서)
+        val homeStep = when (homeStage) {
+            2 -> "One UI Watch 홈 과소모(다음 단계 뒤에도 계속): 홈 캐시 삭제·강제 재시작을 아직 안 했으면 그것부터 → 폰의 Galaxy Wearable 앱 › " +
+                "워치 설정 › 워치 소프트웨어 업데이트 확인 → 고쳐질 때까지 밤엔 워치 앱 지킴이 밤 모드 → 과소모가 이어지는 동안 $REPORT"
+            1 -> "One UI Watch 홈 과소모(재시작 뒤에도 또 나타남): 메뉴 8(자동 치료)의 '모든 앱 캐시 정리'(홈 캐시 포함) → " +
+                "한 번 더 강제 재시작(홈 + 뒤로 7초 이상) → 계속되면 과소모가 이어지는 동안 $REPORT"
+            else -> "One UI Watch 홈 과소모: 홈 + 뒤로 버튼을 꺼질 때까지(7초 이상) 눌러 강제 재시작 → 그래도 또 나타나면 메뉴 8(자동 치료)의 " +
+                "'모든 앱 캐시 정리'(홈 캐시 포함) 뒤 한 번 더 강제 재시작 → 계속되면 과소모가 이어지는 동안 $REPORT"
+        }
+        val steps = listOfNotNull(homeStep.takeIf { home },
         "메뉴 4(차단 조치)에서 추천 표시된 항목을 적용하세요" + (if (actionable.isNotEmpty()) " — ${actionable.take(2).joinToString(", ")} 의 백그라운드 제한·대기 버킷 restricted·Doze 예외 해제(안 쓰는 앱이면 비활성화)" else "") +
-            (if (culprits.contains(GMS)) ". Play 서비스는 워치 재시작 → 캐시 삭제, 안 되면 Play 스토어 > 앱 관리에서 Google 앱(어시스턴트) 업데이트 제거 후 재설치(2026년 사례의 해결책)" else ""),
+            // 워치 앱과 같은 순서(캐시 삭제 → 강제 재시작) — 워치가 다음 단계 뒤에도 계속이라 적었으면 업데이트·오류 보내기로. 어시스턴트 업데이트
+            // 제거는 2023년 워치6 사용자 사례(Play 서비스 과소모로 보였는데 이것으로 풀렸다는 글 — Samsung Community). 원인은 단정하지 않는다
+            (if (!culprits.contains(GMS)) "" else if (gmsStage >= 2) ". Play 서비스는 재시작·치료 뒤에도 계속 — 충전 중 워치 Play 스토어 › 내 앱 › 모두 업데이트 → " +
+                "고쳐질 때까지 밤엔 워치 앱 지킴이 밤 모드 → 과소모가 이어지는 동안 " + (if (home) "오류 보내기(위 홈 줄과 같은 길)" else REPORT)
+            else ". Play 서비스는 캐시 삭제 → 강제 재시작(워치 앱과 같은 순서), 안 되면 Play 스토어 › 앱 관리에서 Google 어시스턴트 " +
+                "업데이트 제거 뒤 다시 업데이트(2023년 워치6 사용자 사례 — Play 서비스 과소모로 보였는데 이것으로 풀렸다는 글)"),
         "조치 뒤 메뉴 3(측정 시작, dumpsys batterystats --reset)으로 통계를 비우고 깨끗하게 다시 재세요. ${Rules.FORCED_RESTART}",
         "24시간 뒤 메뉴 2(수집·분석)로 다시 수집해 웨이크락·소모율이 줄었는지 비교하세요. 그대로면 메뉴 5로 되돌리고 다음 후보를 시도",
         )
+        // 지금 짚은 범인·홈이 없으면 다시 재서 견주기가 맨 앞, 있으면 그 할 일 뒤에
+        return when {
+            earlierStep == null -> steps
+            culprits.isEmpty() && !home -> listOf(earlierStep) + steps
+            else -> steps + earlierStep
+        }
     }
 
     private fun confidence(supporting: Int, hasWatch: Boolean): String {

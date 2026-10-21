@@ -212,7 +212,11 @@ class TreatTest {
         onSequence("shell cmd appops get $drain RUN_ANY_IN_BACKGROUND", "RUN_ANY_IN_BACKGROUND: allow\n", "RUN_ANY_IN_BACKGROUND: allow\n", "RUN_ANY_IN_BACKGROUND: ignore\n")
         onSequence("shell am get-standby-bucket $drain", "10\n", "10\n", "45\n")
         on("shell dumpsys batterystats --reset", "Battery stats reset.\n")
+        on(treated, "Broadcasting: Intent { flg=0x400000 }\nBroadcast completed: result=0, data=\"treated:ok\"\n")
     }
+
+    /** 자동 치료를 마치고 워치 앱에 보내는 '치료함' (셸만 보낼 수 있는 받는 곳) — 실제로 한 치료를 붙여서 */
+    private val treated = "shell am broadcast --include-stopped-packages -n ${Collect.SHELL_RECEIVER} -a ${Collect.TREATED_ACTION}"
 
     private var lastIo = FakeConsole()
 
@@ -241,6 +245,11 @@ class TreatTest {
         val iApply = calls.indexOf("shell settings put global wifi_scan_always_enabled 0")
         val iReset = calls.lastIndexOf("shell dumpsys batterystats --reset")
         assertTrue(calls.toString(), iGrant in 0 until iCollect && iCollect < iApply && iApply < iReset)
+        // 캐시 정리·Play 서비스 다시 시작을 했으면 측정 시작 뒤 워치 앱에 알린다 — 워치가 치료 전 기록으로 또 짚지 않게 거기서 새로 잰다
+        val iTold = calls.indexOfFirst { it.startsWith(treated) }
+        assertTrue(calls.toString(), iTold > iReset)
+        // 워치가 문제마다 단계를 넘기도록 무엇을 했는지도 (Play 서비스를 다시 시작했으면 Play 서비스만 다음 단계로 — 리뷰)
+        assertTrue(calls[iTold], calls[iTold].endsWith("--es did trim-caches,gms-restart"))
         assertTrue(calls.contains("shell cmd appops set $drain RUN_ANY_IN_BACKGROUND ignore"))
         assertTrue(calls.contains("shell am set-standby-bucket $drain restricted"))
         assertTrue(calls.contains("shell cmd deviceidle whitelist -$drain"))
@@ -267,6 +276,7 @@ class TreatTest {
         assertTrue(out, out.contains("report.html"))
         assertTrue(out, out.contains("권한 주기: ${Grant.STEPS.size}개 모두 성공"))
         assertTrue(out, out.contains("배터리 통계 초기화: 완료"))
+        assertTrue(out, out.contains("워치 앱에 치료를 알렸습니다"))
         assertTrue(out, out.contains(Cause.SOFTWARE.label))
 
         // undo --all 이 조치와 권한을 모두 되돌린다
@@ -283,11 +293,89 @@ class TreatTest {
         assertTrue(undo.contains("shell am set-standby-bucket $drain 10"))
         assertTrue(undo.contains("shell cmd deviceidle whitelist +$drain"))
         assertTrue(undo.indexOf("shell cmd deviceidle whitelist +$drain") < undo.indexOf("shell pm revoke $pkg android.permission.BATTERY_STATS"))   // 역순
-        // 캐시 정리·Play 서비스 다시 시작은 되돌릴 것이 없는 일회성 조치 — 나머지는 모두 되돌린다
-        assertTrue(journal.entries().all { it.undone || it.undo == null })
-        val oneShot = journal.entries().count { it.undo == null }
+        // 캐시 정리·Play 서비스 다시 시작은 되돌릴 것이 없는 일회성 조치 — 나머지는 모두 되돌린다. 끝에 '모두 되돌리기' 기록 (리뷰)
+        assertEquals(doctor.fix.Fixer.UNDO_ALL, journal.entries().last().id)
+        val applied = journal.entries().dropLast(1)
+        assertTrue(applied.all { it.undone || it.undo == null })
+        val oneShot = applied.count { it.undo == null }
         assertEquals(2, oneShot)
         assertTrue(out2, out2.contains("되돌린 조치: ${grantIds.size + autoIds.size - oneShot}개"))
+    }
+
+    /** 예전 워치 앱(이 신호를 모름)·앱별 통계 권한 없음이면 그렇다고 — 워치의 알려진 문제는 1~2시간 치료 전 기록으로 보일 수 있다 */
+    @Test
+    fun anOldWatchAppIsNotToldAndTheSummarySaysWhatThatMeans() {
+        val data = tmp.newFolder("data")
+        val adb = treatAdb().apply { on(treated, "Broadcasting: Intent { flg=0x400000 }\nBroadcast completed: result=0\n") }
+        val (_, out) = run(adb, data, "treat")
+        assertTrue(out, out.contains("워치 앱에 치료를 알리지 못했습니다"))
+    }
+
+    /**
+     * 워치 앱이 받았으면 워치와 같은 말(10분 뒤부터 앱별 기록을 새로)로, 받았지만 앱별 통계 권한이 없으면(펌웨어가 막음 등) 그렇다고 — 비정상
+     * 소모만 치료 뒤로 다시 재고 알려진 문제는 못 본다 (리뷰)
+     */
+    @Test
+    fun theSummarySaysWhatTheWatchAppCanSeeAfterTheTreatment() {
+        val (_, out) = run(treatAdb(), tmp.newFolder("data"), "treat")
+        val told = out.lines().single { it.contains("워치 앱에 치료를 알렸습니다") }
+        assertTrue(told, told.contains("10분 뒤부터") && !told.contains("지금부터"))
+        val adb = treatAdb().apply { on(treated, "Broadcasting: Intent { flg=0x400000 }\nBroadcast completed: result=0, data=\"treated:nostats\"\n") }
+        val (_, out2) = run(adb, tmp.newFolder("data2"), "treat")
+        val told2 = out2.lines().single { it.contains("워치 앱에 치료를 알렸습니다") }
+        assertTrue(told2, told2.contains("앱별 통계 권한이 없어") && told2.contains("메뉴 7"))
+        // 권한 주기를 건너뛰었으면(--no-grant) 권한 표가 없다 — '위 표'를 가리키지 않는다 (리뷰)
+        val adb3 = treatAdb().apply { on(treated, "Broadcasting: Intent { flg=0x400000 }\nBroadcast completed: result=0, data=\"treated:nostats\"\n") }
+        val (_, out3) = run(adb3, tmp.newFolder("data3"), "treat", "--no-grant")
+        val told3 = out3.lines().single { it.contains("워치 앱에 치료를 알렸습니다") }
+        assertTrue(told3, told3.contains("메뉴 7(권한 주기)을 해 보세요") && !told3.contains("위 표"))
+    }
+
+    /** 워치가 Play 서비스 과소모를 '다음 단계 뒤에도 계속'으로 적었으면, 또 한 캐시 정리·다시 시작이 끝이 아니라고 — 남은 것은 업데이트·오류 보내기 (리뷰) */
+    @Test
+    fun aPlayServicesIssueThatOutlastedTheTreatmentPointsOnward() {
+        val at = sample("date.txt").trim().toLong() * 1000 + 5_000
+        val adb = treatAdb().apply {
+            on("shell am broadcast --include-stopped-packages -n ${Collect.SHELL_RECEIVER} -a ${Collect.SUMMARY_ACTION}", "Broadcast completed: result=0, data=\"summary:ok\"\n")
+            on("shell ls " + Collect.WATCH_SUMMARY, Collect.WATCH_SUMMARY + "\n")
+            pullable[Collect.WATCH_SUMMARY] = "[지표] at=$at idle_pph=3.4 app_window_min=120 issue_gms=2 issue_home=0 issue_face=0 back_gms=2 back_home=0\n"
+        }
+        val (_, out) = run(adb, tmp.newFolder("data"), "treat")
+        assertTrue(adb.joined().contains("shell am force-stop com.google.android.gms"))
+        val note = out.lines().single { it.startsWith(" 참고: 워치는 Play 서비스") }
+        assertTrue(note, note.contains("모두 업데이트") && note.contains("오류 보내기"))
+        // 처음 단계면 그런 말이 없다
+        val (_, plain) = run(treatAdb(), tmp.newFolder("data2"), "treat")
+        assertTrue(plain.lines().none { it.startsWith(" 참고: 워치는 Play 서비스") })
+    }
+
+    /**
+     * 워치가 One UI Watch 홈 과소모(재시작 뒤에도 또)를 짚어 캐시 정리를 했으면 '다음:'에 강제 재시작을 — 캐시만 지우면 돌고 있는 홈은
+     * 그대로다 (워치 앱 할 일과 같은 순서 · 시나리오 점검)
+     */
+    @Test
+    fun aHomeCacheTrimIsFollowedByAForcedRestart() {
+        val data = tmp.newFolder("data")
+        val at = sample("date.txt").trim().toLong() * 1000 + 5_000
+        val adb = treatAdb().apply {
+            on("shell am broadcast --include-stopped-packages -n ${Collect.SHELL_RECEIVER} -a ${Collect.SUMMARY_ACTION}", "Broadcast completed: result=0, data=\"summary:ok\"\n")
+            on("shell ls " + Collect.WATCH_SUMMARY, Collect.WATCH_SUMMARY + "\n")
+            pullable[Collect.WATCH_SUMMARY] = "[지표] at=$at idle_pph=3.4 app_window_min=120 issue_gms=0 issue_home=2 issue_face=0 back_gms=0 back_home=1\n"
+        }
+        val (_, out) = run(adb, data, "treat")
+        assertTrue(adb.joined().contains("shell pm trim-caches 999999999999"))
+        val next = out.lines().dropWhile { !it.contains(" 다음:") }.take(3).joinToString("\n")
+        assertTrue(next, next.contains("강제 재시작(홈 + 뒤로 7초 이상)") && next.contains("One UI Watch 홈"))
+        // 그다음 단계(재시작 뒤에도 계속)면 이미 해 본 캐시 정리·재시작을 되풀이하지 않는다 (리뷰)
+        val data2 = tmp.newFolder("data2")
+        val adb2 = treatAdb().apply {
+            on("shell am broadcast --include-stopped-packages -n ${Collect.SHELL_RECEIVER} -a ${Collect.SUMMARY_ACTION}", "Broadcast completed: result=0, data=\"summary:ok\"\n")
+            on("shell ls " + Collect.WATCH_SUMMARY, Collect.WATCH_SUMMARY + "\n")
+            pullable[Collect.WATCH_SUMMARY] = "[지표] at=$at idle_pph=3.4 app_window_min=120 issue_gms=0 issue_home=2 issue_face=0 back_gms=0 back_home=2\n"
+        }
+        val (_, out2) = run(adb2, data2, "treat")
+        val next2 = out2.lines().dropWhile { !it.contains(" 다음:") }.take(3).joinToString("\n")
+        assertFalse(next2, next2.contains("워치를 한 번 강제 재시작"))
     }
 
     @Test
