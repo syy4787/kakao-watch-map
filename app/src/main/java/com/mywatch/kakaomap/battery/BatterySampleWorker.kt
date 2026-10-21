@@ -30,6 +30,8 @@ class BatterySampleWorker(context: Context, params: WorkerParameters) : Worker(c
                 Guardian.tick(applicationContext, log)
                 // 배터리 타일이 보일 때 새 값으로 그리게
                 com.mywatch.kakaomap.tile.BatteryTileService.refresh(applicationContext)
+                // 하루에 한 번 요약 파일 (PC 툴킷이 수집할 때 함께 가져가 보고서에 넣는다)
+                BatterySummary.writeDailyIfDue(applicationContext, log)
             }
         } catch (e: Exception) {
             ErrorLog.record("배터리·기록", e)

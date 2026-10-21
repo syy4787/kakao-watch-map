@@ -205,6 +205,7 @@ object HtmlReport {
     }
 
     private fun watchSummary(sb: StringBuilder, f: Facts, zone: ZoneId) {
+        f.watchSummary?.let { sb.append("<details open><summary>워치 앱이 쓴 요약 (사용 내역·알려진 문제·밤사이 범인)</summary><pre class=\"raw\">${esc(it)}</pre></details>") }
         val w = f.watch ?: return
         sb.append("<p>표본 ${w.samples}개 (${fmt1(w.spanHours)}시간) · ${esc(w.verdict.headline)}</p>")
         w.drift?.takeIf { it.suspicious }?.let { d ->

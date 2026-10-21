@@ -119,4 +119,18 @@ class BatterySampleWorkerTest {
         assertEquals(Event.EXPERIMENT_START, s.event)
         assertEquals("비행기 모드", s.note)
     }
+
+    /** 하루에 한 번 요약 파일을 저절로 쓴다 (PC 툴킷이 가져가 보고서에 넣음) */
+    @Test
+    fun aDailySummaryIsWrittenOnce() {
+        context.getSharedPreferences(BatteryLog.PREFS, Context.MODE_PRIVATE).edit().clear().commit()
+        TestWorkerBuilder<BatterySampleWorker>(context, Executors.newSingleThreadExecutor()).build().doWork()
+        assertTrue(log.summaryFile.exists())
+        assertTrue(log.summaryFile.readText().contains("[판정]"))
+        val first = log.summaryFile.lastModified()
+        log.summaryFile.writeText("손대지 않음")
+        TestWorkerBuilder<BatterySampleWorker>(context, Executors.newSingleThreadExecutor()).build().doWork()
+        assertEquals("손대지 않음", log.summaryFile.readText())     // 하루가 안 지났으면 다시 쓰지 않는다
+        assertTrue(first > 0)
+    }
 }

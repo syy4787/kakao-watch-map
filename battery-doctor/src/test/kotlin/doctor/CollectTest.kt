@@ -62,6 +62,20 @@ class CollectTest {
     }
 
     @Test
+    fun theWatchAppSummaryIsPulledWhenPresent() {
+        val adb = happyAdb().apply {
+            on("shell ls " + Collect.WATCH_SUMMARY, Collect.WATCH_SUMMARY + "\n")
+            pullable[Collect.WATCH_SUMMARY] = "[사용 내역 24시간] 22시간 동안 61% 중 화면(1시간) 30% · 대기(21시간) 31%\n"
+        }
+        val snap = Collect.run(adb, tmp.root, bugreport = false, log = {}, now = 1760878865000L)
+        assertEquals(listOf(Collect.WATCH_CSV, Collect.WATCH_SUMMARY), adb.pulls.map { it.first })
+        assertTrue(snap.watchSummary!!.contains("사용 내역"))
+        // 없으면 그냥 넘어간다 (예전 워치 앱)
+        val older = Collect.run(happyAdb(), tmp.newFolder("older"), bugreport = false, log = {}, now = 1760878865000L)
+        assertEquals(null, older.watchSummary)
+    }
+
+    @Test
     fun oneFailureDoesNotStopTheRest() {
         val adb = happyAdb().apply {
             on("shell dumpsys batterystats --checkin", "", code = 1, err = "Can't find service: batterystats")

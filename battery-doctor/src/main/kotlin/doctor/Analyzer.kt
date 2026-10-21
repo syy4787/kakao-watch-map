@@ -62,6 +62,7 @@ object Analyzer {
             gmsVersion = GmsPackage.versionName(snapshot.text("gms_package")),
             watch = watch,
             watchSamples = samples,
+            watchSummary = snapshot.watchSummary,
             collectedAt = snapshot.time,
             missing = snapshot.failed(),
             snapshotDir = snapshot.dir.path,

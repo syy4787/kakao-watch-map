@@ -20,6 +20,9 @@ data class Snapshot(val dir: File) {
 
     val watchCsv: File? get() = File(dir, "watch_log.csv").takeIf { it.isFile && it.length() > 0 }
 
+    /** 워치 앱이 하루에 한 번 쓰는 요약(사용 내역·알려진 문제·밤사이 범인 등) — 없으면 null */
+    val watchSummary: String? get() = File(dir, "watch_summary.txt").takeIf { it.isFile && it.length() > 0 }?.readText(Charsets.UTF_8)
+
     val meta: Properties
         get() = Properties().also { p ->
             File(dir, "meta.properties").takeIf { it.isFile }?.reader(Charsets.UTF_8)?.use { p.load(it) }
@@ -42,6 +45,7 @@ data class Snapshot(val dir: File) {
 /** 스펙 3장의 수집 목록을 돌려 스냅샷 폴더를 만든다 */
 object Collect {
     const val WATCH_CSV = "/sdcard/Android/data/com.mywatch.kakaomap/files/battery/log.csv"
+    const val WATCH_SUMMARY = "/sdcard/Android/data/com.mywatch.kakaomap/files/battery/summary.txt"
     val DIR_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss")
 
     /** 이름 → `adb shell` 뒤에 붙는 인자 */
@@ -107,6 +111,12 @@ object Collect {
             if (!adb.pull(WATCH_CSV, File(dir, "watch_log.csv"))) log("  워치 CSV 를 가져오지 못했습니다")
         } else {
             log("워치 배터리 기록이 아직 없습니다 (워치 앱의 '배터리' 화면을 한 번 열면 기록이 시작됩니다)")
+        }
+        // 워치 앱이 쓴 요약 (있으면)
+        val lsSummary = adb.run(listOf("shell", "ls", WATCH_SUMMARY), 30)
+        if (lsSummary.ok && lsSummary.out.contains("summary.txt")) {
+            log("수집: 워치 앱 요약(watch_summary.txt)")
+            if (!adb.pull(WATCH_SUMMARY, File(dir, "watch_summary.txt"))) log("  워치 요약을 가져오지 못했습니다")
         }
 
         if (bugreport) {

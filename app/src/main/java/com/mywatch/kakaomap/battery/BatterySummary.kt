@@ -14,6 +14,20 @@ import java.util.Locale
 
 /** 배터리 화면과 summary.txt 가 같이 쓰는 글 만들기 */
 object BatterySummary {
+    private const val K_SUMMARY_AT = "summary_written_at"
+    /** 하루에 한 번 (시각이 조금씩 밀려도 되게 20시간) */
+    const val DAILY_MS = 20L * 3_600_000L
+
+    /** 15분 작업에서: 마지막으로 쓴 지 하루가 지났으면 요약 파일을 새로 쓴다 */
+    fun writeDailyIfDue(context: android.content.Context, log: BatteryLog, now: Long = System.currentTimeMillis()) {
+        val p = context.getSharedPreferences(BatteryLog.PREFS, android.content.Context.MODE_PRIVATE)
+        if (now - p.getLong(K_SUMMARY_AT, 0L) < DAILY_MS) return
+        val all = log.readAll()
+        val ins = BatteryInsights.compute(context, all, now)
+        val a = ins.analysis ?: return
+        log.writeSummary(text(a, null, android.os.Build.MODEL ?: "", now, ins))
+        p.edit().putLong(K_SUMMARY_AT, now).apply()
+    }
 
     private val clock = SimpleDateFormat("M/d HH:mm", Locale.KOREA)
 

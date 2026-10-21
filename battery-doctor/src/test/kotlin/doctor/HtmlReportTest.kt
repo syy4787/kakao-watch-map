@@ -91,6 +91,15 @@ class HtmlReportTest {
     }
 
     @Test
+    fun theWatchAppSummaryIsShownEscaped() {
+        val (f, fs, _) = sampleReport()
+        val f2 = f.copy(watchSummary = "[알려진 문제] Google Play 서비스 과소모 <b>CPU</b>")
+        val html = HtmlReport.render(f2, fs, Analyzer.verdict(f2, fs), emptyMap(), zone)
+        assertTrue(html.contains("워치 앱이 쓴 요약"))
+        assertTrue(html.contains("[알려진 문제] Google Play 서비스 과소모 &lt;b&gt;CPU&lt;/b&gt;"))
+    }
+
+    @Test
     fun escapesHtmlAndShowsSources() {
         val f = Facts(model = "SM-L350 <test> & co")
         val fs = listOf(Finding("x", Severity.ABNORMAL, "태그 <script>alert(1)</script> & 끝", listOf("근거 <b>"), listOf("com.example.<evil>"), source = Thresholds.SOURCE_IDLE, category = "drain"))

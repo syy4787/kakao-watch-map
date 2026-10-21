@@ -73,6 +73,8 @@ data class Facts(
     /** battery-core 가 워치 CSV 로 낸 분석 */
     val watch: Analysis? = null,
     val watchSamples: List<BatterySample> = emptyList(),
+    /** 워치 앱이 쓴 요약 글 (사용 내역·알려진 문제·밤사이 범인) */
+    val watchSummary: String? = null,
     val collectedAt: Long? = null,
     /** 수집에 실패한 항목 이름 */
     val missing: List<String> = emptyList(),
