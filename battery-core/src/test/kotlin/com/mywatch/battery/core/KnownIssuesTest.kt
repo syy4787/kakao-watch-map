@@ -126,6 +126,12 @@ class KnownIssuesTest {
         assertEquals(Grade.CAUTION, KnownIssues.detect(warm, windowMs = 2 * h, screenOnMs = 4 * 60_000L).single().grade)
         val light = AppDrain.rank(listOf(UidUse(home, cpuMs = 10 * 60_000L, fgMs = 2 * h)), 2 * h)
         assertTrue(KnownIssues.detect(light, windowMs = 2 * h, screenOnMs = 4 * 60_000L).isEmpty())
+        // 알림·진동으로 웨이크락을 조금(시간당 30초) 쥐는 것은 흔하다 — CPU 가 적으면 짚지 않는다. 멈춘 채 쥐면(창의 절반 넘게) 비정상
+        val wakes = AppDrain.rank(listOf(UidUse(home, cpuMs = 4 * 60_000L, wakelockMs = 60_000L, fgMs = 2 * h)), 2 * h)
+        assertEquals(Grade.CAUTION, wakes.single().grade)
+        assertTrue(KnownIssues.detect(wakes, windowMs = 2 * h, screenOnMs = 4 * 60_000L).isEmpty())
+        val stuck = AppDrain.rank(listOf(UidUse(home, cpuMs = 4 * 60_000L, wakelockMs = 80 * 60_000L, fgMs = 2 * h)), 2 * h)
+        assertEquals(Grade.ABNORMAL, KnownIssues.detect(stuck, windowMs = 2 * h, screenOnMs = 4 * 60_000L).single().grade)
         // 다른 앱이 훨씬 많이 쓰면 홈 탓을 하지 않는다
         val behind = AppDrain.rank(listOf(UidUse(home, cpuMs = 10 * 60_000L, fgMs = 2 * h), UidUse("com.example.drain", wakelockMs = 110 * 60_000L, cpuMs = 40 * 60_000L)), 2 * h)
         assertTrue(KnownIssues.detect(behind, windowMs = 2 * h, screenOnMs = 4 * 60_000L).none { it.id == KnownIssues.HOME_HOG })

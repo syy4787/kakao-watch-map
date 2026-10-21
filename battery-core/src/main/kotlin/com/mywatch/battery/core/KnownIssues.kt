@@ -103,7 +103,9 @@ object KnownIssues {
                     perH > HOME_CAUTION_MS_PER_H -> Grade.CAUTION
                     else -> Grade.NORMAL
                 }
-                val grade = Grade.worst(listOf(cpuGrade, r.grade))
+                // 웨이크락은 '멈춘 채 쥠'(창의 절반 넘게)만 — 알림·진동으로 홈이 잠깐씩 쥐는 것(다른 앱의 '주의' 기준 시간당 18.5초)은 흔하다
+                val stuck = r.use.wakelockMs >= windowMs * AppDrain.STUCK_RATIO
+                val grade = Grade.worst(listOf(cpuGrade, if (stuck) Grade.ABNORMAL else Grade.NORMAL))
                 if (grade != Grade.NORMAL && (i == 0 || r.score >= total * SHARE)) {
                     val cpuNote = "화면이 거의 꺼져 있던 ${fmtHours(hours)} 동안 CPU ${(r.use.cpuMs / 60_000).toInt()}분 (화면 켜짐 ${(screenOnMs / 60_000).toInt()}분)"
                     out += KnownIssue(
