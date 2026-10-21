@@ -14,9 +14,9 @@ import com.mywatch.battery.core.DrainAnalyzer
 import com.mywatch.battery.core.Event
 import com.mywatch.battery.core.GaugeDriftRule
 import com.mywatch.battery.core.Grade
+import com.mywatch.battery.core.Projection
 import com.mywatch.battery.core.Rate
 import com.mywatch.battery.core.Thresholds
-import com.mywatch.battery.core.WatchModels
 import com.mywatch.kakaomap.R
 import com.mywatch.kakaomap.data.ErrorLog
 import com.mywatch.kakaomap.ui.Row
@@ -34,6 +34,10 @@ class BatteryActivity : ComponentActivity() {
     private lateinit var ui: WearList
     private lateinit var log: BatteryLog
     private var analysis: Analysis? = null
+    /** 사용 내역·알려진 문제·조치 효과 (IO 에서 함께 계산) */
+    private var insights: Insights? = null
+    /** "지금 페이스(시간당 4.0%)면 오후 10:05에 15%, …" */
+    private var forecast: String? = null
     private var live: BatterySample? = null
     private var picking = false
     private var notice: String? = null
@@ -69,11 +73,15 @@ class BatteryActivity : ComponentActivity() {
 
     private fun reload() {
         lifecycleScope.launch {
-            val (a, last) = withContext(Dispatchers.IO) {
-                runCatching { val all = log.readAll(); DrainAnalyzer(WatchModels.nominalMah(Build.MODEL)).analyze(all) to all.maxByOrNull { it.t } }
-                    .onFailure { ErrorLog.record("배터리·분석", it) }.getOrNull() ?: (null to null)
+            val (ins, last) = withContext(Dispatchers.IO) {
+                runCatching {
+                    val all = log.readAll()
+                    forecast = Projection.forecast(all, System.currentTimeMillis())?.label(java.time.ZoneId.systemDefault())
+                    BatteryInsights.compute(this@BatteryActivity, all) to all.maxByOrNull { it.t }
+                }.onFailure { ErrorLog.record("배터리·분석", it) }.getOrNull() ?: (null to null)
             }
-            analysis = a
+            insights = ins
+            analysis = ins?.analysis
             lastLogged = last
             render()
         }
@@ -87,6 +95,7 @@ class BatteryActivity : ComponentActivity() {
         val rows = mutableListOf<Row>()
         rows += Row.Header("배터리", BatterySummary.nowLine(live ?: lastSample(a), a.drift))
         notice?.let { rows += Row.Note(it) }
+        forecast?.let { rows += Row.Note(it) }
 
         rows += Row.Header("소모율")
         rows += rateRow("1시간", a.w1, Thresholds.mixed24h(a.w1.percentPerHour))
@@ -101,8 +110,9 @@ class BatteryActivity : ComponentActivity() {
             v.headline, v.reasons.takeIf { it.isNotEmpty() }?.joinToString("\n"), key = "verdict",
         )
 
+        rows += usageRows()
         rows += guardianRows()
-        rows += appRows(now)
+        rows += appRows()
 
         rows += Row.Header("밤사이")
         rows += Row.Note(BatterySummary.overnightLine(a))
@@ -168,6 +178,10 @@ class BatteryActivity : ComponentActivity() {
         rows += toggle("$A_TOGGLE${T_ABNORMAL}", cfg.abnormalSaver, "비정상 소모면 바로 절전")
         rows += toggle("$A_TOGGLE${T_REMINDER}", cfg.chargeReminder, "잠자기 전 충전 알림")
         rows += Row.Note("밤 모드는 화면이 30분 넘게 꺼져 있을 때만 시작하고, 절전을 손수 끄면 12시간 쉽니다")
+        insights?.nightEffect?.let { e ->
+            rows += Row.Note(e.headline?.let { "효과: $it" }
+                ?: "효과: 비교할 밤이 아직 모자람 (켠 밤 ${e.with.size} · 안 켠 밤 ${e.without.size} — 각 2밤 이상이면 밤 소모가 얼마나 줄었는지 보여 줍니다)")
+        }
         return rows
     }
 
@@ -212,15 +226,59 @@ class BatteryActivity : ComponentActivity() {
         return rows
     }
 
-    /** 앱별 소모 (최근 2시간) — 권한이 있을 때만 */
-    private fun appRows(now: Long): List<Row> {
+    /**
+     * 배터리 사용 내역 (24시간): 화면 켜짐·꺼짐으로 나눈 몫, 가장 많이 닳은 시간과 그때 화면의 앱·뒤에서 돈 앱
+     */
+    private fun usageRows(): List<Row> {
+        val rows = ArrayList<Row>()
+        rows += Row.Header("배터리 사용 내역 (24시간)")
+        val b = insights?.breakdown
+        if (b == null) {
+            rows += Row.Note("충전 없이 쓴 기록이 2시간 넘게 쌓이면 어디에 썼는지 나눠 보여 줍니다")
+            return rows
+        }
+        rows += Row.Note(b.headline)
+        b.idlePph?.let { pph ->
+            val g = Thresholds.idle(pph)
+            rows += Row.Step(color(g), R.drawable.ic_battery, if (g == Grade.UNKNOWN) null else g.label, "화면 꺼진 대기: 시간당 ${DrainAnalyzer.fmt(pph)}%",
+                "기준 ${Thresholds.IDLE_NORMAL}% 이하 정상 · ${Thresholds.IDLE_ABNORMAL}% 넘으면 비정상 — 높으면 뒤에서 도는 앱·AOD 쪽", key = "usage:idle")
+        }
+        b.screenPph?.let { pph ->
+            rows += Row.Note("화면 켜진 동안: 시간당 ${DrainAnalyzer.fmt(pph)}% — 화면 시간·밝기가 좌우")
+        }
+        if (!b.exactScreen) rows += Row.Note("PC 툴킷 메뉴 7(권한 주기) 뒤엔 화면 켜짐 시간까지 정확히 나눕니다")
+        b.steepest.forEach { h ->
+            val on = h.screenOnMs?.let { "화면 ${it / 60_000}분" + (h.topApp?.let { p -> "(${HealthStore.label(this, p)})" } ?: "") }
+            val bg = h.culprit?.takeIf { it.score > 0 }?.let { "뒤에서: ${HealthStore.label(this, it.use.pkg)} ${it.summary}" }
+            val g = Thresholds.mixed24h(h.pph)
+            rows += Row.Step(color(g), R.drawable.ic_battery, if (g == Grade.NORMAL) null else g.label,
+                "${hourLabel(h.start)} · ${DrainAnalyzer.fmt(h.dropPercent)}% (시간당 ${DrainAnalyzer.fmt(h.pph)}%)",
+                listOfNotNull(on, bg).joinToString("\n").ifEmpty { null }, key = "hour:${h.start}")
+        }
+        return rows
+    }
+
+    /** "오후 7시~8시" */
+    private fun hourLabel(t: Long): String {
+        val h = java.time.Instant.ofEpochMilli(t).atZone(java.time.ZoneId.systemDefault()).hour
+        fun name(x: Int) = (if (x % 24 < 12) "오전 " else "오후 ") + (if (x % 12 == 0) 12 else x % 12) + "시"
+        return "${name(h)}~${name(h + 1).substringAfter(' ')}"
+    }
+
+    /** 앱별 소모 (최근 2시간) — 권한이 있을 때만. 알려진 문제(Play 서비스 과소모 등)는 맨 위에 해결 순서와 함께 */
+    private fun appRows(): List<Row> {
         val rows = ArrayList<Row>()
         rows += Row.Header("앱별 소모 (최근 2시간)")
         if (!HealthReader(this).available) {
             rows += Row.Note("PC 툴킷 메뉴 7(권한 주기) 뒤에 보입니다")
             return rows
         }
-        val ranked = Guardian.culprits(this, now)
+        insights?.issues?.forEach { i ->
+            rows += Row.Step(color(i.grade), R.drawable.ic_warning, i.grade.label, i.title,
+                (listOf(i.why) + i.steps.mapIndexed { n, st -> "${n + 1}) $st" }).joinToString("\n"), key = "issue:${i.id}")
+            rows += Row.Action("$A_APP_INFO${i.pkg}", R.drawable.ic_edit, "Play 서비스 앱 정보 열기", accent = true)
+        }
+        val ranked = insights?.culprits.orEmpty()
         if (ranked.isEmpty()) { rows += Row.Note("아직 두 번째 기록 전입니다 (15분 뒤부터)"); return rows }
         ranked.take(8).forEach { r ->
             val sub = (r.flags.filter { it != "이 앱" } + r.summary).joinToString(" · ")
@@ -270,6 +328,12 @@ class BatteryActivity : ComponentActivity() {
                 Guardian.saveConfig(this, next)
                 render()
             }
+            row.id.startsWith(A_APP_INFO) -> {
+                val pkg = row.id.removePrefix(A_APP_INFO)
+                runCatching {
+                    startActivity(android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, android.net.Uri.parse("package:$pkg")))
+                }.onFailure { notice = "앱 정보를 열지 못했습니다 — 설정 > 애플리케이션에서 찾아 주세요"; render() }
+            }
             row.id == A_FORCED_RESTART -> {
                 notice = "표시를 남겼습니다 — 이제 홈 + 뒤로 버튼을 꺼질 때까지(7초 이상) 누르세요. 다시 켜지면 전후 잔량을 비교합니다 (이미 재시작했다면 그대로 두세요)"
                 render()
@@ -294,7 +358,7 @@ class BatteryActivity : ComponentActivity() {
                 val a = analysis ?: return
                 lifecycleScope.launch {
                     val f = withContext(Dispatchers.IO) {
-                        runCatching { log.writeSummary(BatterySummary.text(a, live, Build.MODEL ?: "")) }.getOrNull()
+                        runCatching { log.writeSummary(BatterySummary.text(a, live, Build.MODEL ?: "", insights = insights)) }.getOrNull()
                     }
                     notice = if (f != null) "요약 저장됨\n${f.path}" else "요약을 쓰지 못했습니다"
                     render()
@@ -336,6 +400,7 @@ class BatteryActivity : ComponentActivity() {
         const val A_RESTORE = "g:restore"
         const val A_TOGGLE = "g:toggle:"
         const val A_FORCED_RESTART = "drift:restart"
+        const val A_APP_INFO = "appinfo:"
         const val A_CAL_START = "cal:start"
         const val A_CAL_STOP = "cal:stop"
         const val T_NIGHT_SAVER = "nightSaver"

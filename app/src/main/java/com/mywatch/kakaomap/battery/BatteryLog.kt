@@ -4,6 +4,7 @@ import android.content.Context
 import com.mywatch.battery.core.BatterySample
 import com.mywatch.battery.core.SampleCsv
 import java.io.File
+import java.io.RandomAccessFile
 
 /**
  * 배터리 표본 CSV 파일. 앱 전용 외부 저장 공간(PC 에서 `adb pull` 로 가져갈 수 있는 곳)에 두고, 없으면 내부 저장 공간.
@@ -24,6 +25,26 @@ class BatteryLog(context: Context) {
 
     fun readAll(): List<BatterySample> = synchronized(LOCK) {
         if (file.exists()) SampleCsv.parse(file.readText()) else emptyList()
+    }
+
+    /**
+     * 최근 [days]일의 표본만 — 파일 끝부분만 읽는다(15분마다 30일 파일 전체를 읽지 않게). 끝부분에 그 기간이 다 들어 있지
+     * 않으면 읽는 양을 두 배씩 늘린다
+     */
+    fun readRecent(days: Int, now: Long = System.currentTimeMillis()): List<BatterySample> = synchronized(LOCK) {
+        if (!file.exists()) return emptyList()
+        val from = now - days * 86_400_000L
+        val len = file.length()
+        var want = (days * 96L * 100L).coerceAtLeast(16_384L)
+        while (want < len) {
+            val bytes = ByteArray(want.toInt())
+            RandomAccessFile(file, "r").use { raf -> raf.seek(len - want); raf.readFully(bytes) }
+            // 첫 줄은 잘렸을 수 있어 버린다
+            val parsed = String(bytes, Charsets.UTF_8).substringAfter('\n').lineSequence().mapNotNull { SampleCsv.parseLine(it) }.toList()
+            if (parsed.isNotEmpty() && parsed.first().t <= from) return parsed.filter { it.t >= from }
+            want *= 2
+        }
+        SampleCsv.parse(file.readText()).filter { it.t >= from }
     }
 
     /** 오래된 줄을 지우고 남은 줄 수를 돌려준다 (임시 파일에 다시 써서 교체 — 쓰다 꺼져도 원본은 남게) */

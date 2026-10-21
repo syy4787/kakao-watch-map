@@ -84,6 +84,10 @@ object GuardianRules {
         analysis: Analysis?,
         /** 지금 절전 모드가 켜져 있나 (모르면 null) */
         saverOnNow: Boolean?,
+        /** 화면이 지금까지 꺼져 있던 시간(사용 통계로 정확히 알 때) — 없으면 15분 표본으로 어림 */
+        screenOffMs: Long? = null,
+        /** 최근 2시간 중 화면이 켜져 있던 시간(사용 통계) — 비정상 소모 판단에 */
+        screenOnMs2h: Long? = null,
     ): Pair<List<GuardianAction>, GuardianState> {
         val actions = ArrayList<GuardianAction>()
         var s = st
@@ -111,7 +115,7 @@ object GuardianRules {
             }
         }
         val overridden = now < s.userOverrideUntil
-        val screenOff = screenOffFor(samples, now)
+        val screenOff = screenOffMs ?: screenOffFor(samples, now)
         val inNight = inWindow(minuteOfDay, cfg.nightStartMin, cfg.nightEndMin)
 
         // 2. 밤 모드
@@ -133,7 +137,7 @@ object GuardianRules {
                 s = s.copy(abnormalActive = false, saverSeenOn = false)
             }
         } else if (cfg.abnormalSaver && !s.nightActive && !charging && !overridden) {
-            val a = AlertRule.check(samples, now, lastAlertAt = null)
+            val a = AlertRule.check(samples, now, lastAlertAt = null, screenOnMs = screenOnMs2h)
             if (a != null) {
                 val notify = now - s.lastAbnormalNotifyAt >= ABNORMAL_NOTIFY_COOLDOWN_MS
                 actions += GuardianAction.AbnormalOn(a.pph, notify)

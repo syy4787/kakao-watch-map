@@ -240,6 +240,8 @@
     <string name="tube_terms_privacy">개인정보 처리방침</string>
     <string name="tube_terms_on_phone">폰에서 열기</string>
     <string name="tube_tile_label">유튜브</string>
+    <string name="battery_tile_label">배터리</string>
+    <string name="battery_tile_open">자세히</string>
     <string name="tube_tile_search_sub">말로 찾기</string>
     <string name="tube_tile_mix">믹스 이어 듣기</string>
     <string name="tube_tile_no_recent">먼저 하나를 틀어 주세요</string>

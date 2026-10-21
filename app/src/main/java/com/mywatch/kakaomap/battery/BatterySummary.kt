@@ -67,7 +67,7 @@ object BatterySummary {
     }
 
     /** summary.txt 본문 */
-    fun text(a: Analysis, live: BatterySample?, model: String, now: Long = System.currentTimeMillis()): String = buildString {
+    fun text(a: Analysis, live: BatterySample?, model: String, now: Long = System.currentTimeMillis(), insights: Insights? = null): String = buildString {
         appendLine("갤럭시워치 배터리 기록 요약 — ${time(now)}")
         appendLine("기기: $model")
         appendLine("지금: ${nowLine(live, a.drift)}")
@@ -75,6 +75,20 @@ object BatterySummary {
         appendLine("[판정] ${a.verdict.grade.label} — ${a.verdict.headline}")
         a.verdict.reasons.forEach { appendLine(" · $it") }
         appendLine()
+        insights?.breakdown?.let { b ->
+            appendLine("[사용 내역 24시간] ${b.headline}")
+            b.screenPph?.let { appendLine(" · 화면 켜진 동안 시간당 ${DrainAnalyzer.fmt(it)}%") }
+            b.steepest.forEach { h ->
+                appendLine(" · ${time(h.start)}~ ${DrainAnalyzer.fmt(h.dropPercent)}% (시간당 ${DrainAnalyzer.fmt(h.pph)}%)" +
+                    (h.screenOnMs?.let { " 화면 ${it / 60_000}분" } ?: "") + (h.topApp?.let { " [$it]" } ?: "") +
+                    (h.culprit?.let { " 뒤에서 ${it.use.pkg}: ${it.summary}" } ?: ""))
+            }
+        }
+        insights?.issues?.forEach { i ->
+            appendLine("[알려진 문제] ${i.title} — ${i.why}")
+            i.steps.forEachIndexed { n, st -> appendLine("  ${n + 1}) $st") }
+        }
+        insights?.nightEffect?.headline?.let { appendLine("[밤 모드 효과] $it") }
         appendLine("[소모율] 1시간 ${rateLine(a.w1)} / 8시간 ${rateLine(a.w8)} / 24시간 ${rateLine(a.w24)}")
         appendLine("[대기(화면 꺼짐) 24시간] ${rateLine(a.idle24)} — ${Thresholds.idle(a.idle24.percentPerHour).label}")
         appendLine("[밤사이] ${overnightLine(a)}")

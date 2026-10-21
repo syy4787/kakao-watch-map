@@ -14,7 +14,8 @@ object AlertRule {
 
     data class Alert(val pph: Double, val hours: Double)
 
-    fun check(samples: List<BatterySample>, now: Long, lastAlertAt: Long?): Alert? {
+    /** [screenOnMs] = 최근 2시간 중 화면이 켜져 있던 시간(사용 통계로 정확히 알 때) — 없으면 15분 표본의 화면 상태로 어림 */
+    fun check(samples: List<BatterySample>, now: Long, lastAlertAt: Long?, screenOnMs: Long? = null): Alert? {
         if (lastAlertAt != null && now - lastAlertAt < COOLDOWN_MS) return null
         val recent = samples.filter { it.t >= now - WINDOW_MS && it.t <= now }.sortedBy { it.t }
         if (recent.size < MIN_SAMPLES) return null
@@ -22,7 +23,8 @@ object AlertRule {
         val first = recent.first()
         val last = recent.last()
         if (last.t - first.t < MIN_SPAN_MS) return null
-        val off = recent.count { !it.interactive }.toDouble() / recent.size
+        val off = if (screenOnMs != null) 1.0 - screenOnMs.toDouble() / (last.t - first.t).coerceAtLeast(1)
+        else recent.count { !it.interactive }.toDouble() / recent.size
         if (off < SCREEN_OFF_RATIO) return null
         val hours = (last.t - first.t) / 3_600_000.0
         val pph = (first.level - last.level) / hours

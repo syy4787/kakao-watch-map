@@ -19,10 +19,14 @@ object BatteryAlerts {
     const val NOTIFICATION_ID = 7301
     private const val KEY_ALERT_AT = "alert_at"
 
-    fun check(context: Context, log: BatteryLog, now: Long = System.currentTimeMillis()) {
+    fun check(context: Context, log: BatteryLog, now: Long = System.currentTimeMillis()) =
+        check(context, log.readRecent(1, now), now, null)
+
+    /** [samples] 최근 표본, [screenOnMs] 최근 2시간 화면 켜짐(사용 통계로 알 때) */
+    fun check(context: Context, samples: List<com.mywatch.battery.core.BatterySample>, now: Long, screenOnMs: Long?) {
         val prefs = context.getSharedPreferences(BatteryLog.PREFS, Context.MODE_PRIVATE)
         val last = prefs.getLong(KEY_ALERT_AT, 0L).takeIf { it > 0 }
-        val alert = AlertRule.check(log.readAll(), now, last) ?: return
+        val alert = AlertRule.check(samples, now, last, screenOnMs) ?: return
         if (runCatching { notify(context, alert) }.isSuccess) prefs.edit().putLong(KEY_ALERT_AT, now).apply()
     }
 

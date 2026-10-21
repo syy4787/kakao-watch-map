@@ -54,6 +54,8 @@ pm_cmd() {
     disable-user) local pkg="${@: -1}"; echo "$pkg" >> "$STATE/disabled"; echo "Package $pkg new state: disabled-user" ;;
     enable) local pkg="${@: -1}"; { grep -vx "$pkg" "$STATE/disabled" || true; } > "$STATE/disabled.tmp" && mv "$STATE/disabled.tmp" "$STATE/disabled"; echo "Package $pkg new state: enabled" ;;
     clear|uninstall-system-updates) echo "Success" ;;
+    # pm trim-caches <크기> — 실제 pm 처럼 성공 시 출력 없음, 횟수만 남긴다
+    trim-caches) echo "$*" >> "$STATE/trims" ;;
     # pm grant/revoke <pkg> <permission> — 우리 앱에만 된다(실제 pm 처럼 성공 시 출력 없음, 모르는 패키지는 예외 문구)
     grant|revoke)
       local pkg="${2:-}" perm="${3:-}"

@@ -12,9 +12,13 @@ import android.provider.Settings
 import androidx.core.app.NotificationCompat
 import com.mywatch.battery.core.Analysis
 import com.mywatch.battery.core.AppDrain
+import com.mywatch.battery.core.AlertRule
 import com.mywatch.battery.core.AppDrainRank
 import com.mywatch.battery.core.DrainAnalyzer
 import com.mywatch.battery.core.GaugeDriftRule
+import com.mywatch.battery.core.Grade
+import com.mywatch.battery.core.KnownIssues
+import com.mywatch.battery.core.Span
 import com.mywatch.battery.core.GuardianAction
 import com.mywatch.battery.core.GuardianConfig
 import com.mywatch.battery.core.GuardianRules
@@ -40,6 +44,8 @@ object Guardian {
     const val N_DRIFT = 7305
     /** 게이지 보정 루틴 단계 */
     const val N_CAL = 7306
+    /** 알려진 문제(Play 서비스 과소모 등) */
+    const val N_ISSUE = 7307
     const val ACTION_RESTORE = "com.mywatch.kakaomap.battery.RESTORE"
     /** 잔량 표시 오차 알림의 '보정 루틴 시작' 버튼 */
     const val ACTION_CAL_START = "com.mywatch.kakaomap.battery.CAL_START"
@@ -60,6 +66,13 @@ object Guardian {
     private const val K_S_SAVER_SEEN = "gs_saver_seen"
     private const val K_S_SAVER_BROKEN = "gs_saver_broken"
     private const val K_S_DRIFT_NOTIFY_AT = "gs_drift_notify_at"
+    private const val K_S_ISSUE_AT = "gs_issue_notify_at"
+    /** 알려진 문제 알림은 12시간에 한 번 */
+    const val ISSUE_COOLDOWN_MS = 12L * 3_600_000L
+    /** 지킴이 판단에 읽는 기록 (일) */
+    const val RECENT_DAYS = 3
+    /** 화면 켜짐을 볼 창 (하루 — 이 안에 기록이 있어야 사용 통계를 믿는다) */
+    const val SCREEN_LOOKBACK_MS = 24L * 3_600_000L
     /** 마지막으로 알린 드리프트(포인트) — 알림에서 보정을 시작할 때 '시작 때 오차'로 */
     internal const val K_S_LAST_DRIFT = "gs_last_drift"
     private const val K_LAST_ACTION = "gs_last_action"
@@ -104,32 +117,73 @@ object Guardian {
         stats: UidStatsSource? = null, zone: ZoneId = ZoneId.systemDefault(),
     ) {
         val c = context.applicationContext
-        val samples = log.readAll()
+        // 판단에는 최근 며칠이면 충분하다 — 15분마다 30일 파일 전체를 읽고 분석하지 않는다(이 앱이 배터리를 덜 쓰게)
+        val samples = log.readRecent(RECENT_DAYS, now)
         val analysis: Analysis? = runCatching { DrainAnalyzer(WatchModels.nominalMah(Build.MODEL), zone).analyze(samples, now) }
             .onFailure { ErrorLog.record("배터리·지킴이", it) }.getOrNull()
+        // 화면 켜짐을 사용 통계로 정확히 (권한이 있을 때) — 15분 표본 사이에 켰다 끈 것도 안다.
+        // 하루 동안 화면 기록이 하나도 없으면 이 기기가 기록을 안 남기는 것으로 보고 표본으로 어림한다
+        val screen = runCatching { ScreenUsage(c).read(now - SCREEN_LOOKBACK_MS, now) }.getOrNull()?.first?.takeIf { it.isNotEmpty() }
 
         // 앱별 누적 사용량 → 이번 구간 사용량 (권한이 있을 때만)
         val source = stats ?: HealthReader(c).takeIf { it.available }
-        if (source != null) runCatching { HealthStore(c).record(now, source.take()) }.onFailure { ErrorLog.record("배터리·앱별 통계", it) }
+        if (source != null) {
+            runCatching { HealthStore(c).record(now, source.take()) }.onFailure { ErrorLog.record("배터리·앱별 통계", it) }
+            runCatching { checkKnownIssues(c, now) }.onFailure { ErrorLog.record("배터리·알려진 문제", it) }
+        }
 
         // 권한이 필요 없는 것들: 게이지 보정 루틴 단계, 잔량 표시 오차 알림
         runCatching { Calibration.tick(c, samples, now) }.onFailure { ErrorLog.record("배터리·보정", it) }
         runCatching { checkDrift(c, analysis, now) }.onFailure { ErrorLog.record("배터리·게이지", it) }
 
         val levers = Levers(c)
+        val screenOn2h = screen?.sumOf { it.overlap(now - AlertRule.WINDOW_MS, now) }
         if (!levers.canWriteSecure) {
             // 설정을 못 바꾸는 동안은 알림만
-            BatteryAlerts.check(c, log, now)
+            BatteryAlerts.check(c, samples, now, screenOn2h)
             return
         }
         val cfg = config(c)
         val st = state(c)
-        val (actions, next) = GuardianRules.decide(now, zone, cfg, st, samples, analysis, levers.saverOn())
+        val screenOff = screen?.let { spans -> screenOffFor(spans, now) }
+        val (actions, next) = GuardianRules.decide(now, zone, cfg, st, samples, analysis, levers.saverOn(), screenOff, screenOn2h)
         // 설정으로 절전이 안 켜지는 워치면 절전 레버는 빼고 나머지만
         val effective = if (st.saverBroken || next.saverBroken) cfg.copy(nightSaver = false) else cfg
         val phantom = analysis?.verdict?.tags?.let { "phantom" in it || "drift" in it } ?: false
         for (a in actions) runCatching { act(c, levers, effective, a, now, next.saverBroken, phantom) }.onFailure { ErrorLog.record("배터리·지킴이", it) }
         saveState(c, next)
+    }
+
+    /** 화면 켜짐 구간으로 본 '지금까지 꺼져 있던 시간' — 지금 켜져 있으면 0, 창 안에 켜진 적이 없으면 창 길이 */
+    internal fun screenOffFor(spans: List<Span>, now: Long): Long {
+        val last = spans.maxByOrNull { it.end } ?: return SCREEN_LOOKBACK_MS
+        return (now - last.end).coerceAtLeast(0L)
+    }
+
+    /**
+     * 알려진 문제(지금은 Play 서비스가 멈춘 채 돌며 배터리를 먹는 것)를 최근 2시간 앱별 사용량에서 찾으면 해결 순서와
+     * 그 앱 정보 바로 가기를 알린다 (12시간에 한 번). 권한(BATTERY_STATS)이 있어야 앱별 사용량을 안다
+     */
+    private fun checkKnownIssues(c: Context, now: Long) {
+        val issue = KnownIssues.detect(culprits(c, now)).firstOrNull { it.grade == Grade.ABNORMAL } ?: return
+        val p = prefs(c)
+        val last = p.getLong(K_S_ISSUE_AT, 0L)
+        if (last > 0 && now - last < ISSUE_COOLDOWN_MS) return
+        val nm = channel(c) ?: return
+        val text = "${issue.why}. 해결: " + issue.steps.mapIndexed { i, s -> "${i + 1}) $s" }.joinToString(" ")
+        val info = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${issue.pkg}")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        val n = NotificationCompat.Builder(c, CHANNEL)
+            .setSmallIcon(R.drawable.ic_warning)
+            .setContentTitle(issue.title)
+            .setContentText(text)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(text))
+            .setContentIntent(openScreen(c))
+            .setAutoCancel(true)
+            .addAction(0, "Play 서비스 앱 정보", PendingIntent.getActivity(c, 4, info, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT))
+            .build()
+        nm.notify(N_ISSUE, n)
+        p.edit().putLong(K_S_ISSUE_AT, now).apply()
+        noteAction(c, "알려진 문제 알림: ${issue.title}")
     }
 
     /** 게이지가 20포인트 넘게 낮게 세는 것이 확실하고 표시 잔량이 35% 아래면 알린다 (12시간에 한 번) — 표시보다 실제가 많으니 당황할 일이 아니다 */
@@ -171,6 +225,7 @@ object Guardian {
         val minute = local.hour * 60 + local.minute
         if (GuardianRules.minutesUntil(minute, cfg.nightEndMin) > 120 && GuardianRules.inWindow(minute, cfg.nightStartMin, cfg.nightEndMin)) return
         runCatching { Levers(c).restoreNight() }
+        GuardianJournal(c).add(GuardianJournal.NIGHT_OFF, now)
         saveState(c, st.copy(nightActive = false, saverSeenOn = false))
         noteAction(c, "앱을 열어 밤 모드 끝")
     }
@@ -179,10 +234,12 @@ object Guardian {
         when (a) {
             GuardianAction.SaverNotWorking -> noteAction(c, "이 워치는 설정으로 절전 모드가 켜지지 않아 절전 레버는 건너뜁니다 (AOD 등은 계속)")
             GuardianAction.NightOn -> {
+                GuardianJournal(c).add(GuardianJournal.NIGHT_ON, now)
                 val done = levers.applyNight(cfg)
                 noteAction(c, "밤 모드 시작 — " + done.joinToString(", ").ifEmpty { "바꿀 수 있는 설정 없음" })
             }
             GuardianAction.NightOff -> {
+                GuardianJournal(c).add(GuardianJournal.NIGHT_OFF, now)
                 val done = levers.restoreNight()
                 noteAction(c, "밤 모드 끝 — " + done.joinToString(", ").ifEmpty { "되돌릴 것 없음" })
             }
@@ -265,6 +322,7 @@ object Guardian {
     fun restoreNow(c: Context, now: Long = System.currentTimeMillis()) {
         Levers(c).restoreAll(keepSaver = false)
         val s = state(c)
+        if (s.nightActive) GuardianJournal(c).add(GuardianJournal.NIGHT_OFF, now)
         saveState(c, s.copy(nightActive = false, abnormalActive = false, userOverrideUntil = now + GuardianRules.USER_OVERRIDE_MS))
         noteAction(c, "사용자가 되돌림 — 12시간 쉼")
         runCatching { c.getSystemService(NotificationManager::class.java)?.cancel(N_ABNORMAL) }

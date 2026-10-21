@@ -28,6 +28,8 @@ class BatterySampleWorker(context: Context, params: WorkerParameters) : Worker(c
                 log.pruneIfDue()
                 // 지킴이: 밤·비정상 소모 대응과 알림 (권한이 없으면 알림만)
                 Guardian.tick(applicationContext, log)
+                // 배터리 타일이 보일 때 새 값으로 그리게
+                com.mywatch.kakaomap.tile.BatteryTileService.refresh(applicationContext)
             }
         } catch (e: Exception) {
             ErrorLog.record("배터리·기록", e)

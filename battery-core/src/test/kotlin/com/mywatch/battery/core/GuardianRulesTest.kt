@@ -148,4 +148,31 @@ class GuardianRulesTest {
         assertEquals(390, GuardianRules.minutesUntil(30, 420))
         assertEquals(495, GuardianRules.minutesUntil(1365, 420))   // 22:45 → 07:00
     }
+
+    /** 사용 통계로 정확히 아는 화면 켜짐이 있으면 15분 표본의 화면 상태보다 그것을 믿는다 */
+    @Test
+    fun exactScreenTimeBeatsTheSampleFlags() {
+        val now = at(0, 30)
+        val quiet = drain(now, 8, 60.0, 2.0)          // 표본으로는 내내 꺼짐
+        // 실제로는 10분 전까지 화면을 보고 있었다 (표본 사이에 켰다 끔)
+        val (a1, _) = GuardianRules.decide(now, zone, cfg, GuardianState(), quiet, null, saverOnNow = false, screenOffMs = 10 * 60_000L)
+        assertTrue(a1.isEmpty())
+        // 마지막 표본은 켜짐이지만 실제로는 40분째 꺼져 있다 (표본 찍는 순간만 켜져 있었음)
+        val flag = quiet.toMutableList().also { it[it.size - 1] = it.last().copy(interactive = true) }
+        val (a2, _) = GuardianRules.decide(now, zone, cfg, GuardianState(), flag, null, saverOnNow = false, screenOffMs = 40 * 60_000L)
+        assertEquals(listOf<GuardianAction>(GuardianAction.NightOn), a2)
+    }
+
+    @Test
+    fun heavyDrainWhileTheScreenWasActuallyOnIsNotCalledAbnormal() {
+        val now = at(14, 0)
+        val fast = drain(now, 9, 80.0, 6.0)            // 표본으로는 꺼진 채 시간당 6%
+        val (a1, _) = GuardianRules.decide(now, zone, cfg, GuardianState(), fast, null, saverOnNow = false)
+        assertTrue(a1.toString(), a1.any { it is GuardianAction.AbnormalOn })
+        // 실제로는 2시간 중 1시간 넘게 화면을 썼다 (영상 등) — 비정상이 아니다
+        val (a2, _) = GuardianRules.decide(now, zone, cfg, GuardianState(), fast, null, saverOnNow = false, screenOnMs2h = 70 * 60_000L)
+        assertTrue(a2.toString(), a2.none { it is GuardianAction.AbnormalOn })
+        assertEquals(null, AlertRule.check(fast, now, null, screenOnMs = 70 * 60_000L))
+        assertTrue(AlertRule.check(fast, now, null, screenOnMs = 5 * 60_000L) != null)
+    }
 }

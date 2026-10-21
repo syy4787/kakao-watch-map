@@ -81,4 +81,24 @@ class BatteryLogTest {
         assertEquals("요약", f.readText())
         assertEquals(log.dir, f.parentFile)
     }
+
+    /** 지킴이는 15분마다 최근 며칠만 본다 — 30일 파일 전체를 읽지 않고 끝부분만 읽어도 같은 표본 */
+    @Test
+    fun readRecentReadsOnlyTheTailButGetsTheSameSamples() {
+        val q = 15 * 60_000L
+        val day = 86_400_000L
+        val start = now - 10 * day
+        var t = start
+        var k = 0
+        while (t <= now) {
+            // 가끔 이벤트 줄(메모 포함)도 섞어 줄 길이를 고르지 않게
+            val s = if (k % 37 == 0) BatterySample(t, 50 + k % 40, event = Event.USER_NOTE, note = "강제 재시작") else BatterySample(t, 50 + k % 40, chargeUah = 200_000 + k, voltageMv = 3_900, tempDeciC = 300, currentUa = -40_000)
+            log.append(s)
+            t += q; k++
+        }
+        val all = log.readAll()
+        assertEquals(all.filter { it.t >= now - 3 * day }, log.readRecent(3, now))
+        assertEquals(all, log.readRecent(30, now))       // 파일보다 길게 달라면 전체
+        assertTrue(log.readRecent(3, now).size in 280..300)
+    }
 }

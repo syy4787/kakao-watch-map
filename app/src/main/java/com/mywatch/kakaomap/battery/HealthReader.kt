@@ -7,6 +7,7 @@ import android.os.health.HealthStats
 import android.os.health.SystemHealthManager
 import android.os.health.UidHealthStats
 import com.mywatch.battery.core.AppDrain
+import com.mywatch.battery.core.TimedUse
 import com.mywatch.battery.core.UidUse
 import org.json.JSONArray
 import org.json.JSONObject
@@ -106,6 +107,22 @@ class HealthStore(context: Context) {
             windows += (0 until arr.length()).mapNotNull { i -> arr.optJSONObject(i)?.let(::fromJson) }
         }
         return AppDrain.sum(windows) to covered
+    }
+
+    /** 최근 [hours]시간의 15분 차를 그대로 (시간대별 범인을 찾을 때) */
+    @Synchronized
+    fun windows(hours: Int, now: Long): List<TimedUse> {
+        if (!deltas.exists()) return emptyList()
+        val from = now - hours * 3_600_000L
+        val out = ArrayList<TimedUse>()
+        deltas.forEachLine { line ->
+            val o = runCatching { JSONObject(line) }.getOrNull() ?: return@forEachLine
+            val t = o.optLong("t")
+            if (t < from || t > now) return@forEachLine
+            val arr = o.optJSONArray("d") ?: return@forEachLine
+            out += TimedUse(t, o.optLong("ms"), (0 until arr.length()).mapNotNull { i -> arr.optJSONObject(i)?.let(::fromJson) })
+        }
+        return out
     }
 
     private fun readLast(): Pair<Long, Map<String, UidUse>>? {

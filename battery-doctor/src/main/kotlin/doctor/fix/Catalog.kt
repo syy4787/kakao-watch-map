@@ -88,6 +88,11 @@ object Catalog {
             val name = OPTIONAL_APPS[p.name] ?: if (p.thirdParty) p.name else continue
             out += disable(p.name, name)
         }
+        // 2026년 Play 서비스 과소모의 알려진 해결: 캐시 정리 → Play 서비스 다시 시작 (데이터·로그인은 그대로)
+        val gmsFlagged = findings.any { it.severity != Severity.INFO && GMS in it.packages }
+        out += Lever("trim-caches", "모든 앱 캐시 정리 (Play 서비스 포함)", "pm trim-caches — 로그인·데이터는 그대로 두고 임시 파일만 지웁니다. 2026년 Play 서비스 과소모의 첫 번째 해결책. 되돌릴 것 없음(필요한 캐시는 앱이 다시 만듦)", Tier.SAFE,
+            if (gmsFlagged) listOf(GMS) else emptyList(),
+            readState = { null }, apply = listOf(listOf("shell", "pm", "trim-caches", "999999999999")), undo = { null }, recommended = gmsFlagged)
         out += Lever("batterystats-reset", "배터리 통계 초기화(측정 시작)", "dumpsys batterystats --reset — 조치 뒤 깨끗한 측정 구간을 시작합니다. 되돌릴 것 없음", Tier.SAFE,
             readState = { null }, apply = listOf(listOf("shell", "dumpsys", "batterystats", "--reset")), undo = { null })
 
@@ -101,6 +106,8 @@ object Catalog {
             if (f.idle?.userWhitelist?.contains(pkg) == true) out += dozeUnwhitelist(pkg, rec)
             out += forceStop(pkg)
         }
+        if (gmsFlagged && known(GMS)) out += Lever("gms-restart", "Play 서비스 다시 시작", "am force-stop — 멈춘 채 돌던 Play 서비스를 끝내면 시스템이 곧바로 새로 띄웁니다(워치 재시작의 가벼운 판). 되돌릴 것 없음", Tier.CAUTION,
+            listOf(GMS), readState = { null }, apply = listOf(listOf("shell", "am", "force-stop", GMS)), undo = { null }, recommended = true)
         val aodNs = when { "ambient_enabled" in secure -> "secure"; "ambient_enabled" in global -> "global"; else -> null }
         aodNs?.let { ns ->
             out += Lever("aod-off", "AOD(항상 켜진 화면) 끄기", "Wear 설정 키 $ns/ambient_enabled 를 0 으로. AOD 를 쓰고 있다면 고르지 마세요(공식: AOD 끄면 30→40시간)", Tier.CAUTION,

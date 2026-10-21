@@ -63,6 +63,9 @@ object AppDrain {
     /** 구간의 절반 넘게 웨이크락을 쥐면 '멈춘(stuck) 웨이크락'으로 본다 */
     const val STUCK_RATIO = 0.5
     const val GPS_CAUTION_MS_PER_H = 10L * 60_000L
+    /** 화면 밖 CPU: 시간당 3분(코어 하나의 5%) 넘으면 주의, 10분 넘으면 비정상 (경험칙 — 평소 Play 서비스는 시간당 1분 안팎) */
+    const val CPU_CAUTION_MS_PER_H = 3L * 60_000L
+    const val CPU_ABNORMAL_MS_PER_H = 10L * 60_000L
     const val SENSOR_BG_CAUTION_MS_PER_H = 30L * 60_000L
 
     /** 이전 스냅샷과 지금 스냅샷의 차. 이전에 없던 앱은 지금 값 전체가 이번 구간 사용량 */
@@ -86,6 +89,12 @@ object AppDrain {
             val wlPerH = u.wakelockMs / hours
             if (u.wakelockMs >= windowMs * STUCK_RATIO) { flags += "웨이크락을 ${(u.wakelockMs * 100 / windowMs.coerceAtLeast(1))}% 시간 동안 쥐고 있음(stuck)"; grade = Grade.ABNORMAL }
             else if (wlPerH > WAKELOCK_CAUTION_MS_PER_H) { flags += "웨이크락 시간당 ${(wlPerH / 1000).toInt()}초 (기준 18.5초)"; grade = Grade.CAUTION }
+            // 화면에 거의 안 떠 있었는데 CPU 를 많이 씀 = 뒤에서 도는 중 (멈춘 채 도는 서비스의 전형)
+            if (u.fgMs < windowMs / 4) {
+                val cpuPerH = u.cpuMs / hours
+                if (cpuPerH > CPU_ABNORMAL_MS_PER_H) { flags += "화면 밖에서 CPU 시간당 ${(cpuPerH / 60_000).toInt()}분 (멈춘 채 도는 중 의심)"; grade = Grade.ABNORMAL }
+                else if (cpuPerH > CPU_CAUTION_MS_PER_H) { flags += "화면 밖에서 CPU 시간당 ${(cpuPerH / 60_000).toInt()}분"; if (grade == Grade.NORMAL) grade = Grade.CAUTION }
+            }
             if (u.gpsMs / hours > GPS_CAUTION_MS_PER_H) { flags += "GPS 시간당 ${(u.gpsMs / hours / 60_000).toInt()}분"; if (grade == Grade.NORMAL) grade = Grade.CAUTION }
             if (u.sensorMs / hours > SENSOR_BG_CAUTION_MS_PER_H && u.fgMs < u.sensorMs / 4) { flags += "화면 밖에서 센서 시간당 ${(u.sensorMs / hours / 60_000).toInt()}분"; if (grade == Grade.NORMAL) grade = Grade.CAUTION }
             if (ownPkg != null && u.pkg == ownPkg) flags += "이 앱"

@@ -209,5 +209,19 @@
                 android:name="androidx.wear.tiles.PREVIEW"
                 android:resource="@drawable/tile_tube_preview" />
         </service>
+        <!-- 타일 '배터리': 잔량 · 소모율·판정 · 이 페이스면 언제 15% · 지킴이 상태 -->
+        <service
+            android:name=".tile.BatteryTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_battery"
+            android:label="@string/battery_tile_label"
+            android:permission="com.google.android.wearable.permission.BIND_TILE_PROVIDER">
+            <intent-filter>
+                <action android:name="androidx.wear.tiles.action.BIND_TILE_PROVIDER" />
+            </intent-filter>
+            <meta-data
+                android:name="androidx.wear.tiles.PREVIEW"
+                android:resource="@drawable/tile_battery_preview" />
+        </service>
     </application>
 </manifest>

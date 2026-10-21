@@ -77,7 +77,9 @@ done
 [ ! -e "$EV/share/snapshot/location.txt" ] || fail "share 에 location.txt 가 있음"
 grep -q "R3CX1234567" "$EV/snapshot/getprop.txt" || fail "원본 일련번호 누락"
 ! grep -q "R3CX1234567" "$EV/share/snapshot/getprop.txt" || fail "share 일련번호 마스킹 안 됨"
-grep -q "74일" "$EV/03_소비자분쟁해결기준_요구서.txt" || fail "구입 경과일 계산"
+# 구입(2026-08-07)부터 오늘까지 — 날짜가 지나도 맞게 그날 계산
+DAYS=$(( ( $(date -d "$(date +%F)" +%s) - $(date -d 2026-08-07 +%s) ) / 86400 ))
+grep -q "${DAYS}일" "$EV/03_소비자분쟁해결기준_요구서.txt" || fail "구입 경과일 계산 (${DAYS}일 기대)"
 grep -q "wifi-scan-off" "$EV/01_삼성멤버스_오류보내기.txt" || fail "신고문에 조치 이력 없음"
 
 echo "[e2e] 메뉴(0 으로 종료)"
@@ -95,7 +97,8 @@ run treat | tee treat.log | tail -32
 grep -q "자동 치료 요약" treat.log || fail "treat 요약 없음"
 grep -q "권한 주기: 6개 모두 성공" treat.log || fail "권한 주기 결과가 '모두 성공'이 아님"
 grep -q "BATTERY_STATS granted=true, WRITE_SECURE_SETTINGS granted=true, GET_USAGE_STATS allow" treat.log || fail "권한 확인 줄 없음"
-grep -q "적용한 조치 6개" treat.log || fail "적용한 조치 수(6 기대)"
+# 안전 4(캐시 정리 포함) + 범인 앱 주의 3 + Play 서비스 다시 시작 1 (견본 덤프는 Play 서비스도 짚는다)
+grep -q "적용한 조치 8개" treat.log || fail "적용한 조치 수(8 기대)"
 grep -q "(wifi-scan-off): 1 → 0" treat.log || fail "이전 값 → 새 값 표시 없음"
 grep -q "(bg-restrict:com.example.drain): allow → ignore" treat.log || fail "appops 이전 값 → 새 값 표시 없음"
 grep -q "건너뛴 추천" treat.log || fail "건너뛴 추천 절 없음"
@@ -105,13 +108,14 @@ grep -q "24시간 뒤 메뉴 2" treat.log || fail "다음 안내 없음"
 grep -q "배터리 통계 초기화: 완료" treat.log || fail "측정 시작 안내 없음"
 grep -q "report.html" treat.log || fail "보고서 경로 없음"
 ! grep -q "정말 적용하려면" treat.log || fail "treat 가 질문을 함"
-# journal: 새 기록 = 권한 6건 + 안전 3건 + 범인 앱 주의 3건, 전부 성공·미되돌림, 금지 조치 없음
+# journal: 새 기록 = 권한 6건 + 안전 4건(캐시 정리 포함) + 범인 앱 주의 3건 + Play 서비스 다시 시작 1건, 전부 성공·미되돌림, 금지 조치 없음
 NEW="$(tail -n +$((BEFORE_LINES + 1)) data/journal.jsonl)"
 for id in grant:android.permission.BATTERY_STATS grant:android.permission.WRITE_SECURE_SETTINGS grant:android.permission.DUMP grant:android.permission.READ_LOGS grant:GET_USAGE_STATS grant:WRITE_SETTINGS \
-          wifi-scan-off ble-scan-off adaptive-battery-on bg-restrict:com.example.drain bucket-restricted:com.example.drain doze-unwhitelist:com.example.drain; do
+          wifi-scan-off ble-scan-off adaptive-battery-on trim-caches bg-restrict:com.example.drain bucket-restricted:com.example.drain doze-unwhitelist:com.example.drain gms-restart; do
   printf '%s\n' "$NEW" | grep -q "\"id\":\"$id\"" || fail "journal 에 $id 없음"
 done
-[ "$(printf '%s\n' "$NEW" | grep -c '"id":')" = "12" ] || fail "treat 의 journal 기록 수 $(printf '%s\n' "$NEW" | grep -c '"id":') != 12"
+[ "$(printf '%s\n' "$NEW" | grep -c '"id":')" = "14" ] || fail "treat 의 journal 기록 수 $(printf '%s\n' "$NEW" | grep -c '"id":') != 14"
+[ -s "$FAKE_ADB_STATE/trims" ] || fail "treat: 캐시 정리(pm trim-caches)가 실행되지 않음"
 ! printf '%s\n' "$NEW" | grep -q '"undone":true' || fail "새 기록이 되돌림으로 표시됨"
 ! printf '%s\n' "$NEW" | grep -q '"ok":false' || fail "treat 중 실패한 조치가 있음"
 ! printf '%s\n' "$NEW" | grep -qE '"id":"(aod-off|clear:|reboot|gms-rollback|rollback:|force-stop:|disable:|app-standby-on)' || fail "자동 치료가 적용하면 안 되는 조치를 적용함"
@@ -138,6 +142,7 @@ SNAP2="$(ls -d data/snapshots/*/ | tail -1)"
 
 echo "[e2e] undo --all (treat 되돌리기 — 권한 회수 포함)"
 run undo --all | tee undo2.log | tail -2
+# 캐시 정리·Play 서비스 다시 시작은 되돌릴 것이 없는 일회성 조치 — 되돌릴 수 있는 12개만
 grep -q "되돌린 조치: 12개" undo2.log || fail "되돌린 개수(12 기대): $(cat undo2.log)"
 [ "$(fake shell settings get global wifi_scan_always_enabled)" = "1" ] || fail "undo2: wifi_scan 복구 안 됨"
 [ "$(fake shell settings get global ble_scan_always_enabled)" = "1" ] || fail "undo2: ble_scan 복구 안 됨"

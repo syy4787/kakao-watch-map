@@ -21,7 +21,7 @@ object Treat {
     val NO_LOSS: Set<String> = setOf("wifi-scan-off", "ble-scan-off", "adaptive-battery-on", "app-standby-on")
 
     /** 범인 앱에 자동으로 거는 '주의' 등급 조치 종류 */
-    val AUTO_CAUTION: Set<String> = setOf("bg-restrict", "bucket-restricted", "doze-unwhitelist")
+    val AUTO_CAUTION: Set<String> = setOf("bg-restrict", "bucket-restricted", "doze-unwhitelist", "gms-restart")
 
     /** 자동 치료가 절대 건드리지 않는 앱 — 우리 전용앱, Samsung Health */
     val PROTECTED: Set<String> = setOf(Grant.PKG, "com.samsung.android.wear.shealth")

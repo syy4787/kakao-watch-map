@@ -41,7 +41,7 @@ class TreatTest {
     fun planTakesRecommendedSafeAndCulpritCautionNothingElse() {
         val (_, _, levers) = sampleLevers()
         val ids = Treat.plan(levers, strong = false).ids()
-        assertEquals(listOf("wifi-scan-off", "ble-scan-off", "adaptive-battery-on", "bg-restrict:$drain", "bucket-restricted:$drain", "doze-unwhitelist:$drain"), ids)
+        assertEquals(autoIds, ids)
         // 규칙 확인: 강함 없음, 주의는 추천된 자동 종류만, 안전은 추천 또는 무손실 설정만
         for (l in Treat.plan(levers, strong = false)) {
             assertTrue(l.id, l.tier != Tier.STRONG)
@@ -52,6 +52,35 @@ class TreatTest {
         assertFalse(ids.contains("aod-off"))
         assertFalse(ids.contains("batterystats-reset"))      // 초기화는 파이프라인이 따로 한다
         assertFalse(ids.any { it.startsWith("disable:") || it.startsWith("force-stop:") || it.startsWith("clear:") || it.startsWith("rollback:") })
+    }
+
+    /** 2026년 Play 서비스 과소모: 분석이 Play 서비스를 짚으면 캐시 정리(안전)와 Play 서비스 다시 시작(주의)을 자동으로 */
+    @Test
+    fun playServicesFlaggedGetsCacheTrimAndRestartAutomatically() {
+        val (f, findings, _) = sampleLevers()
+        val gms = Finding("gms-share", Severity.ABNORMAL, "Google Play 서비스가 추정 전력의 40%", emptyList(), listOf(Analyzer.GMS), category = "gms")
+        val levers = Catalog.levers(f, findings + gms)
+        val trim = levers.id("trim-caches")
+        assertTrue(trim.recommended)
+        assertEquals(Tier.SAFE, trim.tier)
+        assertEquals(listOf(listOf("shell", "pm", "trim-caches", "999999999999")), trim.apply)
+        val restart = levers.id("gms-restart")
+        assertEquals(Tier.CAUTION, restart.tier)
+        assertEquals(listOf(listOf("shell", "am", "force-stop", Analyzer.GMS)), restart.apply)
+        val ids = Treat.plan(levers, strong = false).ids()
+        assertTrue(ids.toString(), ids.contains("trim-caches") && ids.contains("gms-restart"))
+        assertTrue(ids.indexOf("trim-caches") < ids.indexOf("gms-restart"))
+        // Play 서비스는 여전히 끄기·데이터 삭제·백그라운드 제한 대상이 아니다
+        assertFalse(levers.any { it.id in setOf("disable:${Analyzer.GMS}", "clear:${Analyzer.GMS}", "bg-restrict:${Analyzer.GMS}") })
+    }
+
+    @Test
+    fun withoutPlayServicesTroubleTheCacheTrimIsOfferedButNotApplied() {
+        val (f, _, _) = sampleLevers()
+        val levers = Catalog.levers(f, emptyList())
+        assertFalse(levers.id("trim-caches").recommended)
+        assertFalse(levers.any { it.id == "gms-restart" })
+        assertFalse(Treat.plan(levers, strong = false).ids().contains("trim-caches"))
     }
 
     @Test
@@ -195,7 +224,8 @@ class TreatTest {
     }
 
     private val grantIds = Grant.STEPS.map { it.id }
-    private val autoIds = listOf("wifi-scan-off", "ble-scan-off", "adaptive-battery-on", "bg-restrict:$drain", "bucket-restricted:$drain", "doze-unwhitelist:$drain")
+    /** 견본 덤프는 Play 서비스도 짚으므로(2026년 패턴) 캐시 정리·Play 서비스 다시 시작이 함께 들어간다 */
+    private val autoIds = listOf("wifi-scan-off", "ble-scan-off", "adaptive-battery-on", "trim-caches", "bg-restrict:$drain", "bucket-restricted:$drain", "doze-unwhitelist:$drain", "gms-restart")
 
     @Test
     fun treatRunsWholePipelineWithoutQuestionsAndUndoAllRevertsIt() {
@@ -214,6 +244,8 @@ class TreatTest {
         assertTrue(calls.contains("shell cmd appops set $drain RUN_ANY_IN_BACKGROUND ignore"))
         assertTrue(calls.contains("shell am set-standby-bucket $drain restricted"))
         assertTrue(calls.contains("shell cmd deviceidle whitelist -$drain"))
+        assertTrue(calls.contains("shell pm trim-caches 999999999999"))
+        assertTrue(calls.contains("shell am force-stop com.google.android.gms"))
         assertFalse(calls.any { it.startsWith("shell pm clear") || it.contains("uninstall-system-updates") || it == "reboot" || it.contains("ambient_enabled") || it.contains("disable-user") })
 
         val journal = Journal(File(data, "journal.jsonl"))
@@ -223,7 +255,7 @@ class TreatTest {
         assertTrue(Collect.latest(data) != null && File(Collect.latest(data)!!.dir, "report.html").isFile)
 
         assertTrue(out, out.contains("자동 치료 요약"))
-        assertTrue(out, out.contains("적용한 조치 6개"))
+        assertTrue(out, out.contains("적용한 조치 ${autoIds.size}개"))
         assertTrue(out, out.contains("Wi-Fi 꺼도 스캔 허용 끄기 (wifi-scan-off): 1 → 0"))
         assertTrue(out, out.contains("(adaptive-battery-on): 0 → 1"))
         assertTrue(out, out.contains("(bg-restrict:$drain): allow → ignore"))
@@ -251,8 +283,11 @@ class TreatTest {
         assertTrue(undo.contains("shell am set-standby-bucket $drain 10"))
         assertTrue(undo.contains("shell cmd deviceidle whitelist +$drain"))
         assertTrue(undo.indexOf("shell cmd deviceidle whitelist +$drain") < undo.indexOf("shell pm revoke $pkg android.permission.BATTERY_STATS"))   // 역순
-        assertTrue(journal.entries().all { it.undone })
-        assertTrue(out2.contains("되돌린 조치: ${grantIds.size + autoIds.size}개"))
+        // 캐시 정리·Play 서비스 다시 시작은 되돌릴 것이 없는 일회성 조치 — 나머지는 모두 되돌린다
+        assertTrue(journal.entries().all { it.undone || it.undo == null })
+        val oneShot = journal.entries().count { it.undo == null }
+        assertEquals(2, oneShot)
+        assertTrue(out2, out2.contains("되돌린 조치: ${grantIds.size + autoIds.size - oneShot}개"))
     }
 
     @Test
@@ -308,7 +343,7 @@ class TreatTest {
         assertEquals(1, code)
         assertTrue(out, out.contains("실패한 조치 1개"))
         assertTrue(out, out.contains("bucket-restricted:$drain"))
-        assertTrue(out, out.contains("적용한 조치 5개"))
+        assertTrue(out, out.contains("적용한 조치 ${autoIds.size - 1}개"))
         val e = Journal(File(data, "journal.jsonl")).entries().first { it.id == "bucket-restricted:$drain" }
         assertFalse(e.ok)
         assertNotNull(e.note)
