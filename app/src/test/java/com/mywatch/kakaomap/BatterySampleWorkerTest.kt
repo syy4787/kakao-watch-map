@@ -119,6 +119,28 @@ class BatterySampleWorkerTest {
         assertTrue(next.all { it.constraints.requiresCharging() })
     }
 
+    /**
+     * 실제 WorkManager 사슬로: 걸어 두면 '충전 중' 조건을 기다리고, 조건이 맞으면 돌아 한 줄 남기고 자기 뒤에 다음 것을 잇는다
+     * (앞 작업이 끝나야 다음 것이 기다림 — 돌던 작업을 갈아 끼우지 않는다). 앱이 다시 시작돼 걸어도 사슬은 하나
+     */
+    @Test
+    fun theChargingJobRunsWhenChargingAndRearmsInItsChain() {
+        plugIn(57)
+        com.mywatch.kakaomap.battery.ChargeWatchWorker.arm(context)
+        val wm = WorkManager.getInstance(context)
+        val first = wm.getWorkInfosForUniqueWork(com.mywatch.kakaomap.battery.ChargeWatchWorker.UNIQUE).get().single()
+        assertEquals(WorkInfo.State.ENQUEUED, first.state)
+        WorkManagerTestInitHelper.getTestDriver(context)!!.setAllConstraintsMet(first.id)
+        assertEquals(Event.POWER_CONNECTED, log.readAll().single().event)
+        val after = wm.getWorkInfosForUniqueWork(com.mywatch.kakaomap.battery.ChargeWatchWorker.UNIQUE).get()
+        assertEquals(WorkInfo.State.SUCCEEDED, after.single { it.id == first.id }.state)
+        val next = after.single { it.id != first.id }
+        assertEquals(WorkInfo.State.ENQUEUED, next.state)
+        assertTrue(next.constraints.requiresCharging())
+        com.mywatch.kakaomap.battery.ChargeWatchWorker.arm(context)
+        assertEquals(1, wm.getWorkInfosForUniqueWork(com.mywatch.kakaomap.battery.ChargeWatchWorker.UNIQUE).get().count { it.state == WorkInfo.State.ENQUEUED })
+    }
+
     @Test
     fun bootWritesARowAndReschedules() {
         BatteryEventsReceiver().onReceive(context, Intent(Intent.ACTION_BOOT_COMPLETED))
