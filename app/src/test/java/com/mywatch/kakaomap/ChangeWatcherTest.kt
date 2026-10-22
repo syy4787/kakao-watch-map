@@ -261,12 +261,12 @@ class ChangeWatcherTest {
         run(Event.POWER_CONNECTED)
         run(Event.BOOT)
         run(Event.PERIODIC)
-        val notes = log.readAll().map { it.event to it.note }
-        assertEquals(Event.PERIODIC to "chg:on=1", notes[0])
-        assertEquals(Event.POWER_CONNECTED to "", notes[1])
-        assertEquals(Event.BOOT, notes[2].first)
-        assertTrue(notes[2].second, ChangeNote.decode(0, notes[2].second).single().kind == ChangeKind.FIRMWARE)
-        assertEquals(Event.PERIODIC to "", notes[3])
+        // 부팅 줄은 켜진 때로 앞당겨 적으므로(시험의 '켜진 뒤 시간'은 처음부터 흐름) 시각 순서가 아니라 계기로 찾는다
+        val rows = log.readAll()
+        assertEquals(listOf("chg:on=1", ""), rows.filter { it.event == Event.PERIODIC }.map { it.note })
+        assertEquals("", rows.single { it.event == Event.POWER_CONNECTED }.note)
+        val boot = rows.single { it.event == Event.BOOT }.note
+        assertTrue(boot, ChangeNote.decode(0, boot).single().kind == ChangeKind.FIRMWARE)
     }
 
     /**

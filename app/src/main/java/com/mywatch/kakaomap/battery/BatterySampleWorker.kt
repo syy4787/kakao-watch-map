@@ -25,7 +25,16 @@ class BatterySampleWorker(context: Context, params: WorkerParameters) : Worker(c
             val log = BatteryLog(applicationContext)
             // 15분·부팅 표본엔 지난번 뒤에 바뀐 것(소프트웨어·앱·시계 화면·설정)을 붙인다 — '최근 며칠'의 그 무렵 바뀐 것.
             // 표본이 실제로 저장됐을 때만 본 값을 기억한다 (저장에 실패하면 다음 표본에 다시)
-            fun save(note: String): Boolean = BatteryProbe.read(applicationContext, event, note)?.let { log.append(it); true } ?: false
+            fun save(note: String): Boolean {
+                val read = BatteryProbe.read(applicationContext, event, note) ?: return false
+                // 켜진 뒤 처음 남는 줄이 부팅 줄 — 늦게 돈 부팅 작업은 이 부팅의 줄을 다시 남기지 않는다 ([BootRows])
+                val row = BootRows.shape(applicationContext, read) ?: return false
+                log.append(row)
+                BootRows.wrote(applicationContext, row)
+                // 충전 중 뜨거우면 그 자리에서 식히는 길을, 충전기에서 뺐으면 그 알림을 거둔다
+                if (event == Event.PERIODIC) runCatching { BatteryAlerts.hotCharge(applicationContext, row) }
+                return true
+            }
             if (given.isEmpty() && (event == Event.PERIODIC || event == Event.BOOT)) {
                 // 바뀐 것을 읽다 실패했어도 표본은 남긴다
                 if (runCatching { ChangeWatcher.record(applicationContext) { n -> save(n) } }.isFailure) save("")

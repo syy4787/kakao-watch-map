@@ -608,6 +608,35 @@ class AnalyzerTest {
         assertEquals(Cause.HARDWARE, v.cause)
     }
 
+    /**
+     * 워치 기록으로 본 충전이 공식(44mm 90분)보다 한참 느림 — 충전 중 뜨거웠으면 그렇다고 (워치9 사용자 보고와 같은 모습). 범인 앱은
+     * 짚지 않는다 (자동 치료가 아무 앱도 제한하지 않게)
+     */
+    @Test
+    fun aSlowChargeOnTheWatchIsAFinding() {
+        val q = 15 * 60_000L
+        val samples = ArrayList<com.mywatch.battery.core.BatterySample>()
+        var t = now - 3 * 24 * 3_600_000L
+        repeat(3) {
+            val dayStart = t
+            while (t < dayStart + 12 * 3_600_000L) { samples += com.mywatch.battery.core.BatterySample(t, 95 - ((t - dayStart) / q).toInt() * 80 / 48); t += q }
+            var lv = 15.0
+            while (lv < 100.0) { samples += com.mywatch.battery.core.BatterySample(t, lv.toInt(), plugged = true, tempDeciC = 440); t += q; lv += 0.6 * 15 }
+            samples += com.mywatch.battery.core.BatterySample(t, 100, plugged = true, tempDeciC = 400)
+            t = dayStart + 24 * 3_600_000L
+        }
+        val fs = Analyzer.findings(facts().copy(model = "SM-L350", watchSamples = samples, zone = zone))
+        val f = fs.single { it.id == "watch-charge-slow" }
+        assertEquals(Severity.CAUTION, f.severity)
+        assertTrue(f.title, f.title.contains("충전이 공식보다 느림 — 완충 어림 2시간 47분 넘게 (삼성 공식 고속 충전 90분)"))
+        assertTrue(f.evidence.toString(), f.evidence.any { it.contains("44℃") && it.contains("뜨거워지면 느려질 수 있다") })
+        // 잰 충전 수를 그 주의 충전 수로 말하지 않는다 (리뷰)
+        assertTrue(f.evidence.toString(), f.evidence.any { it.startsWith("최근 7일 충전 3번 중 3번을 잼") })
+        assertTrue(f.packages.isEmpty())
+        // 모르는 모델이면(공식 시간을 모름) 말하지 않는다
+        assertTrue(Analyzer.findings(facts().copy(model = "SM-R960", watchSamples = samples, zone = zone)).none { it.id == "watch-charge-slow" })
+    }
+
     /** 워치가 그 문제를 처음 짚은 때(요약의 first_*_at)를 소견에 — 증상이 얼마나 이어졌는지 (신고문에도) */
     @Test
     fun theFirstSightingTimeIsInTheWatchFinding() {

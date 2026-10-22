@@ -205,6 +205,54 @@ class EvidenceTest {
     }
 
     /**
+     * 느린 충전은 신고문에 사실 한 줄로 (서비스센터가 공식 시간과 견주게) — 주요 소견에선 그 소견을 뺀다. 잰 충전 수는 그 주의 충전 수와
+     * 따로(잠깐 충전은 재지 않는다 · 리뷰), 공식 시간은 고속 충전 기준, 쓴 충전기는 사용자가 채우게. 요구서 하자 내용엔 충전 중 뜨거웠을 때만
+     * (안 뜨거웠으면 먼저 의심할 것은 쓴 충전기라)
+     */
+    @Test
+    fun lettersCarryTheSlowChargeFacts() {
+        val q = 15 * 60_000L
+        val now = java.time.LocalDateTime.of(2026, 10, 20, 22, 0).atZone(zone).toInstant().toEpochMilli()
+        fun week(tempDeciC: Int): List<com.mywatch.battery.core.BatterySample> {
+            val samples = ArrayList<com.mywatch.battery.core.BatterySample>()
+            var t = now - 3 * 24 * 3_600_000L
+            repeat(3) {
+                val dayStart = t
+                while (t < dayStart + 12 * 3_600_000L) { samples += com.mywatch.battery.core.BatterySample(t, 95 - ((t - dayStart) / q).toInt() * 80 / 48); t += q }
+                var lv = 15.0
+                while (lv < 100.0) { samples += com.mywatch.battery.core.BatterySample(t, lv.toInt(), plugged = true, tempDeciC = tempDeciC); t += q; lv += 0.6 * 15 }
+                samples += com.mywatch.battery.core.BatterySample(t, 100, plugged = true, tempDeciC = 400)
+                samples += com.mywatch.battery.core.BatterySample(t + q, 99)
+                // 낮에 잠깐 올려 둔 충전(70→80%) — 충전 횟수엔 들지만 빠르기는 재지 않는다
+                t = dayStart + 18 * 3_600_000L
+                samples += com.mywatch.battery.core.BatterySample(t, 70, plugged = true, tempDeciC = 330)
+                samples += com.mywatch.battery.core.BatterySample(t + q, 80, plugged = true, tempDeciC = 330)
+                samples += com.mywatch.battery.core.BatterySample(t + 2 * q, 79)
+                t = dayStart + 24 * 3_600_000L
+            }
+            return samples
+        }
+        fun lettersOf(samples: List<com.mywatch.battery.core.BatterySample>): Map<String, String> {
+            val f = Facts(model = "SM-L350", collectedAt = now, watchSamples = samples, zone = zone)
+            val fs = Analyzer.findings(f)
+            assertTrue(fs.any { it.id == "watch-charge-slow" })
+            return Evidence.letters(f, fs, Analyzer.verdict(f, fs), emptyList(), null, LocalDate.of(2026, 10, 20), zone)
+        }
+        val hot = lettersOf(week(440))
+        for (l in hot.values) {
+            val line = l.lines().single { it.startsWith("- 충전 속도(워치 15분 기록)") }
+            assertEquals("- 충전 속도(워치 15분 기록): 완충 어림 2시간 47분 넘게 — 삼성 공식(고속 충전) 44mm 90분, 최근 7일 충전 6번 중 3번을 잼" +
+                "(10~85% 구간), 그 구간 최고 44℃, 사용한 충전기: ${Evidence.BLANK}", line)
+        }
+        assertTrue(hot.getValue(Evidence.LETTER_MEMBERS).lines().none { it.contains("충전이 공식보다 느림") })
+        // 충전 중 뜨겁지 않았으면 요구서 하자 내용엔 넣지 않는다 (접수용 두 글엔 그대로)
+        val cool = lettersOf(week(330))
+        assertTrue(cool.getValue(Evidence.LETTER_LAW).lines().none { it.startsWith("- 충전 속도") })
+        assertTrue(cool.getValue(Evidence.LETTER_MEMBERS).lines().any { it.startsWith("- 충전 속도") })
+        assertTrue(cool.getValue(Evidence.LETTER_CENTER).lines().any { it.startsWith("- 충전 속도") })
+    }
+
+    /**
      * 켜지며 잔량이 뛴 것은 본 그대로 — '17%에서 꺼졌다 켜니 47%'(게이지가 낮게 세다 다시 맞춰짐)와 '하루를 못 버티고 꺼졌다가 충전기에서
      * 켜니 48%'(Samsung Community 10/4, 워치9) — 충전으로 그만큼 오를 수 없었으면 앞뒤 잔량을, 방전 뒤 충전기에서 켜졌으면 마지막 기록이
      * 얼마나 앞이었는지도 (충전기에 둔 시간은 워치가 모르니 판단은 읽는 사람이)
