@@ -245,6 +245,9 @@ class EvidenceTest {
                 "(10~85% 구간), 그 구간 최고 44℃, 사용한 충전기: ${Evidence.BLANK}", line)
         }
         assertTrue(hot.getValue(Evidence.LETTER_MEMBERS).lines().none { it.contains("충전이 공식보다 느림") })
+        // 온도를 못 읽었으면 온도는 적지 않는다
+        val noTemp = lettersOf(week(330).map { it.copy(tempDeciC = null) }).getValue(Evidence.LETTER_MEMBERS).lines().single { it.startsWith("- 충전 속도") }
+        assertTrue(noTemp, noTemp.endsWith("번을 잼(10~85% 구간), 사용한 충전기: ${Evidence.BLANK}"))
         // 충전 중 뜨겁지 않았으면 요구서 하자 내용엔 넣지 않는다 (접수용 두 글엔 그대로)
         val cool = lettersOf(week(330))
         assertTrue(cool.getValue(Evidence.LETTER_LAW).lines().none { it.startsWith("- 충전 속도") })

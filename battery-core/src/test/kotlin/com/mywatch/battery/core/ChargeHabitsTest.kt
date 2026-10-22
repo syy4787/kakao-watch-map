@@ -144,6 +144,22 @@ class ChargeHabitsTest {
         assertNull(ChargeHabits.analyze(gappy, at(13, 8), model = "SM-L350")!!.speed)
     }
 
+    /** 기준의 경계 — 30포인트 오른 충전은 재고 29포인트는 안 잼, 화면 켜진 기록이 1/3 까지는 재고 넘으면 안 잼, 40℃ 부터 열 탓 */
+    @Test
+    fun theEdgesOfTheSpeedRules() {
+        assertEquals(3, ChargeHabits.analyze(chargesOf(List(3) { Charge(0.6, upTo = 45) }), at(13, 8), model = "SM-L350")!!.speed!!.measured)
+        assertNull(ChargeHabits.analyze(chargesOf(List(3) { Charge(0.6, upTo = 44) }), at(13, 8), model = "SM-L350")!!.speed)
+        // 충전마다 잰 구간 표본 8개(15~78%) 가운데 몇 개가 화면 켜짐이었나
+        fun screenOn(n: Int) = chargesOf(List(3) { Charge(0.6) }).let { all ->
+            val on = all.filter { it.plugged }.groupBy { it.t / (24 * 3_600_000L) }.values.flatMap { day -> day.take(n) }.toSet()
+            all.map { if (it in on) it.copy(interactive = true) else it }
+        }
+        assertEquals(3, ChargeHabits.analyze(screenOn(2), at(13, 8), model = "SM-L350")!!.speed!!.measured)
+        assertNull(ChargeHabits.analyze(screenOn(3), at(13, 8), model = "SM-L350")!!.speed)
+        assertTrue(ChargeHabits.analyze(charges(3, perMin = 0.6, tempDeciC = 400), at(13, 8), model = "SM-L350")!!.speed!!.hot)
+        assertFalse(ChargeHabits.analyze(charges(3, perMin = 0.6, tempDeciC = 399), at(13, 8), model = "SM-L350")!!.speed!!.hot)
+    }
+
     /**
      * 잰 충전이 둘이면 둘 다 느려야 느림 — 가운데 값을 아래쪽으로 잡는다(둘의 평균이면 한 번만 느려도 '느림'이고, '그런 충전이 2번 이상'이라는
      * 기준과 어긋났다 · 리뷰)
