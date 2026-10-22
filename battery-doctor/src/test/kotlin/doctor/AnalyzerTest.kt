@@ -628,8 +628,10 @@ class AnalyzerTest {
         val fs = Analyzer.findings(facts().copy(model = "SM-L350", watchSamples = samples, zone = zone))
         val f = fs.single { it.id == "watch-charge-slow" }
         assertEquals(Severity.CAUTION, f.severity)
-        assertTrue(f.title, f.title.contains("충전이 공식보다 느림 — 완충 어림 2시간 47분 넘게 (삼성 공식 90분)"))
-        assertTrue(f.evidence.toString(), f.evidence.any { it.contains("44℃") && it.contains("뜨거워지면 느려진다") })
+        assertTrue(f.title, f.title.contains("충전이 공식보다 느림 — 완충 어림 2시간 47분 넘게 (삼성 공식 고속 충전 90분)"))
+        assertTrue(f.evidence.toString(), f.evidence.any { it.contains("44℃") && it.contains("뜨거워지면 느려질 수 있다") })
+        // 잰 충전 수를 그 주의 충전 수로 말하지 않는다 (리뷰)
+        assertTrue(f.evidence.toString(), f.evidence.any { it.startsWith("최근 7일 충전 3번 중 3번을 잼") })
         assertTrue(f.packages.isEmpty())
         // 모르는 모델이면(공식 시간을 모름) 말하지 않는다
         assertTrue(Analyzer.findings(facts().copy(model = "SM-R960", watchSamples = samples, zone = zone)).none { it.id == "watch-charge-slow" })

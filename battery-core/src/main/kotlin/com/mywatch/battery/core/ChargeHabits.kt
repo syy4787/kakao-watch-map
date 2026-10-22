@@ -72,23 +72,24 @@ data class ChargeHabits(
             }
             val slowHot = speed != null && speed.slow && speed.hot
             if (speed != null && speed.slow) {
-                val took = "0→100%에 ${duration(speed.minutesPerFull)} 넘게 걸리는 빠르기(삼성 공식 ${speed.specMinutes}분)"
+                val took = "0→100%에 ${duration(speed.minutesPerFull)} 넘게 걸리는 빠르기(삼성 공식 고속 충전 ${speed.specMinutes}분)"
                 if (slowHot) {
-                    // 워치9 사용자 보고: 충전 중 44℃까지 뜨거워지며 느려짐, 선풍기 바람으로 2시간 10분 → 1시간 15분. 얼음은 습기·급한 온도 변화로 위험
-                    // (Android Authority 2026-08-12·10-13, Notebookcheck, Sammy Fans 2026-10-13 — 삼성은 아직 고침을 알리지 않음)
+                    // 워치9 사용자 보고: 충전 중 44℃까지 뜨거워지며 느려짐, 선풍기 받침으로 15→100% 2시간 10분 → 1시간 15분. 얼음은 습기·급한 온도
+                    // 변화로 위험 (Android Authority 2026-08-12·10-13, Notebookcheck, Sammy Fans 2026-10-13 — 2026년 10월 기준 삼성은 고침을 알리지 않음)
                     val t = fmt(speed.maxTempC!!)
-                    advice += "충전이 공식보다 느립니다 — $took, 충전 중 ${t}℃: 워치9는 충전 중 뜨거워지면 느려진다는 보고가 많습니다(삼성은 아직 고침을 알리지 않음). " +
-                        "서늘한 곳에서 케이스를 빼고 작은 선풍기 바람을 충전 접점 쪽으로 — 사용자 보고 2시간 10분 → 1시간 15분. 얼음은 습기·급한 온도 변화 때문에 쓰지 마세요"
+                    advice += "충전이 공식보다 느립니다 — $took, 충전 중 ${t}℃: 워치9는 충전 중 뜨거워지면 느려질 수 있다는 보고가 많습니다(2026년 10월 기준 삼성은 " +
+                        "고침을 알리지 않음). 서늘한 곳에서 케이스를 빼고 작은 선풍기 바람을 워치와 충전기 쪽으로 — 한 사용자: 15→100% 2시간 10분 → 1시간 15분. " +
+                        "얼음은 습기·급한 온도 변화 때문에 쓰지 마세요"
                     todos += "충전이 느림 · 충전 중 ${t}℃" to "서늘한 곳에서 케이스 빼고 선풍기 바람 (얼음은 쓰지 않기)"
                 } else {
                     // 워치8 충전기·타사 거치대는 느리다는 알림이 뜨거나 안 된다는 보고, 삼성: 승인된 충전기만 (Android Authority·Gadget Hacks, 삼성 지원 2026-03)
                     advice += "충전이 공식보다 느립니다 — $took: 워치9에 들어 있던 충전기와 맞는 어댑터인지(워치8 충전기·타사 거치대는 느리거나 안 된다는 보고), " +
-                        "충전 접점·워치 뒷면을 닦고 가운데 맞추기, 소프트웨어 업데이트 — 그래도 한참 느리면 이 기록과 함께 삼성 서비스에 문의"
-                    todos += "충전이 느림 (완충 ${duration(speed.minutesPerFull)}+)" to "들어 있던 충전기·어댑터 확인 · 충전 접점 닦기"
+                        "충전기 윗면·워치 뒷면을 닦고 가운데 맞추기, 소프트웨어 업데이트 — 그래도 한참 느리면 이 기록과 함께 삼성 서비스에 문의"
+                    todos += "충전이 느림 (완충 ${duration(speed.minutesPerFull)}+)" to "들어 있던 충전기·어댑터 확인 · 충전기·워치 뒷면 닦기"
                 }
             }
-            // 느린 충전이 열 때문이면 위 한 줄로 (같은 말을 두 번 하지 않게)
-            if (tempC != null && tempC >= HOT_C && !slowHot) {
+            // 느린 충전이 열 때문이면 위 한 줄로 (같은 말을 두 번 하지 않게) — 다른 충전이 더 뜨거웠으면 그 온도로 따로
+            if (tempC != null && tempC >= HOT_C && !(slowHot && tempC <= (speed?.maxTempC ?: 0.0))) {
                 advice += "충전 중 최고 ${fmt(tempC)}℃ — 충전할 땐 워치를 벗기고 직사광선·이불 속·두꺼운 케이스를 피하세요 (열이 배터리를 가장 빨리 늙게 합니다)"
                 todos += "충전 중 최고 ${fmt(tempC)}℃" to "충전할 땐 벗기고 햇빛·이불 속·두꺼운 케이스 피하기"
             }
@@ -96,9 +97,11 @@ data class ChargeHabits(
         }
 
         /**
-         * 충전마다 [ChargeSpeed.FROM]~[ChargeSpeed.TO]% 구간(빠른 충전 구간)에서 오른 빠르기로 0→100% 걸릴 시간을 어림한 중앙값 — 그 구간에서
-         * [ChargeSpeed.MIN_RISE]포인트 넘게 오른 충전만, 기록이 빈 곳([MAX_GAP_MS] 넘게)이 있거나 충전기 위에서 화면을 켜고 쓴 충전(표본의
-         * 1/3 넘게 화면 켜짐)은 뺀다. 잴 만한 충전이 없으면 null
+         * 충전마다 처음 오른 구간의 [ChargeSpeed.FROM]~[ChargeSpeed.TO]%(빠른 충전 구간)에서 오른 빠르기로 0→100% 걸릴 시간을 어림한다 —
+         * 처음 [ChargeSpeed.TO]%에 닿은 뒤(배터리 보호로 머물거나 내려왔다 다시 차는 것)는 보지 않는다. 그 구간에서 [ChargeSpeed.MIN_RISE]포인트
+         * 이상 오른 충전만, 기록이 빈 곳([MAX_GAP_MS] 넘게)이 있거나 충전기 위에서 화면을 켜고 쓴 충전(표본의 1/3 넘게 화면 켜짐)은 뺀다.
+         * 가운데 값은 아래쪽으로(둘이면 빠른 쪽) — 느리다고 하려면 잰 충전의 절반 넘게(둘이면 둘 다) 느려야. 열 탓인지·그때 온도는 공식의
+         * [ChargeSpeed.SLOW_RATIO]배 이상 걸린 충전들로만. 잴 만한 충전이 없으면 null
          */
         private fun speedOf(s: List<BatterySample>, model: String?): ChargeSpeed? {
             val runs = ArrayList<List<BatterySample>>()
@@ -107,23 +110,25 @@ data class ChargeHabits(
                 if (p.plugged) cur += p else { if (cur.isNotEmpty()) runs += cur; cur = ArrayList() }
             }
             if (cur.isNotEmpty()) runs += cur
-            val per = ArrayList<Double>()
-            var maxT: Int? = null
+            val per = ArrayList<Pair<Double, Int?>>()
             for (r in runs) {
-                val w = r.filter { it.level in ChargeSpeed.FROM..ChargeSpeed.TO }
+                val top = r.indexOfFirst { it.level >= ChargeSpeed.TO }
+                val w = (if (top >= 0) r.subList(0, top + 1) else r).filter { it.level in ChargeSpeed.FROM..ChargeSpeed.TO }
                 if (w.size < 2) continue
                 val rise = w.last().level - w.first().level
                 val minutes = (w.last().t - w.first().t) / 60_000.0
                 if (rise < ChargeSpeed.MIN_RISE || minutes <= 0.0) continue
                 if (w.zipWithNext().any { (a, b) -> b.t - a.t > MAX_GAP_MS }) continue
                 if (w.count { it.interactive } * 3 > w.size) continue
-                per += minutes / rise * 100.0
-                w.mapNotNull { it.tempDeciC }.maxOrNull()?.let { t -> maxT = maxOf(maxT ?: t, t) }
+                per += minutes / rise * 100.0 to w.mapNotNull { it.tempDeciC }.maxOrNull()
             }
             if (per.isEmpty()) return null
-            val sorted = per.sorted()
-            val median = if (sorted.size % 2 == 1) sorted[sorted.size / 2] else (sorted[sorted.size / 2 - 1] + sorted[sorted.size / 2]) / 2
-            return ChargeSpeed(per.size, median, WatchModels.fullChargeMinutes(model), maxT?.let { it / 10.0 })
+            val sorted = per.map { it.first }.sorted()
+            val spec = WatchModels.fullChargeMinutes(model)
+            val slowOnes = spec?.let { sp -> per.filter { it.first >= sp * ChargeSpeed.SLOW_RATIO } }.orEmpty()
+            val judged = slowOnes.ifEmpty { per }
+            val hot = slowOnes.isNotEmpty() && slowOnes.count { (it.second ?: 0) >= ChargeSpeed.HOT_C * 10 } * 2 > slowOnes.size
+            return ChargeSpeed(per.size, sorted[(sorted.size - 1) / 2], spec, judged.mapNotNull { it.second }.maxOrNull()?.let { it / 10.0 }, hot)
         }
 
         /** "2시간 47분" · "45분" · "2시간" */
@@ -141,15 +146,15 @@ data class ChargeHabits(
 }
 
 /**
- * 충전 속도 — 충전마다 [FROM]~[TO]% 구간(빠른 충전 구간)에서 오른 빠르기로 어림한 0→100% 시간(분)의 중앙값. 뒤쪽(85~100%)은 원래 느려 실제
- * 완충 시간은 이보다 길다 — 그래서 공식 0→100% 시간([specMinutes], 모르면 null)과 견줘 느리다고 할 때 넉넉하다. [maxTempC] = 그 구간의 최고
- * 온도 (워치9는 충전 중 44℃까지 뜨거워지며 느려진다는 보고 — Notebookcheck 2026-08-12)
+ * 충전 속도 — 충전마다 처음 오른 [FROM]~[TO]% 구간(빠른 충전 구간)의 빠르기로 어림한 0→100% 시간(분)의 가운데 값(아래쪽). 뒤쪽(85~100%)은
+ * 원래 느려 실제 완충 시간은 이보다 길다 — 그래서 공식 0→100% 시간([specMinutes], 고속 충전 기준, 모르면 null)과 견줘 느리다고 할 때
+ * 넉넉하다. [measured] = 잰 충전 수(그 주의 모든 충전이 아니다 — 잠깐 충전·화면을 켜고 쓴 충전 등은 빠짐), [maxTempC] = 느린 충전들(없으면
+ * 잰 충전 모두)의 그 구간 최고 온도, [hot] = 느린 충전의 절반 넘게가 [HOT_C]℃ 이상이었다 (워치9는 충전 중 44℃까지 뜨거워지며 느려진다는
+ * 보고 — Notebookcheck 2026-08-12)
  */
-data class ChargeSpeed(val sessions: Int, val minutesPerFull: Double, val specMinutes: Int?, val maxTempC: Double?) {
-    /** 공식 시간의 [SLOW_RATIO]배를 넘고, 잰 충전이 [MIN_SESSIONS]번 이상 (그날만 그랬을 수 있어 한 번으론 말하지 않는다) */
-    val slow: Boolean get() = specMinutes != null && sessions >= MIN_SESSIONS && minutesPerFull >= specMinutes * SLOW_RATIO
-    /** 느려진 까닭이 열로 보이나 */
-    val hot: Boolean get() = (maxTempC ?: 0.0) >= HOT_C
+data class ChargeSpeed(val measured: Int, val minutesPerFull: Double, val specMinutes: Int?, val maxTempC: Double?, val hot: Boolean = false) {
+    /** 가운데 값이 공식 시간의 [SLOW_RATIO]배 이상이고, 잰 충전이 [MIN_SESSIONS]번 이상 (그날만 그랬을 수 있어 한 번으론 말하지 않는다) */
+    val slow: Boolean get() = specMinutes != null && measured >= MIN_SESSIONS && minutesPerFull >= specMinutes * SLOW_RATIO
 
     companion object {
         const val FROM = 10

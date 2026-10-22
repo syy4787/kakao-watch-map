@@ -16,6 +16,8 @@ import java.util.concurrent.TimeUnit
  * 그래서 '충전 중' 조건이 걸린 한 번짜리 작업을 걸어 두면, 시스템이 충전 중이라고 할 때(꽂고 몇 분 안) 돌아 한 줄 남긴다.
  * 15분 표본 사이의 짧은 충전이 '충전 없이 잔량 상승'(게이지 이상)으로 읽히지 않게. 돌고 나면 [REARM_MIN] 분 뒤를 다시 건다 —
  * 충전 중이면 그때 또 돌지만 이미 충전 중 줄이 있으면 쓰지 않는다 (충전기 위라 배터리 걱정이 없다). 뺀 것은 15분 표본이 안다.
+ * 돌 때마다 충전 중 온도를 본다 — 뜨거우면 그 자리에서 식히는 길 ([BatteryAlerts.hotCharge], 새 충전이면 지난 충전의 알림을 거두고 다시 셈).
+ * 켜진 뒤 처음 남는 줄이면 부팅 줄로 ([BootRows])
  */
 class ChargeWatchWorker(context: Context, params: WorkerParameters) : Worker(context, params) {
 
@@ -23,8 +25,13 @@ class ChargeWatchWorker(context: Context, params: WorkerParameters) : Worker(con
         runCatching {
             val log = BatteryLog(applicationContext)
             val last = log.readRecent(1).maxByOrNull { it.t }
-            if (last == null || !last.plugged) {
-                BatteryProbe.read(applicationContext, Event.POWER_CONNECTED)?.takeIf { it.plugged }?.let { log.append(it) }
+            val now = BatteryProbe.read(applicationContext, Event.POWER_CONNECTED)?.takeIf { it.plugged }
+            if (now != null) {
+                if (last == null || !last.plugged) {
+                    BatteryAlerts.chargeStarted(applicationContext)
+                    BootRows.shape(applicationContext, now)?.let { row -> log.append(row); BootRows.wrote(applicationContext, row) }
+                }
+                runCatching { BatteryAlerts.hotCharge(applicationContext, now) }
             }
         }.onFailure { ErrorLog.record("배터리·충전 기록", it) }
         arm(applicationContext, REARM_MIN)

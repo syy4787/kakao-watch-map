@@ -266,7 +266,8 @@ object Evidence {
             measures.forEach { appendLine("- $it") }
             since.forEach { appendLine(it) }
             appendLine("- 잔량 표시 이상: $anomalies / 배터리 건강도: $health")
-            charge.forEach { appendLine(it) }
+            // 느린 충전은 충전 중 뜨거웠을 때만 하자로 — 안 뜨거웠으면 먼저 의심할 것은 쓴 충전기다 (리뷰)
+            if (Analyzer.chargeSpeed(f)?.second?.hot == true) charge.forEach { appendLine(it) }
             stages.values.forEach { appendLine(it) }
             appendLine("- 측정 근거: 첨부 report.html, 워치 15분 기록(watch_log.csv), dumpsys batterystats 원본")
             appendLine()
@@ -489,13 +490,17 @@ object Evidence {
         return if (c.kind == com.mywatch.battery.core.ChangeKind.CONFIG) "배터리 진단 앱 설정: " + label.removePrefix("지킴이: ") else label
     }
 
-    /** 증상 쪽 사실 — 워치 기록으로 본 충전이 공식보다 한참 느림('watch-charge-slow' 소견이 있을 때만, 같은 값) */
+    /**
+     * 증상 쪽 사실 — 워치 기록으로 본 충전이 공식보다 한참 느림('watch-charge-slow' 소견이 있을 때만, 같은 값). 잰 충전 수는 그 주의 충전
+     * 수와 따로, 온도는 잰 구간의 것, 공식 시간은 고속 충전 기준, 쓴 충전기는 사용자가 채우게 (리뷰)
+     */
     internal fun chargeLine(f: Facts, findings: List<Finding>): String? {
         if (findings.none { it.id == "watch-charge-slow" }) return null
-        val sp = Analyzer.chargeSpeed(f)?.second ?: return null
+        val (ch, sp) = Analyzer.chargeSpeed(f) ?: return null
         val size = WatchModels.sizeLabel(f.model)?.let { "$it " } ?: ""
-        return "- 충전 속도(워치 15분 기록): 완충 어림 ${ChargeHabits.duration(sp.minutesPerFull)} 넘게 — 삼성 공식 $size${sp.specMinutes}분, " +
-            "최근 7일 충전 ${sp.sessions}번" + (sp.maxTempC?.let { ", 충전 중 최고 ${fmt1(it).removeSuffix(".0")}℃" } ?: "")
+        return "- 충전 속도(워치 15분 기록): 완충 어림 ${ChargeHabits.duration(sp.minutesPerFull)} 넘게 — 삼성 공식(고속 충전) $size${sp.specMinutes}분, " +
+            "최근 7일 충전 ${ch.sessions}번 중 ${sp.measured}번을 잼(${com.mywatch.battery.core.ChargeSpeed.FROM}~${com.mywatch.battery.core.ChargeSpeed.TO}% 구간)" +
+            (sp.maxTempC?.let { ", 그 구간 최고 ${fmt1(it).removeSuffix(".0")}℃" } ?: "") + ", 사용한 충전기: $BLANK"
     }
 
     /** 신고문에 적는 '그 무렵 바뀐 것' 개수 */

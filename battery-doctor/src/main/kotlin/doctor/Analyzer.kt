@@ -379,15 +379,16 @@ object Analyzer {
                 category = "info")
         }
 
-        // 7-3. 충전 속도 — 워치9 충전이 공식(40mm 80분·44mm 90분)보다 한참 느림(충전 중 뜨거워지며 느려진다는 보고가 많다 — 삼성은 아직
-        // 고침을 알리지 않음). 범인 앱은 짚지 않는다
+        // 7-3. 충전 속도 — 워치9 충전이 공식(고속 충전 40mm 80분·44mm 90분)보다 한참 느림(충전 중 뜨거워지며 느려질 수 있다는 보고가 많다 —
+        // 2026년 10월 기준 삼성은 고침을 알리지 않음). 범인 앱은 짚지 않는다
         chargeSpeed(f)?.let { (ch, sp) ->
-            out += Finding("watch-charge-slow", Severity.CAUTION, "워치 기록: 충전이 공식보다 느림 — 완충 어림 ${ChargeHabits.duration(sp.minutesPerFull)} 넘게 (삼성 공식 ${sp.specMinutes}분)",
+            out += Finding("watch-charge-slow", Severity.CAUTION, "워치 기록: 충전이 공식보다 느림 — 완충 어림 ${ChargeHabits.duration(sp.minutesPerFull)} 넘게 (삼성 공식 고속 충전 ${sp.specMinutes}분)",
                 listOfNotNull(
-                    "최근 7일 충전 ${sp.sessions}번의 ${ChargeSpeed.FROM}~${ChargeSpeed.TO}% 구간 빠르기로 어림한 0→100% 시간의 가운데 값 (그 뒤는 원래 느려 실제 완충은 더 걸림)",
-                    sp.maxTempC?.let { "그 구간 최고 ${fmt1(it).removeSuffix(".0")}℃" + if (sp.hot) " — 충전 중 뜨거워지면 느려진다는 워치9 사용자 보고와 같은 모습" else "" },
+                    // 잰 충전 수는 그 주의 충전 수와 따로 — 잠깐 충전·충전기 위에서 쓴 충전 등은 재지 않는다 (리뷰)
+                    "최근 7일 충전 ${ch.sessions}번 중 ${sp.measured}번을 잼 — 처음 오른 ${ChargeSpeed.FROM}~${ChargeSpeed.TO}% 구간 빠르기로 어림한 0→100% 시간의 가운데 값 (그 뒤는 원래 느려 실제 완충은 더 걸림)",
+                    sp.maxTempC?.let { "느린 충전의 그 구간 최고 ${fmt1(it).removeSuffix(".0")}℃" + if (sp.hot) " — 충전 중 뜨거워지면 느려질 수 있다는 워치9 사용자 보고와 같은 모습" else "" },
                     ch.advice.firstOrNull { it.startsWith("충전이 공식보다 느립니다") },
-                    "기준: 공식 0→100% 시간의 ${ChargeSpeed.SLOW_RATIO}배 넘게, 그런 충전이 ${ChargeSpeed.MIN_SESSIONS}번 이상",
+                    "기준: 공식 0→100% 시간의 ${ChargeSpeed.SLOW_RATIO}배 이상, 잰 충전 ${ChargeSpeed.MIN_SESSIONS}번 이상의 절반 넘게(둘이면 둘 다)",
                 ),
                 source = "삼성 발표 충전 시간(40mm 80분·44mm 90분 — Android Authority 2026-08-12) · 워치9 느린 충전 보고(Notebookcheck 2026-08-12, Sammy Fans 2026-10-13)",
                 category = "charge")

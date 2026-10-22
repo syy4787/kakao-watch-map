@@ -25,12 +25,16 @@ class BatterySampleWorker(context: Context, params: WorkerParameters) : Worker(c
             val log = BatteryLog(applicationContext)
             // 15분·부팅 표본엔 지난번 뒤에 바뀐 것(소프트웨어·앱·시계 화면·설정)을 붙인다 — '최근 며칠'의 그 무렵 바뀐 것.
             // 표본이 실제로 저장됐을 때만 본 값을 기억한다 (저장에 실패하면 다음 표본에 다시)
-            fun save(note: String): Boolean = BatteryProbe.read(applicationContext, event, note)?.let {
-                log.append(atBoot(it))
-                // 충전 중 뜨거우면 그 자리에서 식히는 길을 (충전기에서 빼면 다음 충전 때 다시)
-                if (event == Event.PERIODIC || event == Event.POWER_CONNECTED) runCatching { BatteryAlerts.hotCharge(applicationContext, it) }
-                true
-            } ?: false
+            fun save(note: String): Boolean {
+                val read = BatteryProbe.read(applicationContext, event, note) ?: return false
+                // 켜진 뒤 처음 남는 줄이 부팅 줄 — 늦게 돈 부팅 작업은 이 부팅의 줄을 다시 남기지 않는다 ([BootRows])
+                val row = BootRows.shape(applicationContext, read) ?: return false
+                log.append(row)
+                BootRows.wrote(applicationContext, row)
+                // 충전 중 뜨거우면 그 자리에서 식히는 길을, 충전기에서 뺐으면 그 알림을 거둔다
+                if (event == Event.PERIODIC) runCatching { BatteryAlerts.hotCharge(applicationContext, row) }
+                return true
+            }
             if (given.isEmpty() && (event == Event.PERIODIC || event == Event.BOOT)) {
                 // 바뀐 것을 읽다 실패했어도 표본은 남긴다
                 if (runCatching { ChangeWatcher.record(applicationContext) { n -> save(n) } }.isFailure) save("")
@@ -52,21 +56,8 @@ class BatterySampleWorker(context: Context, params: WorkerParameters) : Worker(c
         return Result.success()
     }
 
-    /**
-     * 부팅 줄은 실제로 켜진 때(지금 − 켜진 뒤 시간)로 — 한 번짜리 작업이 늦게 돌면 그 사이 켜진 뒤에 남은 15분·충전 시작 기록보다 뒤에 서서
-     * 꺼지기 전 기록과의 잔량 점프(게이지가 다시 맞춰짐)를 못 봤다 (리뷰). 켜진 지 [BOOT_BACKDATE_MAX_MS] 넘게 지나 돌았으면 그때 잔량을
-     * 켜진 때의 것으로 적지 않게 그대로 둔다. 파일은 덧붙이기 순서라 이 줄은 시각이 앞 줄보다 이를 수 있다 — 읽는 쪽은 시각으로 정렬한다
-     */
-    private fun atBoot(s: com.mywatch.battery.core.BatterySample): com.mywatch.battery.core.BatterySample {
-        if (s.event != Event.BOOT) return s
-        val elapsed = android.os.SystemClock.elapsedRealtime()
-        return if (elapsed in 0..BOOT_BACKDATE_MAX_MS) s.copy(t = s.t - elapsed) else s
-    }
-
     companion object {
         const val UNIQUE = "battery-sample"
-        /** 부팅 줄을 켜진 때로 앞당기는 한도 — 부팅 기록이 밀릴 수 있는 만큼([com.mywatch.battery.core.RestartEffects.BOOT_ROW_LAG_MS]) */
-        const val BOOT_BACKDATE_MAX_MS = com.mywatch.battery.core.RestartEffects.BOOT_ROW_LAG_MS
         const val KEY_EVENT = "event"
         const val KEY_NOTE = "note"
         const val PERIOD_MIN = 15L

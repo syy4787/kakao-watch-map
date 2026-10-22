@@ -153,70 +153,107 @@ class BatterySampleWorkerTest {
     }
 
     /**
-     * 부팅 줄은 실제로 켜진 때(지금 − 켜진 뒤 시간)로 — 한 번짜리 작업이 늦게 돌면 그 사이 켜진 뒤에 남은 15분·충전 시작 기록보다 뒤에 서서
-     * 꺼지기 전 기록과의 잔량 점프(게이지가 다시 맞춰짐 — '꺼졌다가 충전기에서 켜니 48%')를 못 봤다 (리뷰). 켜진 지 오래 지나 돌았으면 그때
-     * 잔량을 켜진 때로 끌어오지 않는다
+     * 켜진 뒤 처음 남는 줄이 그 부팅의 줄 — 부팅 방송이 건 작업이 늦게 돌면 그 사이 켜진 뒤의 15분·충전 시작 줄이 먼저 남아 꺼지기 전 기록과의
+     * 잔량 점프('방전 뒤 충전기에서 켜니 48%')를 못 봤다. 시각을 앞당기지 않고 그 줄을 부팅 줄로 — 시각과 잔량이 늘 같은 때의 것 (리뷰)
      */
     @Test
-    fun aBootRowIsDatedAtTheBoot() {
+    fun theFirstRowAfterARestartIsTheBootRow() {
+        val cr = context.contentResolver
+        fun bootCount(n: Int) = android.provider.Settings.Global.putInt(cr, android.provider.Settings.Global.BOOT_COUNT, n)
         fun run(event: Event) = TestWorkerBuilder<BatterySampleWorker>(context, Executors.newSingleThreadExecutor())
             .setInputData(workDataOf(BatterySampleWorker.KEY_EVENT to event.name)).build().doWork()
-        org.robolectric.shadows.ShadowSystemClock.advanceBy(java.time.Duration.ofMinutes(3))   // 켜진 지 3분
-        run(Event.PERIODIC)                                                                   // 켜진 뒤 먼저 돈 15분 기록
-        run(Event.BOOT)
-        val rows = log.readAll()
-        val periodic = rows.single { it.event == Event.PERIODIC }
-        val boot = rows.single { it.event == Event.BOOT }
-        assertTrue("${periodic.t - boot.t}", periodic.t - boot.t in 3 * 60_000L - 2_000L..3 * 60_000L + 2_000L)
-        // 켜진 지 한 시간 뒤에야 돌았으면 그대로 (그때 잔량을 켜진 때의 것으로 적지 않게)
-        log.file.delete()
-        org.robolectric.shadows.ShadowSystemClock.advanceBy(java.time.Duration.ofMinutes(60))
+        fun events() = log.readAll().map { it.event }
+        bootCount(1)
+        // 이 기능 전부터 쓰던 워치 — 지난 부팅을 모르면 15분 줄은 그대로, 부팅 작업이 부팅 줄을 남긴다
         run(Event.PERIODIC)
         run(Event.BOOT)
-        val late = log.readAll()
-        assertTrue(late.single { it.event == Event.BOOT }.t >= late.single { it.event == Event.PERIODIC }.t)
+        assertEquals(listOf(Event.PERIODIC, Event.BOOT), events())
+        run(Event.PERIODIC)
+        assertEquals(Event.PERIODIC, events().last())
+        // 다시 켜졌다 — 15분 줄이 먼저 돌면 그 줄이 부팅 줄, 늦게 돈 부팅 작업은 남기지 않는다
+        bootCount(2)
+        run(Event.PERIODIC)
+        run(Event.BOOT)
+        assertEquals(listOf(Event.PERIODIC, Event.BOOT, Event.PERIODIC, Event.BOOT), events())
+        run(Event.PERIODIC)
+        assertEquals(Event.PERIODIC, events().last())
+        // 방전 뒤 충전기 위에서 켜졌다 — 충전 시작 줄이 부팅 줄 (충전 중으로)
+        bootCount(3)
+        context.sendStickyBroadcast(Intent(Intent.ACTION_BATTERY_CHANGED)
+            .putExtra(BatteryManager.EXTRA_LEVEL, 48).putExtra(BatteryManager.EXTRA_SCALE, 100)
+            .putExtra(BatteryManager.EXTRA_STATUS, BatteryManager.BATTERY_STATUS_CHARGING).putExtra(BatteryManager.EXTRA_PLUGGED, BatteryManager.BATTERY_PLUGGED_WIRELESS))
+        TestWorkerBuilder<com.mywatch.kakaomap.battery.ChargeWatchWorker>(context, Executors.newSingleThreadExecutor()).build().doWork()
+        val boot = log.readAll().last()
+        assertEquals(Event.BOOT, boot.event)
+        assertTrue(boot.plugged && boot.level == 48)
+        run(Event.BOOT)
+        assertEquals(1, log.readAll().count { it.event == Event.BOOT && it.level == 48 })
+        // 줄은 늘 시각 순으로 덧붙는다 (앞당겨 적지 않는다)
+        val rows = log.readAll()
+        assertEquals(rows.sortedBy { it.t }, rows)
     }
 
     /**
-     * 충전 중 42℃ 넘게 뜨거우면 그 자리에서 식히는 길을 한 번 — 충전기에서 뺐다 다시 올리기 전엔 다시 알리지 않는다 (워치9 느린 충전:
-     * 충전 중 44℃까지 뜨거워지며 느려짐)
+     * 충전 중 42℃ 이상이고 80% 아래면 그 자리에서 식히는 길을 — 충전마다 한 번, 같은 안내는 사흘에 한 번(2℃ 넘게 더 뜨거우면 다시), 밤엔
+     * 소리 없는 채널, 충전기에서 빼면 그 알림을 거둔다 (워치9 느린 충전: 충전 중 44℃까지 뜨거워지며 느려질 수 있음)
      */
     @Test
-    fun aHotChargeIsToldOncePerCharge() {
+    fun aHotChargeIsToldOncePerChargeAndNotEveryNight() {
         shadowOf(context as Application).grantPermissions(android.Manifest.permission.POST_NOTIFICATIONS)
         val real = context.getSystemService(android.app.NotificationManager::class.java)
         val nm = shadowOf(real)
-        fun battery(level: Int, plugged: Boolean, tempDeciC: Int) = context.sendStickyBroadcast(
-            Intent(Intent.ACTION_BATTERY_CHANGED)
-                .putExtra(BatteryManager.EXTRA_LEVEL, level).putExtra(BatteryManager.EXTRA_SCALE, 100)
-                .putExtra(BatteryManager.EXTRA_STATUS, if (plugged) BatteryManager.BATTERY_STATUS_CHARGING else BatteryManager.BATTERY_STATUS_DISCHARGING)
-                .putExtra(BatteryManager.EXTRA_PLUGGED, if (plugged) BatteryManager.BATTERY_PLUGGED_WIRELESS else 0)
-                .putExtra(BatteryManager.EXTRA_TEMPERATURE, tempDeciC))
-        fun run() = TestWorkerBuilder<BatterySampleWorker>(context, Executors.newSingleThreadExecutor()).build().doWork()
-        fun hot() = nm.allNotifications.filter { shadowOf(it).contentTitle?.toString()?.startsWith("충전 중") == true }
-        battery(50, plugged = true, tempDeciC = 380)
-        run()
-        assertTrue("38℃ 는 아직", hot().isEmpty())
-        battery(55, plugged = true, tempDeciC = 431)
-        run()
-        val n = hot().single()
-        assertTrue(shadowOf(n).contentTitle.toString(), shadowOf(n).contentTitle.toString().startsWith("충전 중 43.1℃"))
+        val zone = java.time.ZoneId.of("Asia/Seoul")
+        fun at(d: Int, h: Int, m: Int = 0) = java.time.LocalDateTime.of(2026, 10, d, h, m).atZone(zone).toInstant().toEpochMilli()
+        fun s(level: Int, plugged: Boolean, tempDeciC: Int) = com.mywatch.battery.core.BatterySample(0L, level, plugged = plugged, tempDeciC = tempDeciC)
+        fun hot(level: Int, tempDeciC: Int, now: Long) = com.mywatch.kakaomap.battery.BatteryAlerts.hotCharge(context, s(level, true, tempDeciC), now, zone)
+        fun shown() = nm.allNotifications.filter { shadowOf(it).contentTitle?.toString()?.startsWith("충전 중") == true }
+        hot(50, 419, at(20, 12))
+        assertTrue("41.9℃ 는 아직", shown().isEmpty())
+        hot(55, 420, at(20, 12, 10))
+        val n = shown().single()
+        assertTrue(shadowOf(n).contentTitle.toString(), shadowOf(n).contentTitle.toString().startsWith("충전 중 42℃"))
         assertTrue(shadowOf(n).contentText.toString().contains("선풍기"))
+        assertEquals(com.mywatch.kakaomap.battery.BatteryAlerts.CHANNEL, n.channelId)
         real.cancelAll()
-        battery(60, plugged = true, tempDeciC = 440)
-        run()
-        assertTrue("같은 충전에선 한 번", hot().isEmpty())
-        // 충전기에서 뺐다 다시 올리면 다시
-        battery(58, plugged = false, tempDeciC = 350)
-        run()
-        battery(59, plugged = true, tempDeciC = 430)
-        run()
-        assertEquals(1, hot().size)
-        // 거의 다 찼으면 알리지 않는다
-        real.cancelAll()
-        battery(58, plugged = false, tempDeciC = 350); run()
-        battery(92, plugged = true, tempDeciC = 450); run()
-        assertTrue(hot().isEmpty())
+        hot(60, 440, at(20, 12, 20))
+        assertTrue("같은 충전에선 한 번", shown().isEmpty())
+        com.mywatch.kakaomap.battery.BatteryAlerts.hotCharge(context, s(66, false, 350), at(20, 13), zone)
+        // 다음 날 충전 — 사흘 안이고 더 뜨겁지 않으면 다시 알리지 않는다, 2℃ 넘게 더 뜨거우면 다시
+        hot(50, 430, at(21, 12))
+        assertTrue("밤마다 같은 알림을 내지 않게", shown().isEmpty())
+        hot(55, 441, at(21, 12, 10))
+        assertEquals(1, shown().size)
+        com.mywatch.kakaomap.battery.BatteryAlerts.hotCharge(context, s(70, false, 350), at(21, 13), zone)
+        assertTrue("빼면 거둔다", shown().isEmpty())
+        // 사흘 지나면 다시 — 밤이면 소리·진동 없는 채널
+        hot(50, 430, at(24, 23, 30))
+        assertEquals(com.mywatch.kakaomap.battery.BatteryAlerts.CHANNEL_QUIET, shown().single().channelId)
+        com.mywatch.kakaomap.battery.BatteryAlerts.hotCharge(context, s(70, false, 350), at(25, 7), zone)
+        // 80% 이상이면 알리지 않는다 (곧 끝남)
+        hot(80, 460, at(29, 12))
+        assertTrue(shown().isEmpty())
+    }
+
+    /** 충전 시작 작업(충전 중 10분마다)과 15분 기록이 충전 중 온도를 본다 */
+    @Test
+    fun theChargeWatchAndThePeriodicRowCheckTheHeat() {
+        shadowOf(context as Application).grantPermissions(android.Manifest.permission.POST_NOTIFICATIONS)
+        val real = context.getSystemService(android.app.NotificationManager::class.java)
+        val nm = shadowOf(real)
+        fun shown() = nm.allNotifications.filter { shadowOf(it).contentTitle?.toString()?.startsWith("충전 중") == true }
+        context.sendStickyBroadcast(Intent(Intent.ACTION_BATTERY_CHANGED)
+            .putExtra(BatteryManager.EXTRA_LEVEL, 40).putExtra(BatteryManager.EXTRA_SCALE, 100)
+            .putExtra(BatteryManager.EXTRA_STATUS, BatteryManager.BATTERY_STATUS_CHARGING).putExtra(BatteryManager.EXTRA_PLUGGED, BatteryManager.BATTERY_PLUGGED_WIRELESS)
+            .putExtra(BatteryManager.EXTRA_TEMPERATURE, 435))
+        TestWorkerBuilder<com.mywatch.kakaomap.battery.ChargeWatchWorker>(context, Executors.newSingleThreadExecutor()).build().doWork()
+        assertEquals(1, shown().size)
+        // 15분 기록도 — 충전기에서 뺀 기록이면 그 알림을 거둔다
+        context.sendStickyBroadcast(Intent(Intent.ACTION_BATTERY_CHANGED)
+            .putExtra(BatteryManager.EXTRA_LEVEL, 45).putExtra(BatteryManager.EXTRA_SCALE, 100)
+            .putExtra(BatteryManager.EXTRA_STATUS, BatteryManager.BATTERY_STATUS_DISCHARGING).putExtra(BatteryManager.EXTRA_PLUGGED, 0)
+            .putExtra(BatteryManager.EXTRA_TEMPERATURE, 350))
+        TestWorkerBuilder<BatterySampleWorker>(context, Executors.newSingleThreadExecutor()).build().doWork()
+        assertTrue(shown().isEmpty())
     }
 
     @Test
