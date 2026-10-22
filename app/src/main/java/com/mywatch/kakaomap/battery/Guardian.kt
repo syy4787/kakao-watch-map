@@ -521,7 +521,10 @@ object Guardian {
         val boot = HealthStore.Boot.now(c)
         val e = p.edit()
         for (i in found.filter { it.id in RESTART_FIRST }) {
-            if (!ongoing(p, i.id, now) || p.getInt("$K_STAGE${i.id}", -1) != i.stage) writeStage(p, e, i.id, i.stage, boot)
+            val fresh = !ongoing(p, i.id, now)
+            if (fresh || p.getInt("$K_STAGE${i.id}", -1) != i.stage) writeStage(p, e, i.id, i.stage, boot)
+            // 새 일이면 처음 짚은 때 — 이어지는 일은 그대로 (이 버전 전에 시작된 일은 모름: 적지 않는다)
+            if (fresh) e.putLong("$K_FIRST_AT${i.id}", now)
             e.putLong("$K_SEEN_AT${i.id}", now)
         }
         e.apply()
@@ -558,12 +561,22 @@ object Guardian {
     /** 이 버전 전(v2.43)이 적던, 이번 일을 처음 본 부팅 차례 — 그때 시작된 일을 이어 가는 데만 읽는다 */
     private const val K_SEEN_SEQ = "gs_issue_seen_seq_"
     private const val K_SEEN_AT = "gs_issue_seen_at_"
+    /** 이번 일을 처음 짚은 때 — 새 일일 때만 적는다 */
+    private const val K_FIRST_AT = "gs_issue_first_at_"
     /**
      * 이틀 안에 짚었던 문제(해결 단계에 재시작이 있는 것) — id → 마지막으로 본 때. 재시작·치료 뒤 다시 보는 중이거나 사라졌어도 PC 툴킷이
      * 요약으로 알게 (재시작 직후 수집에서 충전 뒤 통계만 보고 하드웨어로 단정하지 않게)
      */
     fun lastSeen(c: Context, now: Long): Map<String, Long> = prefs(c).let { p ->
         RESTART_FIRST.filter { ongoing(p, it, now) }.associateWith { p.getLong("$K_SEEN_AT$it", 0L) }
+    }
+
+    /**
+     * 이어지는 일(이틀 안에 짚은 문제)마다 처음 짚은 때 — PC 신고문이 '언제부터'를 적게. 이 버전 전에 시작된 일이나 시계가 뒤로 가 미래가
+     * 된 때는 모르는 것으로 (넣지 않는다)
+     */
+    fun firstSeen(c: Context, now: Long): Map<String, Long> = prefs(c).let { p ->
+        RESTART_FIRST.filter { ongoing(p, it, now) }.associateWith { p.getLong("$K_FIRST_AT$it", 0L) }.filterValues { it in 1..now }
     }
 
     private const val K_TILE_ISSUE = "gs_tile_issue"

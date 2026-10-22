@@ -190,6 +190,12 @@ object Analyzer {
         // 통계와 따로 잰 증거. 3시간 넘게 묵었거나 판단할 만큼(55분) 기록이 없었으면 쓰지 않는다. 수집 시각(워치 date)은 요약을 새로
         // 쓰기 전에 읽으므로 새 요약은 그보다 조금 늦다 — 30분까지는 '방금 쓴 것'으로 (리뷰에서 찾음: 늘 미래라 버려졌다)
         val wm = f.watchMetrics
+        // 워치가 이번 일을 처음 짚은 때(요약의 first_*_at) — 증상이 얼마나 이어졌는지 (신고문의 '언제부터'). 모르면 적지 않는다 ([firstSeenAt])
+        fun firstSeen(key: String): List<String> {
+            val t = firstSeenAt(f, key) ?: return emptyList()
+            val ref = f.collectedAt ?: t
+            return listOf("처음 짚은 때: ${time(t, f.zone)} (${ago((ref - t).coerceAtLeast(0L))})")
+        }
         val watchFresh = (wm["app_window_min"] ?: 0.0) >= 55.0 &&
             wm["at"]?.let { at -> f.collectedAt?.let { c -> c - at.toLong() in -WATCH_AHEAD_MS..WATCH_FRESH_MS } } == true
         if (watchFresh) {
@@ -199,8 +205,9 @@ object Analyzer {
             val minutes = wm["app_window_min"]!!.toInt()
             wm["issue_gms"]?.takeIf { it >= 1.0 }?.let { g ->
                 out += Finding("watch-gms", if (g >= 2.0) Severity.ABNORMAL else Severity.CAUTION, "워치 앱: 최근 Google Play 서비스 과소모${back("back_gms")}",
-                    listOf("워치 앱 지킴이가 최근 ${minutes}분 앱별 통계(화면 꺼진 동안의 CPU·웨이크락)로 짚었습니다 — 이 보고서의 충전 뒤 통계와 따로 잰 것",
-                        "자동 치료(메뉴 8)가 모든 앱 캐시 정리와 Play 서비스 다시 시작을 합니다(데이터·로그인은 그대로)") +
+                    listOf("워치 앱 지킴이가 최근 ${minutes}분 앱별 통계(화면 꺼진 동안의 CPU·웨이크락)로 짚었습니다 — 이 보고서의 충전 뒤 통계와 따로 잰 것") +
+                        firstSeen("first_gms_at") +
+                        listOf("자동 치료(메뉴 8)가 모든 앱 캐시 정리와 Play 서비스 다시 시작을 합니다(데이터·로그인은 그대로)") +
                         // 캐시·재시작·치료를 다 보인 뒤에도 — 모두에게 듣는 해결은 없다 (워치 앱 할 일과 같게)
                         if (stage("back_gms") >= 2) listOf("치료·재시작 뒤에도 계속되면: 충전기에 올려 둔 채 워치 Play 스토어 › 내 앱 › 모두 업데이트(도움이 됐다는 보고), " +
                             "고쳐질 때까지 밤엔 워치 앱 지킴이 밤 모드, 과소모가 이어지는 동안 $REPORT") else emptyList(),
@@ -210,6 +217,7 @@ object Analyzer {
                 // 홈은 시스템 앱 — 범인으로 제한하지 않는다(DENY). 재시작 뒤에도 또 나타났으면 캐시 정리를 추천(워치의 다음 단계와 같게)
                 out += Finding("watch-home", if (g >= 2.0) Severity.ABNORMAL else Severity.CAUTION, "워치 앱: One UI Watch 홈 과소모${back("back_home")}",
                     listOf("워치 앱 지킴이가 최근 ${minutes}분 앱별 통계로 짚었습니다(화면 켜짐·받은 알림 몫을 빼고 남은 CPU)") +
+                        firstSeen("first_home_at") +
                         when (stage("back_home")) {
                             2 -> listOf("다음 단계(홈 캐시 삭제 → 강제 재시작)를 보인 뒤 또 재시작했는데도 계속됩니다(홈 캐시를 아직 안 지웠으면 그것부터) — " +
                                 "폰의 Galaxy Wearable 앱 › 워치 설정 › 워치 소프트웨어 업데이트 확인, 고쳐질 때까지 밤엔 워치 앱 지킴이 밤 모드, " +
@@ -232,7 +240,7 @@ object Analyzer {
             // 있다 — 그래야 판정을 바꾼다 (리뷰)
             val statsHours = s?.onBatteryHours ?: 0.0
             val watchHours = if (f.hasWatchLog) minOf(24.0, f.watch?.spanHours ?: 0.0) else 0.0
-            fun earlier(key: String, id: String, name: String, category: String) {
+            fun earlier(key: String, firstKey: String, id: String, name: String, category: String) {
                 // 'N시간 전'은 수집 때부터 (요약은 수집 몇 분~3시간 전에 쓰였을 수 있다)
                 val hours = (wm[key] ?: return) + ((f.collectedAt ?: summaryAt!!) - summaryAt!!).coerceAtLeast(0L) / 3_600_000.0
                 if (out.any { it.id == id }) return
@@ -243,13 +251,13 @@ object Analyzer {
                     else -> "지금은 앱별 기록이 ${window}분치라 아직 다시 보는 중입니다(1시간쯤 쌓이면 봄 — 재시작·PC 치료 뒤엔 기록을 새로 모음)"
                 }
                 out += Finding("$id-earlier", if (inWindow) Severity.CAUTION else Severity.INFO, "워치 앱: ${fmt1(hours).removeSuffix(".0")}시간 전 $name — 지금은 안 보임",
-                    listOf("워치 앱 지킴이가 최근 48시간 안에 짚었습니다 — $now") +
+                    listOf("워치 앱 지킴이가 최근 48시간 안에 짚었습니다 — $now") + firstSeen(firstKey) +
                         if (inWindow) listOf("이 보고서가 잰 구간(충전 뒤 통계·워치 기록 최근 24시간)에 그때의 소모가 섞여 소모율이 높게 나올 수 있습니다 — 하드웨어로 단정하기 전에 메뉴 3(측정 시작)으로 초기화하고 하루 뒤 다시 수집(메뉴 2)해 견주세요")
                         else listOf("그때는 이 보고서가 잰 구간보다 앞이라 지금 소모율과는 따로입니다 — 참고로만"),
                     source = "워치 앱 지킴이(최근 48시간)", category = category)
             }
-            earlier("seen_gms_h", "watch-gms", "Google Play 서비스 과소모", "gms")
-            earlier("seen_home_h", "watch-home", "One UI Watch 홈 과소모", "home")
+            earlier("seen_gms_h", "first_gms_at", "watch-gms", "Google Play 서비스 과소모", "gms")
+            earlier("seen_home_h", "first_home_at", "watch-home", "One UI Watch 홈 과소모", "home")
         }
 
         // One UI Watch 홈이 시스템 uid(1000)를 같이 쓰면 앱별 통계에서 홈만 따로 셀 수 없다 — 이 보고서의 순위도, 워치 앱의
@@ -589,6 +597,27 @@ object Analyzer {
     private fun stepDown(c: String) = when (c) { "높음" -> "중간"; else -> "낮음" }
 
     fun fmt1(x: Double): String = String.format(Locale.US, "%.1f", x)
+    /**
+     * 요약이 적은 처음 짚은 때(epoch ms) — 모르면 null: 이 버전 전 워치 앱에서 시작된 일(값 없음), 수집 시각과 요약을 쓴 때 가운데 늦은
+     * 것보다도 늦은 때(시계가 뒤로 감). 수집하며 워치가 요약을 새로 쓸 때 처음 짚었으면 수집 시각(워치 date — 요약을 쓰라고 부르기 전에
+     * 읽음)보다 조금 늦을 수 있다 (리뷰)
+     */
+    fun firstSeenAt(f: Facts, key: String): Long? {
+        val t = f.watchMetrics[key]?.toLong()?.takeIf { it > 0 } ?: return null
+        val bound = maxOf(f.collectedAt ?: 0L, f.watchMetrics["at"]?.toLong() ?: 0L)
+        return t.takeIf { bound > 0 && it <= bound }
+    }
+
+    /** 지난 시간을 사람 말로 — 1시간 안(또는 [minutes] 면 N분 전) · N시간 전(이틀까지) · N일 전 */
+    fun ago(ms: Long, minutes: Boolean = false): String {
+        val h = ms / 3_600_000L
+        return when {
+            h < 1 && minutes -> "${ms / 60_000L}분 전"
+            h < 1 -> "1시간 안"
+            h < 48 -> "${h}시간 전"
+            else -> "${h / 24}일 전"
+        }
+    }
     fun pct(x: Double): String = String.format(Locale.US, "%.1f", x)
     private val timeFmt = DateTimeFormatter.ofPattern("M월 d일 HH:mm")
     fun time(t: Long, zone: ZoneId = ZoneId.systemDefault()): String = Instant.ofEpochMilli(t).atZone(zone).format(timeFmt)

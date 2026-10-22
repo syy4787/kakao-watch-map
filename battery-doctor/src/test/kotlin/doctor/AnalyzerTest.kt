@@ -608,6 +608,31 @@ class AnalyzerTest {
         assertEquals(Cause.HARDWARE, v.cause)
     }
 
+    /** 워치가 그 문제를 처음 짚은 때(요약의 first_*_at)를 소견에 — 증상이 얼마나 이어졌는지 (신고문에도) */
+    @Test
+    fun theFirstSightingTimeIsInTheWatchFinding() {
+        val wm = mapOf("at" to (now - 5 * 60_000L).toDouble(), "app_window_min" to 120.0, "issue_home" to 2.0, "back_home" to 1.0,
+            "issue_gms" to 2.0, "first_home_at" to (now - 26 * 3_600_000L).toDouble(), "first_gms_at" to (now + 3_600_000L).toDouble())
+        val fs = Analyzer.findings(facts().copy(watchMetrics = wm, zone = zone))
+        val home = fs.single { it.id == "watch-home" }
+        assertTrue(home.evidence.toString(), home.evidence.any { it.contains("처음 짚은 때: 10월 18일 20:00 (26시간 전)") })
+        // 수집보다 늦으면(시계가 뒤로 감) 모르는 것으로 — 적지 않는다
+        assertTrue(fs.single { it.id == "watch-gms" }.evidence.none { it.contains("처음 짚은 때") })
+        assertEquals("1시간 안", Analyzer.ago(59 * 60_000L))
+        assertEquals("47시간 전", Analyzer.ago(47 * 3_600_000L))
+        assertEquals("2일 전", Analyzer.ago(48 * 3_600_000L))
+        assertEquals("3일 전", Analyzer.ago(72 * 3_600_000L + 1))
+        // 수집하며 워치가 요약을 새로 쓸 때 처음 짚었으면 처음 짚은 때가 수집 시각(워치 date)보다 조금 늦다 — 요약을 쓴 때까지는 그대로 (리뷰)
+        val during = mapOf("at" to (now + 3 * 60_000L).toDouble(), "app_window_min" to 120.0, "issue_home" to 1.0,
+            "first_home_at" to (now + 2 * 60_000L).toDouble())
+        val h2 = Analyzer.findings(facts().copy(watchMetrics = during, zone = zone)).single { it.id == "watch-home" }
+        assertTrue(h2.evidence.toString(), h2.evidence.any { it.contains("처음 짚은 때: 10월 19일 22:02 (1시간 안)") })
+        // 지금은 안 보이는 문제(재시작·치료 뒤)에도 처음 짚은 때를
+        val earlier = mapOf("at" to (now - 5 * 60_000L).toDouble(), "seen_home_h" to 2.0, "first_home_at" to (now - 30 * 3_600_000L).toDouble())
+        val e = Analyzer.findings(facts().copy(watchMetrics = earlier, zone = zone)).single { it.id == "watch-home-earlier" }
+        assertTrue(e.evidence.toString(), e.evidence.any { it.contains("처음 짚은 때: 10월 18일 16:00 (30시간 전)") })
+    }
+
     /** 워치 기록이 하루가 안 되면 '워치 기록 24시간'이 아니라 그 길이까지만 이 보고서가 잰 구간 (리뷰) */
     @Test
     fun aShortWatchLogLimitsTheMeasuredWindow() {

@@ -66,6 +66,8 @@ data class Insights(
     val earlier: Map<String, Long> = emptyMap(),
     /** PC 치료 뒤 새 기준값 전 (10분 뒤 첫 기록부터 다시 모음 — [Guardian.treatPending]) */
     val treatPending: Boolean = false,
+    /** 이어지는 알려진 문제마다 처음 짚은 때 ([Guardian.firstSeen]) — PC 신고문의 '언제부터' */
+    val firstSeen: Map<String, Long> = emptyMap(),
 )
 
 
@@ -129,7 +131,8 @@ object BatteryInsights {
         val restart = runCatching { com.mywatch.battery.core.RestartEffects.last(samples, now, bootAt) }.getOrNull()
         val earlier = runCatching { Guardian.lastSeen(c, now) }.getOrDefault(emptyMap())
         return Insights(analysis, breakdown, culprits, issues, effect, wakes, night, levers, chart, face, charging, trend, bootAt, names, tileDevice, HomeUid.of(c),
-            cw.windowMs, rebootPending, restart, earlier, runCatching { Guardian.treatPending(c) }.getOrDefault(false))
+            cw.windowMs, rebootPending, restart, earlier, runCatching { Guardian.treatPending(c) }.getOrDefault(false),
+            runCatching { Guardian.firstSeen(c, now) }.getOrDefault(emptyMap()))
     }
 
     /** 미리 찾아 둔 이름으로 보일 이름 (공유 uid 의 '+N' 은 ' 외 N') — 화면을 그리는 동안 패키지 관리자를 부르지 않게 */
