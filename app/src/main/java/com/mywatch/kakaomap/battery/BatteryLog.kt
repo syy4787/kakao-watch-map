@@ -29,7 +29,7 @@ class BatteryLog(context: Context) {
 
     /**
      * 최근 [days]일의 표본만 — 파일 끝부분만 읽는다(15분마다 30일 파일 전체를 읽지 않게). 끝부분에 그 기간이 다 들어 있지
-     * 않으면 읽는 양을 두 배씩 늘린다
+     * 않으면 읽는 양을 두 배씩 늘린다. [readAll] 처럼 시각 순으로 — 부팅 줄은 켜진 때로 앞당겨 덧붙이므로 파일 순서와 다를 수 있다
      */
     fun readRecent(days: Int, now: Long = System.currentTimeMillis()): List<BatterySample> = synchronized(LOCK) {
         if (!file.exists()) return emptyList()
@@ -41,7 +41,9 @@ class BatteryLog(context: Context) {
             RandomAccessFile(file, "r").use { raf -> raf.seek(len - want); raf.readFully(bytes) }
             // 첫 줄은 잘렸을 수 있어 버린다
             val parsed = String(bytes, Charsets.UTF_8).substringAfter('\n').lineSequence().mapNotNull { SampleCsv.parseLine(it) }.toList()
-            if (parsed.isNotEmpty() && parsed.first().t <= from) return parsed.filter { it.t >= from }
+            if (parsed.isNotEmpty() && parsed.minOf { it.t } <= from) {
+                return parsed.filter { it.t >= from }.distinctBy { it.t to it.event }.sortedBy { it.t }
+            }
             want *= 2
         }
         SampleCsv.parse(file.readText()).filter { it.t >= from }

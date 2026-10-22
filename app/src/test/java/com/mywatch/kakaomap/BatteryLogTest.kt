@@ -105,8 +105,14 @@ class BatteryLogTest {
             log.append(s)
             t += q; k++
         }
+        // 부팅 줄은 켜진 때로 앞당겨 덧붙인다 — 파일 끝에 있어도 시각 순으로 읽힌다 (읽는 쪽이 앞뒤 줄로 잔량 점프를 본다)
+        log.append(BatterySample(now - 20 * 60_000L, 70, event = Event.BOOT))
         val all = log.readAll()
-        assertEquals(all.filter { it.t >= now - 3 * day }, log.readRecent(3, now))
+        val recent = log.readRecent(3, now)
+        assertEquals(all.filter { it.t >= now - 3 * day }, recent)
+        assertEquals(recent.sortedBy { it.t }, recent)
+        val b = recent.indexOfFirst { it.event == Event.BOOT }
+        assertTrue("$b", b in 1 until recent.size - 1 && recent[b - 1].t < recent[b].t && recent[b].t < recent[b + 1].t)
         assertEquals(all, log.readRecent(30, now))       // 파일보다 길게 달라면 전체
         assertTrue(log.readRecent(3, now).size in 280..300)
     }
