@@ -137,6 +137,21 @@ jobs:
           SECRETS_FILE: ${{ runner.temp }}/secrets.properties
         run: bash .github/scripts/check-youtube-login.sh
 
+      # PC 툴킷에 넣을 Java — Java 가 없는 PC 에서도 BatteryDoctor.bat 이 돌게 Windows 용 Eclipse Temurin 21 JRE 를 그대로 넣는다.
+      # 버전과 sha256 을 고정해 다른 파일이 끼어들 수 없게 한다(올릴 때는 api.adoptium.net 의 checksum 으로 함께 바꾼다).
+      # 받지 못하면 경고만 남기고 Java 없는 zip 으로 배포한다(.bat 은 PC 에 깔린 Java 를 찾는다)
+      - name: Fetch the Java runtime for the PC toolkit
+        if: steps.check.outputs.ready == 'true'
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          JRE_URL="https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.12.1%2B1/OpenJDK21U-jre_x64_windows_hotspot_21.0.12.1_1.zip"
+          JRE_SHA256="d35f31e712f0fcf6ac5a093edc90204fbff22f720ba3950bd09d331d5e621636"
+          OUT="$RUNNER_TEMP/doctor-jre.zip"
+          curl -fsSL --retry 3 -o "$OUT" "$JRE_URL"
+          echo "$JRE_SHA256  $OUT" | sha256sum -c -
+          echo "DOCTOR_JRE=$OUT" >> "$GITHUB_ENV"
+
       # 키를 바꾸거나(TAGO 실시간 버스 키 추가 등) 할 때는 저장소 Secrets 에 같은 이름으로 넣으면
       # 암호화 파일보다 우선한다 (비어 있으면 무시)
       - name: Test and build signed APK
@@ -154,7 +169,13 @@ jobs:
           RELEASE_KEY_PASSWORD=$(bash .github/scripts/signing-password.sh)
           export RELEASE_KEY_PASSWORD
           # 워치 앱 시험·서명 APK + 배터리 닥터(공용 계산 모듈 시험, PC 툴킷 시험·zip)
-          ./gradlew --no-daemon :app:testDebugUnitTest :battery-core:test :battery-doctor:test :app:assembleRelease :battery-doctor:doctorZip
+          if [ -n "${DOCTOR_JRE:-}" ] && [ -f "$DOCTOR_JRE" ]; then
+            JRE_ARG="-PdoctorJre=$DOCTOR_JRE"
+          else
+            JRE_ARG=""
+            echo "::warning::PC 툴킷에 Java 를 넣지 못했어요 — 이번 battery-doctor.zip 은 PC 에 깔린 Java 가 있어야 돌아요"
+          fi
+          ./gradlew --no-daemon :app:testDebugUnitTest :battery-core:test :battery-doctor:test :app:assembleRelease :battery-doctor:doctorZip $JRE_ARG
 
       # kakao-watch-map.apk = 모든 CPU 용 (처음 설치·예전 버전 앱의 업데이트용)
       # kakao-watch-map-<CPU>.apk = CPU 별 (새 버전 앱은 update.json 의 apks 에서 자기 것만 받는다 — 워치는 armeabi-v7a)
@@ -196,9 +217,11 @@ jobs:
             '{versionCode: $code, versionName: $name, apkUrl: $url, sha256: $sha, size: $size, notes: $notes, apks: $apks}' > update.json
           cat update.json
           ls -l kakao-watch-map*.apk
-          # PC 툴킷(Windows): BatteryDoctor.bat + battery-doctor.jar + README.txt
+          # PC 툴킷(Windows): BatteryDoctor.bat + battery-doctor.jar + README.txt + runtime\(Java)
           cp battery-doctor/build/dist/battery-doctor.zip battery-doctor.zip
           ls -l battery-doctor.zip
+          # grep -q 는 일찍 끝나 unzip 이 SIGPIPE 로 실패할 수 있어(pipefail) 끝까지 읽게 둔다
+          if unzip -Z1 battery-doctor.zip | grep -x "runtime/bin/java.exe" > /dev/null; then echo "Java 포함"; else echo "::warning::battery-doctor.zip 에 runtime/bin/java.exe 가 없어요"; fi
 
       # 작은 업데이트: 최근 릴리스 3개의 CPU 별 APK 에서 새 APK 를 만드는 패치(.kwdelta)를 만들어 update.json 에 적는다.
       # 재생 엔진(약 100MB)은 그대로라 패치는 몇 MB — 워치가 깔린 APK 와 맞는 패치만 받아 새 APK 를 똑같이 다시 만든다.
@@ -246,7 +269,7 @@ jobs:
           shopt -s nullglob
           FILES=(kakao-watch-map.apk kakao-watch-map-armeabi-v7a.apk kakao-watch-map-arm64-v8a.apk update.json deltas/*.kwdelta battery-doctor.zip)
           # 릴리스 설명: 커밋 제목 + PC 툴킷 안내 한 줄 (YAML 블록 안이라 줄바꿈은 printf 로)
-          BODY=$(printf '%s\n\nPC 툴킷(Windows): battery-doctor.zip — 압축을 풀고 BatteryDoctor.bat 실행 (Android Studio 의 Java·adb 를 자동으로 찾음). 사용법은 안의 README.txt' "$NOTES")
+          BODY=$(printf '%s\n\nPC 툴킷(Windows): battery-doctor.zip — 압축을 모두 풀고 BatteryDoctor.bat 실행 (Java 포함 — 설치할 것 없음, adb 가 없으면 물어본 뒤 구글 공식 platform-tools 를 받음). 사용법은 안의 README.txt' "$NOTES")
           gh release create "v$VERSION_CODE" "${FILES[@]}" \
             --target "$GITHUB_SHA" --title "v$VERSION_NAME" --notes "$BODY" --latest
 

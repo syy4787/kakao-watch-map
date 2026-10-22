@@ -21,7 +21,7 @@
 - 비정상 기준(Android vitals 워치페이스 기준 준용): 앱을 안 쓰고 충전 중이 아닌 구간에서 **시간당 4.44% 초과 = 과소모, 3.2% 미만이 목표**. 기여 요인: CPU ≥90초/시간, partial wakelock ≥18.5초/시간. 백그라운드에서 1시간 연속 wakelock = stuck.
 - 워치 내장 배터리 화면의 앱 목록은 **앱 소모만** 보여 준다(시스템·BT·Wi-Fi 제외) — 합계가 실제보다 작은 것은 설계이지 숨은 소모의 증거가 아니다. 범인 찾기는 ADB `dumpsys batterystats`로만 가능.
 - ADB: `설정 > 워치 정보 > 소프트웨어 > 소프트웨어 버전` 5번 탭 → 개발자 옵션 → ADB 디버깅 + 무선 디버깅(+ 연결 작업 중엔 '자동 Wi-Fi 끄기') → `adb pair IP:페어링포트 코드` → `adb connect IP:연결포트`. 블루투스 디버깅은 Wear OS 3부터 불가, USB 없음 → Wi-Fi 전용. ADB 30 이상, PC와 같은 Wi-Fi.
-- 사용자 PC: Windows, Android Studio 설치됨(= JBR Java + Android SDK platform-tools의 adb.exe 있음). 별도 설치 없이 돌아가야 한다.
+- 사용자 PC: Windows. 별도 설치 없이 돌아가야 한다 — Android Studio 가 없을 수 있다(실제 사용자 PC 가 그랬다, 5-11: Java 는 zip 에 함께, adb 는 묻고 받음).
 - 워치 앱 배포: `main` 푸시 → GitHub Actions가 서명 APK·델타를 릴리스 → 워치의 전용앱이 자동 업데이트.
 
 ## 전체 구조
@@ -141,8 +141,8 @@ Kotlin/JVM 17 CLI, 의존성은 kotlin-stdlib + battery-core만(JSON은 직접 �
 ### 실행기 `BatteryDoctor.bat`
 
 1. `chcp 65001`, `cd /d %~dp0`.
-2. Java 찾기: `%JAVA_HOME%\bin\java.exe` → `%ProgramFiles%\Android\Android Studio\jbr\bin\java.exe` → `%LOCALAPPDATA%\Programs\Android Studio\jbr\bin\java.exe` → `where java`. 없으면 안내 후 종료.
-3. adb 찾기: `%ANDROID_HOME%` / `%ANDROID_SDK_ROOT%` `\platform-tools\adb.exe` → `%LOCALAPPDATA%\Android\Sdk\platform-tools\adb.exe` → `where adb`. 없으면 안내(SDK Manager에서 Platform-Tools).
+2. Java 찾기: 함께 든 `runtime\bin\java.exe`(v2.48~) → `%JAVA_HOME%\bin\java.exe` → `%ProgramFiles%\Android\Android Studio\jbr\bin\java.exe` → `%LOCALAPPDATA%\Programs\Android Studio\jbr\bin\java.exe` → `where java`. 없으면 안내(zip 을 통째로 다시 풀기) 후 종료.
+3. adb 찾기: 이 폴더의 `platform-tools\adb.exe` → `%ANDROID_HOME%` / `%ANDROID_SDK_ROOT%` `\platform-tools\adb.exe` → `%LOCALAPPDATA%\Android\Sdk\platform-tools\adb.exe` → `where adb`. 없어도 멈추지 않는다 — 프로그램이 워치 일 전에 묻고 받는다(5-11).
 4. `java -Dfile.encoding=UTF-8 -Dstdout.encoding=UTF-8 -Dbd.adb="<adb>" -jar battery-doctor.jar %*`. 인자가 없으면 대화형 메뉴.
 
 ### 메뉴 / 하위 명령
@@ -562,6 +562,23 @@ Kotlin/JVM 17 CLI, 의존성은 kotlin-stdlib + battery-core만(JSON은 직접 �
   번호·켜진 뒤 시간 — `HealthStore.Boot`) 켜진 뒤 처음 남는 15분·충전 시작 줄을 부팅 줄로 남기고, 늦게 돈 부팅 작업은 이 부팅의 줄을 다시
   남기지 않는다. 시각과 잔량은 늘 같은 때의 것(처음엔 시각만 켜진 때로 앞당겼다가 늦게 읽은 잔량이 켜진 때의 것처럼 적혀 없던 점프가
   생기는 것을 리뷰에서 찾아 바꿈). 이 기능 전부터 쓰던 워치는 처음 한 번은 예전처럼. 최근 기록 읽기(`readRecent`)도 `readAll` 처럼 시각 순.
+
+## 5-11. 설치 없이 (13차, 2026-10-22) — Android Studio 가 없는 PC
+
+실제 사용자 PC 에서 `[ERROR] java.exe not found` — Android Studio 가 없는 PC 였다(처음 가정 '사용자 PC 에 Android Studio 설치됨'이 틀림).
+
+- Java: 릴리스 zip 에 Eclipse Temurin 21 JRE(Windows x64)를 고치지 않고 `runtime\` 로 넣는다(GPLv2+CE, `runtime\legal\`). CI 가
+  버전·sha256 을 고정해 받고(`jdk-21.0.12.1+1`, api.adoptium.net 의 checksum) `-PdoctorJre` 로 `doctorZip` 에 넘긴다 — 받지 못하면 경고만
+  남기고 예전처럼 PC 의 Java 를 찾는 zip. zip 이 약 51MB 가 된다(jlink 로 줄이는 건 리눅스에서 윈도우용 이미지를 만들려면 같은 버전 JDK 둘이
+  필요해 미룸). `.bat` 은 `runtime\bin\java.exe` 를 먼저 쓴다.
+- adb: 구글 Android SDK 라이선스가 재배포를 막아 zip 에 넣지 않는다. 대신 `AdbSetup` — 쓸 adb 는 .bat 이 찾은 것 → 설정의 `adbPath`(파일이
+  있을 때만) → 이 폴더의 `platform-tools` → PATH. 워치 일(연결·수집·측정 시작·조치·되돌리기·권한·자동 치료) 전에 `adb version` 이 되는지 보고,
+  안 되면 주소·둘 곳·라이선스를 알린 뒤 물어(y) 구글 공식 `platform-tools-latest-windows.zip`(약 8MB)을 받아 `platform-tools/` 아래만
+  푼다(그 밖·`..`·절대 경로·200MB 넘는 것은 버림), 받은 adb 가 실행되는지 본 뒤 쓴다. 아니라고 하면 직접 까는 길을 알려 주고 그 일은 하지
+  않는다(adb 를 부르지 않음). 지난 수집 다시 분석·증거 패키지는 adb 를 묻지 않는다. 네트워크는 이때 한 번뿐(Windows 프록시 설정을 따름).
+- 시험: 순서(찾은 것·설정·이 폴더·PATH), 풀기(밖으로 나가는 경로·zip 아님·adb 없음), 묻기(아니오면 받지 않음·직접 까는 길), 받기 실패·실행
+  안 되는 adb, adb 없을 때 워치 명령이 adb 를 부르지 않음. e2e 에 '없는 adb → 묻고 아니오 → 수집 안 함', 가짜 adb 에 `version`. 실제 구글
+  zip 으로 받기·풀기·`adb version` 까지 한 번 돌려 봄(리눅스판).
 
 ## 6. 열린 가정 (첫 실제 수집으로 확정)
 

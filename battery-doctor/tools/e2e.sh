@@ -32,6 +32,13 @@ fail() { echo "[e2e] 실패: $*"; exit 1; }
 # (부정 검사면 거짓 통과로) 보였다 (가끔 'DUMP 이 회수되지 않음'으로 실패 — 상태는 맞았음)
 has() { local pat="$1"; shift; local out; out="$("$@")"; grep -q -- "$pat" <<<"$out"; }
 
+echo "[e2e] adb 가 없으면 받을지 묻고(아니오) 워치 일은 하지 않음"
+NOADB="$(printf '\n' | "${JAVA:-java}" -Dfile.encoding=UTF-8 -Dsun.jnu.encoding=UTF-8 -Djava.awt.headless=true -Dbd.adb="$WORK/no-such-adb" -jar "$JAR" collect 2>&1 || true)"
+grep -q "platform-tools-latest" <<<"$NOADB" || fail "adb 가 없을 때 구글 platform-tools 를 받을지 묻지 않음"
+grep -q "받지 않았습니다" <<<"$NOADB" || fail "아니오에 직접 까는 길을 알려 주지 않음"
+! grep -q "수집을 시작합니다" <<<"$NOADB" || fail "adb 없이 수집을 시작함"
+[ ! -d data/snapshots ] || fail "adb 없이 스냅샷을 만듦"
+
 echo "[e2e] connect"
 run connect 192.168.0.50:5555 | tee connect.log | tail -3
 grep -q "SM-L350" connect.log || fail "connect 가 모델을 출력하지 않음"

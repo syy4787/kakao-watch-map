@@ -9,13 +9,18 @@
 ADB로만 바꿀 수 있는 차단 조치를 골라 적용·되돌리고, 서비스센터·삼성멤버스·소비자원에 낼
 증거 패키지(보고서·원자료·신고문 3종)를 만듭니다.
 
-네트워크를 쓰지 않습니다. 모든 결과는 이 폴더의 data\ 안에만 남습니다.
+네트워크를 쓰지 않습니다(adb 가 없을 때 물어본 뒤 구글에서 한 번 받는 것만 빼고). 모든 결과는 이 폴더의 data\ 안에만 남습니다.
 
 준비물
 ------
-1. Windows PC에 Android Studio가 설치되어 있으면 됩니다 (Java와 adb.exe가 함께 들어 있습니다).
-   - Java: ...\Android Studio\jbr\bin\java.exe  (없으면 JAVA_HOME 설정)
-   - adb : %LOCALAPPDATA%\Android\Sdk\platform-tools\adb.exe  (없으면 Android Studio > SDK Manager > SDK Tools > Android SDK Platform-Tools 설치)
+1. 따로 설치할 것은 없습니다. zip 을 '압축 풀기(모두 추출)'로 통째로 풀어 runtime 폴더가 BatteryDoctor.bat 옆에 있게 하세요.
+   - Java: runtime\ 에 함께 들어 있습니다 (Eclipse Temurin 21 JRE 그대로 — GPLv2+Classpath Exception, runtime\legal\ 참고).
+     zip 을 풀지 않고 탐색기 안에서 바로 .bat 을 실행하면 runtime 이 없어 'java.exe not found' 가 납니다.
+   - adb : Android Studio 의 것(%LOCALAPPDATA%\Android\Sdk\platform-tools)이나 PATH 의 adb 를 알아서 찾고,
+     어디에도 없으면 워치와 하는 메뉴(1 연결 등)를 처음 고를 때 물어본 뒤 구글 공식 주소에서 Android SDK Platform-Tools(약 8MB)를 받아
+     이 폴더의 platform-tools\ 에 둡니다(구글 라이선스에 동의해야 함 — 라이선스 때문에 zip 에는 넣지 않았습니다).
+     직접 깔려면 https://developer.android.com/studio/releases/platform-tools 에서 Windows 용 zip 을 받아
+     그 안의 platform-tools 폴더를 이 폴더에 두면 됩니다.
 2. 워치와 PC가 같은 Wi-Fi에 있어야 합니다. 손님용 Wi-Fi·AP 격리(기기 간 통신 차단)가 켜진 공유기는 안 됩니다.
    안 되면 휴대폰 핫스팟에 PC와 워치를 함께 붙이세요.
 3. 워치의 전용앱에서 '배터리' 화면을 한 번 열어 두면 15분마다 기록이 쌓입니다 (없어도 dumpsys만으로 분석은 되지만 신뢰도가 한 단계 낮습니다).
@@ -123,6 +128,9 @@ AOD 끄기, 전용앱·Samsung Health 관련 조치, '강함' 등급은 자동�
 ------------
 - "연결된 워치가 없습니다": 메뉴 1 을 다시 실행. 워치 화면을 켠 채로, 무선 디버깅 화면의 IP:연결포트를 확인.
 - 기기가 offline: 워치의 무선 디버깅을 껐다 켜고, 명령 프롬프트에서 adb kill-server 후 다시 시도.
+  (adb 를 이 폴더에 받았으면 명령 프롬프트에서 이 폴더로 가서 platform-tools\adb kill-server)
+- "java.exe not found": zip 을 통째로 다시 풀어 runtime 폴더가 .bat 옆에 있게 하세요.
+- adb 를 받지 못했으면(회사·학교망, 백신): 위 '준비물'의 주소에서 직접 받아 platform-tools 폴더를 이 폴더에 두세요.
 - 보고서가 자동으로 안 열리면 표시된 경로의 report.html 을 더블클릭하세요.
 - 강제 재시작: 홈 + 뒤로 가기 버튼을 꺼질 때까지(7초 이상), 효과 없으면 30초까지.
 - 삼성전자서비스 1588-3366 / 소비자상담센터 1372

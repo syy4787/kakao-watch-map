@@ -184,6 +184,7 @@ case "$cmd" in
   bugreport) : > "${1:-bugreport.zip}" ;;
   reboot) echo "reboot" >> "$STATE/reboots" ;;
   kill-server|start-server) ;;
+  version) printf 'Android Debug Bridge version 1.0.41\nVersion 36.0.0-fake\nInstalled as %s\n' "$0" ;;
   shell) shell_cmd "$@" ;;
   *) echo "fake-adb: unknown command '$cmd'" >&2; exit 1 ;;
 esac

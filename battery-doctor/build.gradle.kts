@@ -1,5 +1,6 @@
 // 배터리 닥터 PC 툴킷(Windows): ADB로 워치의 배터리 통계를 수집·분석하고, 차단 조치와 증거 패키지를 만든다.
-// 순수 Kotlin(JVM 17) CLI — Android Studio 에 들어 있는 Java(JBR)와 adb 로 설치 없이 돌아간다.
+// 순수 Kotlin(JVM 17) CLI — 배포 zip 에 Java(Eclipse Temurin JRE, runtime\)가 함께 들어 있어 설치 없이 돌아가고(-PdoctorJre),
+// adb 는 없으면 처음 쓸 때 물어본 뒤 구글 공식 platform-tools 를 받는다(AdbSetup).
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
@@ -44,7 +45,13 @@ val fatJar by tasks.registering(Jar::class) {
     exclude("META-INF/*.SF", "META-INF/*.DSA", "META-INF/*.RSA", "META-INF/versions/9/module-info.class", "module-info.class")
 }
 
-/** 배포물: BatteryDoctor.bat + battery-doctor.jar + README.txt → build/dist/battery-doctor.zip  (./gradlew :battery-doctor:doctorZip) */
+/**
+ * 배포물: BatteryDoctor.bat + battery-doctor.jar + README.txt (+ runtime\) → build/dist/battery-doctor.zip
+ * (./gradlew :battery-doctor:doctorZip [-PdoctorJre=OpenJDK21U-jre_x64_windows_hotspot_….zip]).
+ * -PdoctorJre 를 주면 그 JRE zip 의 내용을 맨 위 폴더(jdk-…-jre/)를 걷어 runtime/ 에 그대로 넣는다 — Java 가 없는 PC 에서도
+ * .bat 이 runtime\bin\java.exe 로 돈다. 릴리스(CI)는 버전·sha256 을 고정한 Temurin JRE 를 받아 넣는다
+ */
+val doctorJre = providers.gradleProperty("doctorJre")
 val doctorZip by tasks.registering(Zip::class) {
     group = "distribution"
     archiveFileName.set("battery-doctor.zip")
@@ -52,4 +59,14 @@ val doctorZip by tasks.registering(Zip::class) {
     from(fatJar)
     from(layout.projectDirectory.file("BatteryDoctor.bat"))
     from(layout.projectDirectory.file("README.txt"))
+    val jre = doctorJre.orNull
+    if (jre != null) {
+        val jreZip = file(jre)
+        require(jreZip.isFile) { "doctorJre: JRE zip 이 없습니다 — $jre" }
+        from(zipTree(jreZip)) {
+            // jdk-21.0.x+y-jre/bin/java.exe → runtime/bin/java.exe
+            eachFile { relativePath = RelativePath(true, "runtime", *relativePath.segments.drop(1).toTypedArray()) }
+            includeEmptyDirs = false
+        }
+    }
 }

@@ -19,11 +19,22 @@ import kotlin.system.exitProcess
 fun main(args: Array<String>) {
     System.setOut(PrintStream(FileOutputStream(FileDescriptor.out), true, "UTF-8"))
     System.setErr(PrintStream(FileOutputStream(FileDescriptor.err), true, "UTF-8"))
+    // adb 를 받을 때(물어본 뒤 한 번) Windows 의 프록시 설정을 따른다
+    System.setProperty("java.net.useSystemProxies", "true")
     val dataDir = File(System.getProperty("bd.data")?.takeIf { it.isNotBlank() } ?: "data")
-    // adb 경로: .bat 이 넘긴 -Dbd.adb → data/config.properties 의 adbPath → PATH 의 adb
-    val adbPath = System.getProperty("bd.adb")?.takeIf { it.isNotBlank() } ?: Config(dataDir).adbPath ?: "adb"
+    // adb 경로: .bat 이 넘긴 -Dbd.adb → data/config.properties 의 adbPath → 이 폴더의 platform-tools → PATH 의 adb.
+    // 워치 일을 하기 전에 실행되는지 보고, 없으면 물어본 뒤 구글 공식 platform-tools 를 받는다 (AdbSetup)
+    val appDir = AdbSetup.appDir()
+    val windows = System.getProperty("os.name").orEmpty().startsWith("Windows")
+    var adbPath = AdbSetup.resolve(System.getProperty("bd.adb"), Config(dataDir).adbPath, appDir, windows)
+    var adbOk = false
+    val ensureAdb: (Console) -> Boolean = { io ->
+        adbOk = adbOk || AdbSetup.works(adbPath) ||
+            AdbSetup.offer(io, appDir, windows, AdbSetup::download, AdbSetup::works)?.also { adbPath = it } != null
+        adbOk
+    }
     val code = try {
-        Main.run(args, StdConsole(), dataDir, { serial -> RealAdb(adbPath, serial) })
+        Main.run(args, StdConsole(), dataDir, { serial -> RealAdb(adbPath, serial) }, ensureAdb = ensureAdb)
     } catch (e: Exception) {
         System.err.println("오류: $e")
         3
@@ -81,8 +92,10 @@ object Main {
         args: Array<String>, io: Console, dataDir: File, adbFactory: (String?) -> AdbRunner,
         zone: ZoneId = ZoneId.systemDefault(), today: LocalDate = LocalDate.now(),
         clock: () -> Long = { System.currentTimeMillis() }, open: (File) -> Boolean = { HtmlReport.open(it) },
+        /** 워치 일 전에 adb 가 준비됐는지 — 없으면 물어보고 받는다(실제 실행은 main 이 끼움). false 면 그 일을 하지 않는다 */
+        ensureAdb: (Console) -> Boolean = { true },
     ): Int {
-        val ctx = Ctx(io, dataDir, adbFactory, zone, today, clock, open)
+        val ctx = Ctx(io, dataDir, adbFactory, zone, today, clock, open, ensureAdb)
         val a = parse(args)
         return when (a.command) {
             null -> ctx.menu()
@@ -141,7 +154,7 @@ object Main {
 
     private class Ctx(
         val io: Console, val dataDir: File, val adbFactory: (String?) -> AdbRunner, val zone: ZoneId,
-        val today: LocalDate, val clock: () -> Long, val open: (File) -> Boolean,
+        val today: LocalDate, val clock: () -> Long, val open: (File) -> Boolean, val ensureAdb: (Console) -> Boolean,
     ) {
         val cfg = Config(dataDir)
         val journal get() = Journal(File(dataDir, "journal.jsonl"))
@@ -176,10 +189,14 @@ object Main {
             }
         }
 
-        fun connect(address: String?): Int = if (Connect.run(adbFactory(null), cfg, io, address)) 0 else 1
+        fun connect(address: String?): Int {
+            if (!ensureAdb(io)) return 1
+            return if (Connect.run(adbFactory(null), cfg, io, address)) 0 else 1
+        }
 
-        /** 연결된 워치 하나를 고른다. 없으면 null + 안내 */
+        /** 연결된 워치 하나를 고른다. 없으면 null + 안내 (adb 가 없고 받지도 않았으면 adb 를 부르지 않는다) */
         fun device(): AdbRunner? {
+            if (!ensureAdb(io)) return null
             val states = Adb.parseDevices(adbFactory(null).run(listOf("devices"), 30).out)
             val ready = states.filterValues { it == "device" }.keys.toList()
             val offline = states.filterValues { it != "device" }
