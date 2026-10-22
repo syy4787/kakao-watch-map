@@ -34,6 +34,11 @@ object BatteryAlerts {
     const val NOTIFICATION_ID = 7301
     /** '언제부터 더 닳음' 알림 (꺾임마다 한 번) */
     const val TREND_ID = 7308
+    /** 충전 중 뜨거움 알림 (충전기에 올릴 때마다 한 번까지) */
+    const val HOT_CHARGE_ID = 7312
+    /** 이 잔량 아래에서 뜨거우면 알린다 — 거의 다 찼으면 그냥 두어도 곧 끝난다 */
+    const val HOT_CHARGE_BELOW = 90
+    private const val KEY_HOT_CHARGE_SENT = "hot_charge_sent"
     /** 꺾인 날이 이만큼 안에서 옮겨 간 것은 같은 꺾임 */
     const val SAME_SHIFT_DAYS = 3L
     /** 새 꺾임이라도 지난 알림에서 이만큼은 지나야 다시 알린다 (훨씬 더 닳으면 바로) */
@@ -63,6 +68,40 @@ object BatteryAlerts {
         val last = prefs.getLong(KEY_ALERT_AT, 0L).takeIf { it > 0 }
         val alert = AlertRule.check(samples, now, last, screenOnMs, freshFrom) ?: return
         if (runCatching { notify(context, alert, quiet(now, zone)) }.isSuccess) prefs.edit().putLong(KEY_ALERT_AT, now).apply()
+    }
+
+    /**
+     * 충전 중 뜨거움 — 워치9는 충전 중 44℃까지 뜨거워지며 충전이 느려진다는 보고가 많다(삼성 공식 완충 80~90분인데 2~4시간, 삼성은 아직
+     * 고침을 알리지 않음 — Android Authority·Notebookcheck 2026-08-12, Sammy Fans 2026-10-13). 충전 중 기록이 [ChargeHabits.HOT_C]℃ 이상이고
+     * 아직 [HOT_CHARGE_BELOW]% 아래면 그 자리에서 식히는 길을 한 번 알린다 — 충전기에서 뺐다 다시 올리기 전까지 한 번. 밤엔 소리·진동 없이
+     */
+    fun hotCharge(context: Context, s: com.mywatch.battery.core.BatterySample, now: Long = System.currentTimeMillis(), zone: ZoneId = ZoneId.systemDefault()) {
+        val prefs = context.getSharedPreferences(BatteryLog.PREFS, Context.MODE_PRIVATE)
+        if (!s.plugged) {
+            if (prefs.getBoolean(KEY_HOT_CHARGE_SENT, false)) prefs.edit().putBoolean(KEY_HOT_CHARGE_SENT, false).apply()
+            return
+        }
+        val temp = s.tempDeciC?.div(10.0) ?: return
+        if (temp < com.mywatch.battery.core.ChargeHabits.HOT_C || s.level >= HOT_CHARGE_BELOW || prefs.getBoolean(KEY_HOT_CHARGE_SENT, false)) return
+        val t = DrainAnalyzer.fmt(temp).removeSuffix(".0")
+        val text = "뜨거우면 배터리를 지키려 충전이 느려집니다(워치9에서 많이 보고됨). 케이스를 빼고 서늘한 곳에서, 작은 선풍기 바람을 충전 접점 쪽으로 — " +
+            "사용자 보고 2시간 10분 → 1시간 15분. 얼음은 습기 때문에 쓰지 마세요"
+        if (runCatching { notifyHotCharge(context, "충전 중 ${t}℃ — 충전이 느려질 수 있음", text, quiet(now, zone)) }.isSuccess) {
+            prefs.edit().putBoolean(KEY_HOT_CHARGE_SENT, true).apply()
+        }
+    }
+
+    private fun notifyHotCharge(context: Context, title: String, text: String, quiet: Boolean) {
+        val (nm, channel) = manager(context, quiet) ?: return
+        val n = NotificationCompat.Builder(context, channel)
+            .setSmallIcon(R.drawable.ic_battery)
+            .setContentTitle(title)
+            .setContentText(text)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(text))
+            .setContentIntent(openBattery(context))
+            .setAutoCancel(true)
+            .build()
+        nm.notify(HOT_CHARGE_ID, n)
     }
 
     /** 밤(23~7시)인가 — 알림이 소리·진동으로 화면을 깨우지 않게 */

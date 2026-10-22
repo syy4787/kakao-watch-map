@@ -152,6 +152,72 @@ class BatterySampleWorkerTest {
         assertTrue(charge.single().constraints.requiresCharging())
     }
 
+    /**
+     * 부팅 줄은 실제로 켜진 때(지금 − 켜진 뒤 시간)로 — 한 번짜리 작업이 늦게 돌면 그 사이 켜진 뒤에 남은 15분·충전 시작 기록보다 뒤에 서서
+     * 꺼지기 전 기록과의 잔량 점프(게이지가 다시 맞춰짐 — '꺼졌다가 충전기에서 켜니 48%')를 못 봤다 (리뷰). 켜진 지 오래 지나 돌았으면 그때
+     * 잔량을 켜진 때로 끌어오지 않는다
+     */
+    @Test
+    fun aBootRowIsDatedAtTheBoot() {
+        fun run(event: Event) = TestWorkerBuilder<BatterySampleWorker>(context, Executors.newSingleThreadExecutor())
+            .setInputData(workDataOf(BatterySampleWorker.KEY_EVENT to event.name)).build().doWork()
+        org.robolectric.shadows.ShadowSystemClock.advanceBy(java.time.Duration.ofMinutes(3))   // 켜진 지 3분
+        run(Event.PERIODIC)                                                                   // 켜진 뒤 먼저 돈 15분 기록
+        run(Event.BOOT)
+        val rows = log.readAll()
+        val periodic = rows.single { it.event == Event.PERIODIC }
+        val boot = rows.single { it.event == Event.BOOT }
+        assertTrue("${periodic.t - boot.t}", periodic.t - boot.t in 3 * 60_000L - 2_000L..3 * 60_000L + 2_000L)
+        // 켜진 지 한 시간 뒤에야 돌았으면 그대로 (그때 잔량을 켜진 때의 것으로 적지 않게)
+        log.file.delete()
+        org.robolectric.shadows.ShadowSystemClock.advanceBy(java.time.Duration.ofMinutes(60))
+        run(Event.PERIODIC)
+        run(Event.BOOT)
+        val late = log.readAll()
+        assertTrue(late.single { it.event == Event.BOOT }.t >= late.single { it.event == Event.PERIODIC }.t)
+    }
+
+    /**
+     * 충전 중 42℃ 넘게 뜨거우면 그 자리에서 식히는 길을 한 번 — 충전기에서 뺐다 다시 올리기 전엔 다시 알리지 않는다 (워치9 느린 충전:
+     * 충전 중 44℃까지 뜨거워지며 느려짐)
+     */
+    @Test
+    fun aHotChargeIsToldOncePerCharge() {
+        shadowOf(context as Application).grantPermissions(android.Manifest.permission.POST_NOTIFICATIONS)
+        val nm = shadowOf(context.getSystemService(android.app.NotificationManager::class.java))
+        fun battery(level: Int, plugged: Boolean, tempDeciC: Int) = context.sendStickyBroadcast(
+            Intent(Intent.ACTION_BATTERY_CHANGED)
+                .putExtra(BatteryManager.EXTRA_LEVEL, level).putExtra(BatteryManager.EXTRA_SCALE, 100)
+                .putExtra(BatteryManager.EXTRA_STATUS, if (plugged) BatteryManager.BATTERY_STATUS_CHARGING else BatteryManager.BATTERY_STATUS_DISCHARGING)
+                .putExtra(BatteryManager.EXTRA_PLUGGED, if (plugged) BatteryManager.BATTERY_PLUGGED_WIRELESS else 0)
+                .putExtra(BatteryManager.EXTRA_TEMPERATURE, tempDeciC))
+        fun run() = TestWorkerBuilder<BatterySampleWorker>(context, Executors.newSingleThreadExecutor()).build().doWork()
+        fun hot() = nm.allNotifications.filter { shadowOf(it).contentTitle?.toString()?.startsWith("충전 중") == true }
+        battery(50, plugged = true, tempDeciC = 380)
+        run()
+        assertTrue("38℃ 는 아직", hot().isEmpty())
+        battery(55, plugged = true, tempDeciC = 431)
+        run()
+        val n = hot().single()
+        assertTrue(shadowOf(n).contentTitle.toString(), shadowOf(n).contentTitle.toString().startsWith("충전 중 43.1℃"))
+        assertTrue(shadowOf(n).contentText.toString().contains("선풍기"))
+        nm.cancelAll()
+        battery(60, plugged = true, tempDeciC = 440)
+        run()
+        assertTrue("같은 충전에선 한 번", hot().isEmpty())
+        // 충전기에서 뺐다 다시 올리면 다시
+        battery(58, plugged = false, tempDeciC = 350)
+        run()
+        battery(59, plugged = true, tempDeciC = 430)
+        run()
+        assertEquals(1, hot().size)
+        // 거의 다 찼으면 알리지 않는다
+        nm.cancelAll()
+        battery(58, plugged = false, tempDeciC = 350); run()
+        battery(92, plugged = true, tempDeciC = 450); run()
+        assertTrue(hot().isEmpty())
+    }
+
     @Test
     fun aNoteTravelsWithTheRow() {
         val worker = TestWorkerBuilder<BatterySampleWorker>(context, Executors.newSingleThreadExecutor())

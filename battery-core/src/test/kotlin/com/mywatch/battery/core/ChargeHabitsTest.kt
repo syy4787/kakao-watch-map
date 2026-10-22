@@ -126,6 +126,12 @@ class ChargeHabitsTest {
         assertFalse(unknown.speed!!.slow)
         assertTrue(unknown.advice.none { it.contains("느립니다") })
         assertNull(ChargeHabits.analyze(charges(3, perMin = 0.6, screenOn = true), at(13, 8), model = "SM-L350")!!.speed)
+        // 충전 중 기록이 30분 넘게 빈 충전도 빼고 잰다 (그 사이를 모른다) — 날마다 충전 셋째·넷째 기록을 지움
+        val gappy = charges(3, perMin = 0.6).let { all ->
+            val drop = all.filter { it.plugged }.groupBy { it.t / (24 * 3_600_000L) }.values.flatMap { day -> day.drop(2).take(2) }.toSet()
+            all.filterNot { it in drop }
+        }
+        assertNull(ChargeHabits.analyze(gappy, at(13, 8), model = "SM-L350")!!.speed)
     }
 
     @Test
