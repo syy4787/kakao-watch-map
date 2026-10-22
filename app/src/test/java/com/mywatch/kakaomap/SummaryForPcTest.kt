@@ -91,6 +91,13 @@ class SummaryForPcTest {
             firstSeen = mapOf(KnownIssues.HOME_HOG to first)), now))
         assertEquals(first.toDouble(), withFirst["first_home_at"])
         assertNull(withFirst["first_gms_at"])
+        // 재시작·치료 뒤 다시 보는 중이라 문제 칸이 없어도(창이 짧음) 처음 짚은 때는 적는다 — PC 가 그 일이 언제부터였는지 알게 (리뷰)
+        val gmsFirst = now - 50 * 3_600_000L
+        val after = SummaryMetrics.parse(BatterySummary.metricsLine(a, ins.copy(firstSeen = mapOf(KnownIssues.HOME_HOG to first,
+            KnownIssues.PLAY_SERVICES_LOOP to gmsFirst)), now))
+        assertNull(after["issue_home"])
+        assertEquals(first.toDouble(), after["first_home_at"])
+        assertEquals(gmsFirst.toDouble(), after["first_gms_at"])
     }
 
     /** 셸이 '지금 요약'을 부르면(PC 수집 직전) 하루 한 번을 기다리지 않고 새로 쓴다 */

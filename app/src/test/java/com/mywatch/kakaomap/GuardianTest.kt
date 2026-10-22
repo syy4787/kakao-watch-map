@@ -788,12 +788,15 @@ class GuardianTest {
         restartAndSettle(2)
         fill(at(10, 0), 9, 79.0, 1.0)
         Guardian.tick(context, log, at(10, 0), stats = UidStatsSource { mapOf(home to UidUse(home)) }, zone = zone)
-        // 사흘 전 첫 부팅에서 본 것으로
+        // 사흘 전 첫 부팅에서 본 것으로 (그 일을 처음 짚은 때도)
         context.getSharedPreferences(BatteryLog.PREFS, Context.MODE_PRIVATE).edit()
-            .putInt("gs_issue_seen_seq_watch-home-hog", 0).putLong("gs_issue_seen_at_watch-home-hog", at(12, 0, d = 17)).commit()
+            .putInt("gs_issue_seen_seq_watch-home-hog", 0).putLong("gs_issue_seen_at_watch-home-hog", at(12, 0, d = 17))
+            .putLong("gs_issue_first_at_watch-home-hog", at(9, 0, d = 17)).commit()
         fill(at(11, 0), 9, 78.0, 1.0)
         Guardian.tick(context, log, at(11, 0), stats = UidStatsSource { mapOf(home to UidUse(home, cpuMs = 20 * 60_000L)) }, zone = zone)
         assertEquals("One UI Watch 홈 과소모 — 강제 재시작", Guardian.tileIssue(context, at(11, 0)))
+        // 새 일은 처음 짚은 때도 새로 — 지난 일의 때를 이어 쓰지 않는다 (리뷰)
+        assertEquals(at(11, 0), Guardian.firstSeen(context, at(11, 0))[com.mywatch.battery.core.KnownIssues.HOME_HOG])
         // 같은 부팅에서 또 보여도 새 일은 이 부팅부터 — 사흘 전 부팅을 '재시작 앞'으로 치지 않는다
         fill(at(12, 0), 9, 77.0, 1.0)
         Guardian.tick(context, log, at(12, 0), stats = UidStatsSource { mapOf(home to UidUse(home, cpuMs = 40 * 60_000L)) }, zone = zone)
@@ -838,11 +841,13 @@ class GuardianTest {
         homeHogUntilNoon()
         restartAndSettle(2)
         tickHome(at(13, 0), 36, 77.0)                  // 재시작 뒤 기준값 (부팅 차례 1)
-        // 예전 버전이 남긴 모양으로: 이 버전의 단계 기록은 없고 처음 본 차례(0)·본 때만
-        p.edit().apply { p.all.keys.filter { it.startsWith("gs_issue_stage") }.forEach { remove(it) } }
+        // 예전 버전이 남긴 모양으로: 이 버전의 단계 기록·처음 짚은 때는 없고 처음 본 차례(0)·본 때만
+        p.edit().apply { p.all.keys.filter { it.startsWith("gs_issue_stage") || it.startsWith("gs_issue_first_at") }.forEach { remove(it) } }
             .putInt("gs_issue_seen_seq_watch-home-hog", 0).putLong("gs_issue_seen_at_watch-home-hog", at(12, 0)).commit()
         tickHome(at(14, 0), 56, 76.0)
         assertEquals("이어서 다음 단계", "One UI Watch 홈 과소모 — 홈 캐시 지우고 재시작", Guardian.tileIssue(context, at(14, 0)))
+        // 그 일을 처음 짚은 때는 모른다 — 다시 본 때를 처음 짚은 때로 적지 않는다 (리뷰)
+        assertTrue(Guardian.firstSeen(context, at(14, 0)).isEmpty())
         // 앱별 통계 파일이 사라져(차례를 0 부터 다시 셈) 기준값부터 다시 모아도 단계는 그대로
         java.io.File(BatteryLog(context).dir, "health_last.json").delete()
         java.io.File(BatteryLog(context).dir, "health_deltas.jsonl").delete()

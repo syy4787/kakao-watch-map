@@ -190,13 +190,11 @@ object Analyzer {
         // 통계와 따로 잰 증거. 3시간 넘게 묵었거나 판단할 만큼(55분) 기록이 없었으면 쓰지 않는다. 수집 시각(워치 date)은 요약을 새로
         // 쓰기 전에 읽으므로 새 요약은 그보다 조금 늦다 — 30분까지는 '방금 쓴 것'으로 (리뷰에서 찾음: 늘 미래라 버려졌다)
         val wm = f.watchMetrics
-        // 워치가 이번 일을 처음 짚은 때(요약의 first_*_at) — 증상이 얼마나 이어졌는지 (신고문의 '언제부터'). 모르면(이 버전 전 워치 앱에서
-        // 시작된 일, 시계가 뒤로 가 수집보다 늦은 때) 적지 않는다
+        // 워치가 이번 일을 처음 짚은 때(요약의 first_*_at) — 증상이 얼마나 이어졌는지 (신고문의 '언제부터'). 모르면 적지 않는다 ([firstSeenAt])
         fun firstSeen(key: String): List<String> {
-            val t = wm[key]?.toLong()?.takeIf { it > 0 } ?: return emptyList()
-            val ref = f.collectedAt ?: wm["at"]?.toLong() ?: return emptyList()
-            if (t > ref) return emptyList()
-            return listOf("처음 짚은 때: ${time(t, f.zone)} (${ago(ref - t)})")
+            val t = firstSeenAt(f, key) ?: return emptyList()
+            val ref = f.collectedAt ?: t
+            return listOf("처음 짚은 때: ${time(t, f.zone)} (${ago((ref - t).coerceAtLeast(0L))})")
         }
         val watchFresh = (wm["app_window_min"] ?: 0.0) >= 55.0 &&
             wm["at"]?.let { at -> f.collectedAt?.let { c -> c - at.toLong() in -WATCH_AHEAD_MS..WATCH_FRESH_MS } } == true
@@ -599,6 +597,17 @@ object Analyzer {
     private fun stepDown(c: String) = when (c) { "높음" -> "중간"; else -> "낮음" }
 
     fun fmt1(x: Double): String = String.format(Locale.US, "%.1f", x)
+    /**
+     * 요약이 적은 처음 짚은 때(epoch ms) — 모르면 null: 이 버전 전 워치 앱에서 시작된 일(값 없음), 수집 시각과 요약을 쓴 때 가운데 늦은
+     * 것보다도 늦은 때(시계가 뒤로 감). 수집하며 워치가 요약을 새로 쓸 때 처음 짚었으면 수집 시각(워치 date — 요약을 쓰라고 부르기 전에
+     * 읽음)보다 조금 늦을 수 있다 (리뷰)
+     */
+    fun firstSeenAt(f: Facts, key: String): Long? {
+        val t = f.watchMetrics[key]?.toLong()?.takeIf { it > 0 } ?: return null
+        val bound = maxOf(f.collectedAt ?: 0L, f.watchMetrics["at"]?.toLong() ?: 0L)
+        return t.takeIf { bound > 0 && it <= bound }
+    }
+
     /** 지난 시간을 사람 말로 — 1시간 안(또는 [minutes] 면 N분 전) · N시간 전(이틀까지) · N일 전 */
     fun ago(ms: Long, minutes: Boolean = false): String {
         val h = ms / 3_600_000L

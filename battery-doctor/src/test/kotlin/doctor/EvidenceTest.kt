@@ -186,7 +186,7 @@ class EvidenceTest {
             assertTrue(effect, effect.contains("시간당 3.0% → 2.9%") && effect.endsWith("비슷합니다"))
             // 워치 앱이 본 단계는 워치가 아는 말로 — 다시 켜진 횟수(사용자가 재시작했다고 하지 않음)
             val stage = l.lines().single { it.startsWith("- 워치 앱 지킴이") }
-            assertTrue(stage, stage.contains("One UI Watch 홈") && stage.contains("두 번 이상 다시 켜진 뒤에도 계속") && !stage.contains("재시작을"))
+            assertTrue(stage, stage.contains("[비정상] One UI Watch 홈") && stage.endsWith("처음 짚은 뒤 워치가 두 번 이상 다시 켜졌는데도 계속") && !stage.contains("재시작을"))
             // 켜짐·효과·단계는 증상 쪽 — '시도한 조치' 앞
             val tried = l.indexOf(if (name == Evidence.LETTER_MEMBERS) "[시도한 조치]" else "시도한 조치:")
             assertTrue(l, l.indexOf(boot) in 0 until tried && l.indexOf(effect) < tried && l.indexOf(stage) < tried)
@@ -218,58 +218,144 @@ class EvidenceTest {
         val samples = listOf(
             s(10, 0, 40), s(11, 0, 35), s(11, 45, 30), s(12, 0, 52, event = boot), s(12, 15, 52), s(14, 0, 40), s(15, 0, 30), s(16, 0, 22),
             s(16, 45, 17), s(16, 50, 17, event = com.mywatch.battery.core.Event.USER_NOTE, note = com.mywatch.battery.core.GaugeDriftRule.NOTE_FORCED_RESTART),
-            s(16, 55, 47, event = boot), s(17, 0, 47), s(19, 0, 25), s(20, 0, 12), s(21, 0, 2),
-            s(21, 40, 48, plugged = true, event = boot), s(21, 45, 49, plugged = true), s(22, 0, 52, plugged = true),
+            s(16, 55, 47, event = boot), s(16, 59, 47, event = boot), s(17, 0, 47), s(19, 0, 25), s(20, 0, 12), s(21, 0, 2),
+            s(21, 40, 48, plugged = true, event = boot), s(21, 44, 49, plugged = true, event = boot), s(21, 45, 49, plugged = true), s(22, 0, 52, plugged = true),
         )
-        val f = Facts(model = "SM-L350", collectedAt = at(22, 5), watchSamples = samples)
-        val l = Evidence.letters(f, emptyList(), Analyzer.verdict(f, emptyList()), emptyList(), null, LocalDate.of(2026, 10, 20), zone).getValue(Evidence.LETTER_MEMBERS)
-        val line = l.lines().single { it.startsWith("- 워치 켜짐(부팅) 기록") }
-        assertTrue(line, line.contains("최근 7일 3번: 10/20 12:00(직전 기록 30% → 켜진 뒤 52%), " +
-            "10/20 16:55(강제 재시작 표시 · 직전 기록 17% → 켜진 뒤 47%), 10/20 21:40(직전 기록 2%(40분 전) · 충전기에서 켜짐 · 켜진 뒤 48%) —"))
+        fun bootLine(rows: List<com.mywatch.battery.core.BatterySample>): String {
+            val f = Facts(model = "SM-L350", collectedAt = at(22, 5), watchSamples = rows)
+            val l = Evidence.letters(f, emptyList(), Analyzer.verdict(f, emptyList()), emptyList(), null, LocalDate.of(2026, 10, 20), zone).getValue(Evidence.LETTER_MEMBERS)
+            return l.lines().single { it.startsWith("- 워치 켜짐(부팅) 기록") }
+        }
+        // 곧이어 한 번 더 켜졌으면(16:59, 21:44) 앞 켜짐의 점프를 되풀이하지 않는다 — 직전 기록은 그 앞 켜짐 (리뷰: 같은 신고문의 잔량 표시
+        // 이상 수와 어긋났다)
+        val line = bootLine(samples)
+        assertTrue(line, line.contains("최근 7일 5번: 10/20 12:00(켜지기 15분 전 기록 30% → 켜진 뒤 52%), " +
+            "10/20 16:55(강제 재시작 표시 · 켜지기 5분 전 기록 17% → 켜진 뒤 47%), 10/20 16:59, " +
+            "10/20 21:40(켜지기 40분 전 기록 2% · 충전기에서 켜짐 · 켜진 뒤 48%), 10/20 21:44 —"))
         // 충전기에 꽂힌 채 그동안 충전으로 오를 수 있었던 만큼이면 점프가 아니다
-        val charging = Facts(model = "SM-L350", collectedAt = at(22, 5), watchSamples = listOf(s(10, 0, 20, plugged = true), s(11, 0, 60, plugged = true, event = boot)))
-        val l2 = Evidence.letters(charging, emptyList(), Analyzer.verdict(charging, emptyList()), emptyList(), null, LocalDate.of(2026, 10, 20), zone).getValue(Evidence.LETTER_MEMBERS)
-        assertTrue(l2, l2.lines().single { it.startsWith("- 워치 켜짐(부팅) 기록") }.contains("최근 7일 1번: 10/20 11:00 — "))
+        assertTrue(bootLine(listOf(s(10, 0, 20, plugged = true), s(11, 0, 60, plugged = true, event = boot))).contains("최근 7일 1번: 10/20 11:00 — "))
+        // 충전기 위에서 켜졌어도 그 사이 충전으로 오를 수 없는 만큼이면 점프 — 충전기에서 켜졌다고 함께
+        val plugged = bootLine(listOf(s(10, 0, 30), s(10, 5, 60, plugged = true, event = boot)))
+        assertTrue(plugged, plugged.contains("10/20 10:05(켜지기 5분 전 기록 30% → 켜진 뒤 60% · 충전기에서 켜짐) — "))
+        // 1분이 안 되면 '0분 전'이 아니라 '직전'
+        val quick = bootLine(listOf(s(9, 0, 30), com.mywatch.battery.core.BatterySample(at(9, 0) + 30_000L, 60, event = boot)))
+        assertTrue(quick, quick.contains("10/20 09:00(켜지기 직전 기록 30% → 켜진 뒤 60%) — "))
     }
 
+    private fun atD(d: Int, h: Int, m: Int = 0) = java.time.LocalDateTime.of(2026, 10, d, h, m).atZone(zone).toInstant().toEpochMilli()
+
     /**
-     * 신고문 증상 칸에 '언제부터'(워치 기록으로 대기 소모가 늘어난 때와 그 무렵 바뀐 것 — 소프트웨어 업데이트 등)와 워치가 문제를 처음 짚은 때
-     * — 업데이트 뒤 과소모라는 것이 날짜로 남게. 그 소견은 주요 소견에서 빼고(같은 말을 두 번 적지 않게) 요구서 하자 내용에도
+     * 10/12~10/18 날마다 0~20시 화면 꺼진 채(대기 시간당 1.0·1.0·1.1·1.0·2.6·2.5·2.4% — 10/16부터 늘어 꺾임) · 20~24시 충전.
+     * [notes] = 그 시각 표본의 '바뀐 것' 표시
      */
-    @Test
-    fun lettersSayWhenTheDrainStartedAndWhatChangedThen() {
+    private fun week(notes: Map<Long, List<com.mywatch.battery.core.ChangeNote.Item>>): List<com.mywatch.battery.core.BatterySample> {
         val q = 15 * 60_000L
-        fun at(d: Int, h: Int) = java.time.LocalDateTime.of(2026, 10, d, h, 0).atZone(zone).toInstant().toEpochMilli()
-        val fw = com.mywatch.battery.core.ChangeNote.Item(com.mywatch.battery.core.ChangeKind.FIRMWARE, "fw", "L350XXU1AZH1", "L350XXU1AZI1")
         val samples = ArrayList<com.mywatch.battery.core.BatterySample>()
-        listOf(1.0, 1.0, 1.1, 1.0, 2.6, 2.5, 2.4).forEachIndexed { i, r ->       // 10/12~10/18, 0~20시 화면 꺼진 채 · 20~24시 충전
-            val start = at(12 + i, 0)
+        listOf(1.0, 1.0, 1.1, 1.0, 2.6, 2.5, 2.4).forEachIndexed { i, r ->
+            val start = atD(12 + i, 0)
             var t = start
             while (t <= start + 20 * 3_600_000L) {
-                val note = if (t == at(16, 3)) com.mywatch.battery.core.ChangeNote.encode(listOf(fw)) else ""
+                val note = notes[t]?.let { com.mywatch.battery.core.ChangeNote.encode(it) } ?: ""
                 samples += com.mywatch.battery.core.BatterySample(t = t, level = (100 - r * (t - start) / 3_600_000.0).toInt(), note = note); t += q
             }
             t = start + 20 * 3_600_000L + q
             while (t < start + 24 * 3_600_000L) { samples += com.mywatch.battery.core.BatterySample(t = t, level = 100, plugged = true); t += q }
         }
-        val now = at(19, 22)
-        val wm = mapOf("at" to (now - 5 * 60_000L).toDouble(), "app_window_min" to 120.0, "issue_home" to 2.0, "back_home" to 1.0,
-            "first_home_at" to at(18, 20).toDouble(), "issue_gms" to 2.0, "back_gms" to 1.0, "first_gms_at" to (now + 3_600_000L).toDouble())
-        val f = Facts(model = "SM-L350", collectedAt = now, watchSamples = samples, watchMetrics = wm, zone = zone,
+        return samples
+    }
+
+    private val tracking = com.mywatch.battery.core.ChangeNote.Item(com.mywatch.battery.core.ChangeKind.TRACKING, "on", null, "1")
+    private val fw = com.mywatch.battery.core.ChangeNote.Item(com.mywatch.battery.core.ChangeKind.FIRMWARE, "fw", "L350XXU1AZH1", "L350XXU1AZI1")
+
+    private fun weekFacts(samples: List<com.mywatch.battery.core.BatterySample>, wm: Map<String, Double> = emptyMap()): Facts {
+        val now = atD(19, 22)
+        return Facts(model = "SM-L350", collectedAt = now, watchSamples = samples, watchMetrics = wm, zone = zone,
             watchTrend = com.mywatch.battery.core.TrendReport.of(samples, now, zone), packages = listOf(doctor.parse.PackageInfo(Analyzer.HOME, 10123, true, false)))
+    }
+
+    private fun lettersOf(f: Facts): Map<String, String> {
         val fs = Analyzer.findings(f)
-        assertTrue(fs.any { it.id == "watch-shift" })
-        val letters = Evidence.letters(f, fs, Analyzer.verdict(f, fs), emptyList(), null, LocalDate.of(2026, 10, 19), zone)
+        return Evidence.letters(f, fs, Analyzer.verdict(f, fs), emptyList(), null, LocalDate.of(2026, 10, 19), zone)
+    }
+
+    /**
+     * 신고문 증상 칸에 '언제부터'(워치 기록으로 대기 소모가 늘어난 때와 그 무렵 바뀐 것 — 소프트웨어 업데이트 등)와 워치가 문제를 처음 짚은 때
+     * — 업데이트 뒤 과소모라는 것이 날짜로 남게. 그 소견은 주요 소견에서 빼고(같은 말을 두 번 적지 않게) 요구서 하자 내용에도. 워치 앱이 본
+     * 단계 줄엔 그 소견의 등급도 (주요 소견에서 빠지니)
+     */
+    @Test
+    fun lettersSayWhenTheDrainStartedAndWhatChangedThen() {
+        val now = atD(19, 22)
+        val wm = mapOf("at" to (now - 5 * 60_000L).toDouble(), "app_window_min" to 120.0, "issue_home" to 2.0, "back_home" to 1.0,
+            "first_home_at" to atD(18, 20).toDouble(), "issue_gms" to 2.0, "back_gms" to 1.0, "first_gms_at" to (now + 3_600_000L).toDouble())
+        val f = weekFacts(week(mapOf(atD(12, 0) to listOf(tracking), atD(16, 3) to listOf(fw))), wm)
+        assertTrue(Analyzer.findings(f).any { it.id == "watch-shift" })
+        val letters = lettersOf(f)
         for (name in listOf(Evidence.LETTER_MEMBERS, Evidence.LETTER_CENTER, Evidence.LETTER_LAW)) {
             val l = letters.getValue(name)
             val since = l.lines().single { it.startsWith("- 대기 소모가 늘어난 때") }
-            assertTrue(since, since.contains("10/16부터 시간당 1.0% → 2.5% — 그 무렵 바뀐 것: 10/16 03:00 ") && since.contains("워치 소프트웨어 업데이트 (L350XXU1AZI1)"))
+            assertEquals("- 대기 소모가 늘어난 때(워치 15분 기록): 10/16부터 시간당 1.0% → 2.5% — 그 무렵 바뀐 것: 10/16 03:00 워치 소프트웨어 업데이트 (L350XXU1AZI1)", since)
             val stage = l.lines().filter { it.startsWith("- 워치 앱 지킴이") }
-            assertTrue(stage.toString(), stage.single { it.contains("홈") }.contains("처음 짚은 때 10/18 20:00, 그 뒤 워치가 다시 켜진 뒤에도 또 나타남"))
+            assertEquals("- 워치 앱 지킴이(앱별 통계, 최근 2시간): [비정상] One UI Watch 홈이 화면 꺼진 채 CPU 를 많이 씀 — 처음 짚은 때 10/18 20:00, " +
+                "그 뒤 워치가 다시 켜졌는데도 또 나타남", stage.single { it.contains("홈") })
             // 처음 짚은 때가 수집보다 늦으면(시계가 뒤로 감) 모르는 것으로 — 단계만
-            assertTrue(stage.toString(), stage.single { it.contains("Play 서비스") }.endsWith("— 처음 짚은 뒤 워치가 다시 켜진 뒤에도 또 나타남"))
+            assertTrue(stage.toString(), stage.single { it.contains("Play 서비스") }.endsWith("[비정상] Google Play 서비스 과소모 — 처음 짚은 뒤 워치가 다시 켜졌는데도 또 나타남"))
         }
-        assertTrue(letters.getValue(Evidence.LETTER_MEMBERS).lines().none { it.contains("워치 기록: 10/16부터") })
+        val members = letters.getValue(Evidence.LETTER_MEMBERS)
+        assertTrue(members.lines().none { it.contains("워치 기록: 10/16부터") })
+        // 주요 소견이 모두 위 증상 칸에 풀어 적혔으면 빈칸이 아니라 그렇다고 (리뷰: 소견이 있는데 '[  ]'이면 채울 칸으로 읽힘)
+        assertTrue(members, members.contains("- 주요 소견:\n  - 위 증상 칸에 적음\n"))
+    }
+
+    /**
+     * 그 무렵 바뀐 것은 가능성 높은 것 세 개를 시각 순으로, 나머지는 '외 N개' — 워치 앱이 적기 전이면 '모름'이라고(없다고 하지 않는다),
+     * 적기 시작한 것이 그 무렵 안이면 그 앞은 모른다고 (리뷰)
+     */
+    @Test
+    fun theTrendLineListsTheLikeliestChangesByTimeAndSaysWhatIsUnknown() {
+        fun item(kind: com.mywatch.battery.core.ChangeKind, subject: String, from: String?, to: String?) = com.mywatch.battery.core.ChangeNote.Item(kind, subject, from, to)
+        val app = com.mywatch.battery.core.ChangeKind.APP
+        val five = weekFacts(week(mapOf(
+            atD(12, 0) to listOf(tracking),
+            atD(15, 10) to listOf(item(app, "com.example.app", null, "+1.0")),
+            atD(15, 19) to listOf(item(com.mywatch.battery.core.ChangeKind.SETTING, "aod", "0", "1")),
+            atD(16, 3) to listOf(fw),
+            atD(16, 9) to listOf(item(com.mywatch.battery.core.ChangeKind.FACE, "face", "com.samsung.android.watch.watchface.basic", "com.example.face")),
+            atD(16, 11) to listOf(item(app, "com.example.other", null, "2.0")),
+        )))
+        val line = lettersOf(five).getValue(Evidence.LETTER_MEMBERS).lines().single { it.startsWith("- 대기 소모가 늘어난 때") }
+        assertTrue(line, line.endsWith("— 그 무렵 바뀐 것: 10/15 19:00 AOD 켬, 10/16 03:00 워치 소프트웨어 업데이트 (L350XXU1AZI1), " +
+            "10/16 09:00 시계 화면 바꿈 (com.example.face) 외 2개"))
+        // 워치 앱이 아직 적기 전 — '없음'이 아니라 '모름'
+        val unknown = weekFacts(week(mapOf(atD(18, 5) to listOf(tracking))))
+        val u = lettersOf(unknown).getValue(Evidence.LETTER_MEMBERS).lines().single { it.startsWith("- 대기 소모가 늘어난 때") }
+        assertTrue(u, u.endsWith("— 그 무렵 바뀐 것은 모름(워치 앱이 아직 적기 전)"))
+        // 그 무렵 안에서 적기 시작했다 — 본 것은 적고 그 앞은 모른다고
+        val partly = weekFacts(week(mapOf(atD(15, 12) to listOf(tracking), atD(16, 3) to listOf(fw))))
+        val pl = lettersOf(partly).getValue(Evidence.LETTER_MEMBERS).lines().single { it.startsWith("- 대기 소모가 늘어난 때") }
+        assertTrue(pl, pl.endsWith("10/16 03:00 워치 소프트웨어 업데이트 (L350XXU1AZI1) (그 앞은 워치 앱이 적기 전이라 모름)"))
+        // 이 진단 앱(지킴이) 설정은 삼성 쪽에서 알아보게
+        assertEquals("배터리 진단 앱 설정: 밤 절전 모드 끔",
+            Evidence.changeLabel(com.mywatch.battery.core.Change(0L, com.mywatch.battery.core.ChangeKind.CONFIG, "night_saver", "1", "0")))
+    }
+
+    /**
+     * 처음 단계(재시작 뒤 아님)여도 처음 짚은 때를 알면 단계 줄로 — 등급과 함께, 주요 소견에선 뺀다. 지금은 안 보이지만 이틀 안에 짚었던
+     * 문제(재시작·치료 직후 수집)도 처음 짚은 때를 알면 처음·마지막으로 짚은 때를 (리뷰)
+     */
+    @Test
+    fun aKnownFirstSightingMakesAStageLineEvenAtTheFirstStep() {
+        val now = atD(20, 22)
+        val wm = mapOf("at" to (now - 5 * 60_000L).toDouble(), "app_window_min" to 120.0, "issue_home" to 1.0, "back_home" to 0.0,
+            "first_home_at" to (now - 3 * 3_600_000L).toDouble(), "seen_gms_h" to 2.0, "first_gms_at" to (now - 30 * 3_600_000L).toDouble())
+        val f = Facts(model = "SM-L350", collectedAt = now, watchMetrics = wm, zone = zone, packages = listOf(doctor.parse.PackageInfo(Analyzer.HOME, 10123, true, false)))
+        val fs = Analyzer.findings(f)
+        assertTrue(fs.map { it.id }.toString(), fs.any { it.id == "watch-home" } && fs.any { it.id == "watch-gms-earlier" })
+        val l = Evidence.letters(f, fs, Analyzer.verdict(f, fs), emptyList(), null, LocalDate.of(2026, 10, 20), zone).getValue(Evidence.LETTER_MEMBERS)
+        val stage = l.lines().filter { it.startsWith("- 워치 앱 지킴이") }
+        assertTrue(stage.toString(), stage.contains("- 워치 앱 지킴이(앱별 통계, 최근 2시간): [주의] One UI Watch 홈이 화면 꺼진 채 CPU 를 많이 씀 — 처음 짚은 때 10/20 19:00"))
+        assertTrue(stage.toString(), stage.contains("- 워치 앱 지킴이(최근 48시간): [참고] Google Play 서비스 과소모 — 처음 짚은 때 10/19 16:00 · 마지막으로 짚은 때 10/20 19:55(지금은 안 보임)"))
+        assertTrue(l, l.lines().none { it.contains("[주의] 워치 앱: One UI Watch 홈 과소모") })
     }
 
     @Test
