@@ -184,7 +184,8 @@ class BatterySampleWorkerTest {
     @Test
     fun aHotChargeIsToldOncePerCharge() {
         shadowOf(context as Application).grantPermissions(android.Manifest.permission.POST_NOTIFICATIONS)
-        val nm = shadowOf(context.getSystemService(android.app.NotificationManager::class.java))
+        val real = context.getSystemService(android.app.NotificationManager::class.java)
+        val nm = shadowOf(real)
         fun battery(level: Int, plugged: Boolean, tempDeciC: Int) = context.sendStickyBroadcast(
             Intent(Intent.ACTION_BATTERY_CHANGED)
                 .putExtra(BatteryManager.EXTRA_LEVEL, level).putExtra(BatteryManager.EXTRA_SCALE, 100)
@@ -201,7 +202,7 @@ class BatterySampleWorkerTest {
         val n = hot().single()
         assertTrue(shadowOf(n).contentTitle.toString(), shadowOf(n).contentTitle.toString().startsWith("충전 중 43.1℃"))
         assertTrue(shadowOf(n).contentText.toString().contains("선풍기"))
-        nm.cancelAll()
+        real.cancelAll()
         battery(60, plugged = true, tempDeciC = 440)
         run()
         assertTrue("같은 충전에선 한 번", hot().isEmpty())
@@ -212,7 +213,7 @@ class BatterySampleWorkerTest {
         run()
         assertEquals(1, hot().size)
         // 거의 다 찼으면 알리지 않는다
-        nm.cancelAll()
+        real.cancelAll()
         battery(58, plugged = false, tempDeciC = 350); run()
         battery(92, plugged = true, tempDeciC = 450); run()
         assertTrue(hot().isEmpty())
