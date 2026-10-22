@@ -98,7 +98,7 @@ data class ChargeHabits(
 
         /**
          * 충전마다 처음 오른 구간의 [ChargeSpeed.FROM]~[ChargeSpeed.TO]%(빠른 충전 구간)에서 오른 빠르기로 0→100% 걸릴 시간을 어림한다 —
-         * 처음 [ChargeSpeed.TO]%에 닿은 뒤(배터리 보호로 머물거나 내려왔다 다시 차는 것)는 보지 않는다. 그 구간에서 [ChargeSpeed.MIN_RISE]포인트
+         * 그 충전의 가장 높은 잔량(85% 넘으면 85%)에 처음 닿은 뒤(배터리 보호로 머물거나 내려왔다 다시 차는 것)는 보지 않는다. 그 구간에서 [ChargeSpeed.MIN_RISE]포인트
          * 이상 오른 충전만, 기록이 빈 곳([MAX_GAP_MS] 넘게)이 있거나 충전기 위에서 화면을 켜고 쓴 충전(표본의 1/3 넘게 화면 켜짐)은 뺀다.
          * 가운데 값은 아래쪽으로(둘이면 빠른 쪽) — 느리다고 하려면 잰 충전의 절반 넘게(둘이면 둘 다) 느려야. 열 탓인지·그때 온도는 공식의
          * [ChargeSpeed.SLOW_RATIO]배 이상 걸린 충전들로만. 잴 만한 충전이 없으면 null
@@ -112,8 +112,11 @@ data class ChargeHabits(
             if (cur.isNotEmpty()) runs += cur
             val per = ArrayList<Pair<Double, Int?>>()
             for (r in runs) {
-                val top = r.indexOfFirst { it.level >= ChargeSpeed.TO }
-                val w = (if (top >= 0) r.subList(0, top + 1) else r).filter { it.level in ChargeSpeed.FROM..ChargeSpeed.TO }
+                // 처음 오른 구간만 — 그 충전에서 가장 높이(85% 넘으면 85%) 처음 닿은 데까지. 그 뒤 머문 시간(배터리 보호가 85% 아래에서
+                // 멈추는 것까지)은 빼고 잰다 (리뷰)
+                val peak = minOf(r.maxOf { it.level }, ChargeSpeed.TO)
+                val top = r.indexOfFirst { it.level >= peak }
+                val w = r.subList(0, top + 1).filter { it.level in ChargeSpeed.FROM..ChargeSpeed.TO }
                 if (w.size < 2) continue
                 val rise = w.last().level - w.first().level
                 val minutes = (w.last().t - w.first().t) / 60_000.0

@@ -167,6 +167,10 @@ class ChargeHabitsTest {
         assertTrue(drift.speed!!.slow)
         val hold85 = ChargeHabits.analyze(chargesOf(List(3) { Charge(1.3, upTo = 85, holdHours = 6) }), at(13, 8), model = "SM-L350")!!
         assertFalse(hold85.speed.toString(), hold85.speed!!.slow)
+        // 85% 아래에서 멈추는 보호(휴대폰의 '최대 80%'처럼)도 — 다 오른 뒤 머문 시간은 빼고 잰다
+        val hold80 = ChargeHabits.analyze(chargesOf(List(3) { Charge(1.3, upTo = 80, holdHours = 6) }), at(13, 8), model = "SM-L350")!!
+        assertEquals(3, hold80.speed!!.measured)
+        assertFalse(hold80.speed.toString(), hold80.speed!!.slow)
     }
 
     /**
